@@ -122,7 +122,8 @@ def main():
         action = actions[ind]
         # print("vidmeshes ", vidmeshes.shape)
         # meshes = vidmeshes.transpose(2, 0, 1)
-        meshes = torch.permute(vidmeshes, (2, 0, 1)).cpu()
+        # meshes = torch.permute(vidmeshes, (2, 0, 1)).cpu() # 这行报错，AttributeError: module 'torch' has no attribute 'permute'
+        meshes = vidmeshes.permute(2, 0, 1).cpu().numpy()
         # meshes: [T, 6890, 3]
         path = os.path.join(savefolder, "{}_{}.mp4".format(action, ind))
         render_video(meshes, ind, action, renderer, path, background, num_person)
