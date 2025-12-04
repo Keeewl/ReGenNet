@@ -20,7 +20,7 @@ python -m render.crendermotion \
   --setting cmdm \
   --body_model smplx
 
-在regennet-render这个conda环境都能运行
+在regennet-render这个conda环境都能运行，已导出为environment-render.yml
 
 
 
