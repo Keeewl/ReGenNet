@@ -1,6 +1,7 @@
-# usage
+# Motion Synthesis and Visualize
 
-预训练模型跑推理：
+1. 预训练模型跑推理：
+Test:
 python -m sample.cgenerate \
   --model_path save/chi3d/model000568404.pt \
   --dataset chi3d \
@@ -13,7 +14,21 @@ python -m sample.cgenerate \
   --motion_length 150 \
   --output_dir outputs/chi3d_demo_v2
 
-可视化：
+Train:
+python -m sample.cgenerate \
+  --model_path save/chi3d/model000568404.pt \
+  --dataset chi3d \
+  --body_model smplx \
+  --pose_rep rot6d \
+  --num_person 2 \
+  --data_path dataset/chi3d/chi3d_smplx_train.h5 \
+  --action_file assets/action_names_chi3d.txt \
+  --num_repetitions 10 \
+  --motion_length 150 \
+  --output_dir outputs/chi3d_train_v1
+
+
+2. 可视化：
 python -m render.crendermotion \
   --data_path outputs/chi3d_demo_v2/results.npy \
   --num_person 2 \
