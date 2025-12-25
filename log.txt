@@ -35,7 +35,18 @@ python -m render.crendermotion \
   --setting cmdm \
   --body_model smplx
 
-在regennet-render这个conda环境都能运行，已导出为environment-render.yml
+
+3. 指标评估：
+python -m eval.eval_cmdm \
+--model_path save/chi3d/model000568404.pt \
+--rec_model_path recognition_training/chi3d_smplx/checkpoint_0060.pth.tar \
+--eval_mode full \
+--device 0 --batch_size 64
+
+爆显存
+
+
+在 regennet-render 这个conda环境都能运行，已导出为environment-render.yml
 
 
 
