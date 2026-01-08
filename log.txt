@@ -1,3 +1,12 @@
+# Train
+
+1. Train:
+python -m train.train_mdm --setting cmdm --save_dir save/cmdm/chi3d_smplx --dataset chi3d --cond_mask_prob 0 --num_person 2 --layers 8 --num_frames 150 --arch online --overwrite --pose_rep rot6d --body_model smplx --data_path dataset/chi3d/chi3d_smplx_train.h5 --train_platform_type TensorboardPlatform --vel_threshold 0.01 --unconstrained
+
+2. 
+
+
+
 # Motion Synthesis and Visualize
 
 1. 预训练模型跑推理：
@@ -44,58 +53,17 @@ python -m eval.eval_cmdm \
 --device 0 --batch_size 64
 
 爆显存：（已解决，用conda的regennet5090环境）
-(regennet-render) oukewei@aiseon:~/project/ReGenNet$ python -m eval.eval_cmdm \
---model_path save/chi3d/model000568404.pt \
+
+python -m eval.eval_cmdm \
+--model save/chi3d/model000568404.pt \
 --rec_model_path recognition_training/chi3d_smplx/checkpoint_0060.pth.tar \
 --eval_mode full \
---device 0 --batch_size 64
-/home/oukewei/miniconda3/envs/regennet-render/lib/python3.7/site-packages/torch/cuda/__init__.py:104: UserWarning: 
-NVIDIA GeForce RTX 5090 with CUDA capability sm_120 is not compatible with the current PyTorch installation.
-The current PyTorch install supports CUDA capabilities sm_37 sm_50 sm_60 sm_61 sm_70 sm_75 sm_80 compute_37.
-If you want to use the NVIDIA GeForce RTX 5090 GPU with PyTorch, please check the instructions at https://pytorch.org/get-started/locally/
+--use_ddim \
+--timestep_respacing ddim5
 
-  warnings.warn(incompatible_device_warn.format(device_name, capability, " ".join(arch_list), device_name))
-Eval mode [full]
-creating model and diffusion...
-TRANS_DEC init
-Loading checkpoints from [save/chi3d/model000568404.pt]...
-/home/oukewei/miniconda3/envs/regennet-render/lib/python3.7/site-packages/torch/nn/modules/container.py:435: UserWarning: Setting attributes on ParameterList is not supported.
-  warnings.warn("Setting attributes on ParameterList is not supported.")
-Evaluation number: 1/20
-Construct dataloader: gt..:   0%|                                                                                      | 0/4 [03:24<?, ?it/s]
-Traceback (most recent call last):
-  File "/home/oukewei/miniconda3/envs/regennet-render/lib/python3.7/runpy.py", line 193, in _run_module_as_main
-    "__main__", mod_spec)
-  File "/home/oukewei/miniconda3/envs/regennet-render/lib/python3.7/runpy.py", line 85, in _run_code
-    exec(code, run_globals)
-  File "/home/oukewei/project/ReGenNet/eval/eval_cmdm.py", line 83, in <module>
-    main()
-  File "/home/oukewei/project/ReGenNet/eval/eval_cmdm.py", line 77, in main
-    eval_results = evaluate(args, model, diffusion, data_loader.dataset, args.rec_model_path, setting='cmdm', acc_only=acc_only, auto_regressive=args.auto_regressive)
-  File "/home/oukewei/project/ReGenNet/eval/eval_cmdm.py", line 30, in evaluate
-    eval_results = evaluate(args, model, diffusion, data, rec_model_path, setting, acc_only, auto_regressive=auto_regressive)
-  File "/home/oukewei/project/ReGenNet/eval/a2m/stgcn_eval.py", line 178, in evaluate
-    for key in ["train", "test"]}
-  File "/home/oukewei/project/ReGenNet/eval/a2m/stgcn_eval.py", line 178, in <dictcomp>
-    for key in ["train", "test"]}
-  File "/home/oukewei/project/ReGenNet/eval/a2m/stgcn_eval.py", line 83, in __init__
-    beta=0, glob_rot=None, get_rotations_back=False, num_person=num_person)
-  File "/home/oukewei/project/ReGenNet/model/rotation2xyz.py", line 234, in __call__
-    return_verts=True)
-  File "/home/oukewei/miniconda3/envs/regennet-render/lib/python3.7/site-packages/torch/nn/modules/module.py", line 727, in _call_impl
-    result = self.forward(*input, **kwargs)
-  File "/home/oukewei/project/ReGenNet/model/smpl.py", line 112, in forward
-    smplx_output = super(SMPLX, self).forward(*args, **kwargs)
-  File "/home/oukewei/miniconda3/envs/regennet-render/lib/python3.7/site-packages/smplx/body_models.py", line 1436, in forward
-    pose2rot=False,
-  File "/home/oukewei/miniconda3/envs/regennet-render/lib/python3.7/site-packages/smplx/lbs.py", line 238, in lbs
-    T = torch.matmul(W, A.view(batch_size, num_joints, 16)) \
-RuntimeError: CUDA out of memory. Tried to allocate 5.99 GiB (GPU 0; 31.37 GiB total capacity; 24.31 GiB already allocated; 4.44 GiB free; 24.34 GiB reserved in total by PyTorch)
-
-
-在 regennet-render 这个conda环境都能运行，已导出为environment-render.yml
-
-
+4. 把指标做成表：
+python -m eval.easy_table save/chi3d/evaluation_results_iter568404_samp1000_scale1_a2m_not_auto__full.yaml
+python -m eval.easy_table save/chi3d/evaluation_results_iter568404_samp1000_scale1_a2m_not_auto_ddim5_full.yaml
 
 
 
