@@ -43,7 +43,7 @@ python -m eval.eval_cmdm \
 --eval_mode full \
 --device 0 --batch_size 64
 
-爆显存：
+爆显存：（已解决，用conda的regennet5090环境）
 (regennet-render) oukewei@aiseon:~/project/ReGenNet$ python -m eval.eval_cmdm \
 --model_path save/chi3d/model000568404.pt \
 --rec_model_path recognition_training/chi3d_smplx/checkpoint_0060.pth.tar \
