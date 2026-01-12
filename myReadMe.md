@@ -2,7 +2,7 @@
 Done:
 1. clone repo ✅
 
-2. setup the environment (maybe) ✅
+2. setup the environment (maybe) ✅ 以后都用regennet5090这个conda环境 ✅
 
 3. Download other required files
 
@@ -12,14 +12,14 @@ Done:
 
 Todo:
 
-- [] 用 action recognition models 来复现 evaluation？
-
+- [x] 用 action recognition models 来复现 evaluation：第一轮acc0.2-0.3完全不对，debug ⌛️
+- [] debug eval
 
 ## Data Preparation
 Done:
 1. Chi3D 
 
-- 已下载 chi3d 的原始数据集，存放在 my-HHI/ ✅ 用来跑实验 ⌛️
+- 已下载 chi3d 的原始数据集，存放在 my-HHI/ ✅ 用来跑实验 ✅
 - 已下载 actor-reactor order annotations 放到 dataset/chi3d/annotations_chi3d ✅ 
 - 已下载 processed dataset (.h5 files) 放到 dataset/chi3d ✅
 
