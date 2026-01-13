@@ -156,8 +156,7 @@ dmypy.json
 
 
 # my added files
-download/
 body_models/
-INTRODUCTION.md
-environment-render.yml
-recognition_training/
+
+# 存放训练好的动作识别模型
+recognition_training/ 

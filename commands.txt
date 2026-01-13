@@ -1,16 +1,45 @@
 # Train
+1. Train:   (regenent5090✅)
+python -m train.train_mdm \
+--setting cmdm \
+--save_dir save/cmdm/chi3d_smplx \
+--dataset chi3d \
+--cond_mask_prob 0 \
+--num_person 2 \
+--layers 8 \
+--num_frames 150 \
+--arch online \
+--overwrite \
+--pose_rep rot6d \
+--body_model smplx \
+--data_path dataset/chi3d/chi3d_smplx_train.h5 \
+--train_platform_type TensorboardPlatform \
+--vel_threshold 0.01 \
+--unconstrained
 
-1. Train:
-python -m train.train_mdm --setting cmdm --save_dir save/cmdm/chi3d_smplx --dataset chi3d --cond_mask_prob 0 --num_person 2 --layers 8 --num_frames 150 --arch online --overwrite --pose_rep rot6d --body_model smplx --data_path dataset/chi3d/chi3d_smplx_train.h5 --train_platform_type TensorboardPlatform --vel_threshold 0.01 --unconstrained
-
-2. 
+2. Train (4 GPUs):   (regenent5090✅)
+mpiexec -n 4 --allow-run-as-root python -m train.train_mdm \
+--setting cmdm \
+--save_dir save/cmdm/chi3d_smplx \
+--dataset chi3d \
+--cond_mask_prob 0 \
+--num_person 2 \
+--layers 8 \
+--num_frames 150 \
+--arch online \
+--overwrite \
+--pose_rep rot6d \
+--body_model smplx \
+--data_path dataset/chi3d/chi3d_smplx_train.h5 \
+--train_platform_type TensorboardPlatform \
+--vel_threshold 0.01 \
+--unconstrained
 
 
 
 # Motion Synthesis and Visualize
-
-1. 预训练模型跑推理：
-Test:
+1. Motion Synthesis
+1.1 Test:   (regenent5090✅)
 python -m sample.cgenerate \
   --model_path save/chi3d/model000568404.pt \
   --dataset chi3d \
@@ -21,9 +50,9 @@ python -m sample.cgenerate \
   --action_file assets/action_names_chi3d.txt \
   --num_repetitions 10 \
   --motion_length 150 \
-  --output_dir outputs/chi3d_demo_v2
+  --output_dir outputs/chi3d_test_v1
 
-Train:
+1.2 Train:   (regenent5090✅)
 python -m sample.cgenerate \
   --model_path save/chi3d/model000568404.pt \
   --dataset chi3d \
@@ -36,8 +65,7 @@ python -m sample.cgenerate \
   --motion_length 150 \
   --output_dir outputs/chi3d_train_v1
 
-
-2. 可视化：
+2. Visualize:   (regenent5090✅)
 python -m render.crendermotion \
   --data_path outputs/chi3d_train_v1/results.npy \
   --num_person 2 \
@@ -45,7 +73,9 @@ python -m render.crendermotion \
   --body_model smplx
 
 
-3. 指标评估：
+
+# Evaluation
+1. Evaluation:   (regenent5090✅)
 python -m eval.eval_cmdm \
 --model_path save/chi3d/model000568404.pt \
 --rec_model_path recognition_training/chi3d_smplx/checkpoint_0060.pth.tar \
@@ -59,6 +89,31 @@ python -m eval.eval_cmdm \
 --use_ddim \
 --timestep_respacing ddim5
 
-4. 把指标做成表：
+python -m eval.eval_cmdm \
+--model save/chi3d/model000568404.pt \
+--rec_model_path recognition_training/chi3d_smplx/mytrain/checkpoint_0030.pth.tar \
+--eval_mode full \
+--use_ddim \
+--timestep_respacing ddim5
+
+2. Get a table:   (regenent5090✅)
 python -m eval.easy_table save/chi3d/evaluation_results_iter568404_samp1000_scale1_a2m_not_auto__full.yaml
 python -m eval.easy_table save/chi3d/evaluation_results_iter568404_samp1000_scale1_a2m_not_auto_ddim5_full.yaml
+
+3. Train my action recognition model:   (regenent5090✅)
+CUDA_VISIBLE_DEVICES=7 python -m src.train.train_stgcn \
+  --dataset chi3d \
+  --pose_rep rot6d \
+  --num_epochs 100 \
+  --snapshot 10 \
+  --batch_size 64 \
+  --lr 0.0001 \
+  --num_frames 150 \
+  --sampling conseq \
+  --sampling_step 1 \
+  --glob \
+  --translation \
+  --folder recognition_training/chi3d_smplx_mytrain \
+  --datapath ../dataset/chi3d/smplx/conditioned/chi3d_smplx_train.h5 \
+  --num_person 2 \
+  --body_model smplx
