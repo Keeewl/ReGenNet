@@ -39,7 +39,7 @@ python -m sample.cgenerate \
 
 2. 可视化：
 python -m render.crendermotion \
-  --data_path outputs/chi3d_demo_v2/results.npy \
+  --data_path outputs/chi3d_train_v1/results.npy \
   --num_person 2 \
   --setting cmdm \
   --body_model smplx
