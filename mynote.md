@@ -32,3 +32,17 @@ ReGenNet
 
 # Data preprocess
 prepare_data.py → actor_reactor.py → split_2p.py。
+
+## Chi3d data shape
+The shape of motion data for each person is [N, 56, 3], 
+thus for two persons, the motion shape is [N, 56, 6]. 
+The details of the [56, 3] is illustrated here:
+body_pose # [22, 3]
+jaw_pose # [1, 3]
+leye_pose # [1, 3]
+reye_pose # [1, 3]
+left_hand_pose # [15, 3]
+right_hand_pose # [15, 3]
+root_transl # [1, 3]
+From body_pose to right_hand_pose are SMPLX-format rotational poses,    # 3 -> axis-angle
+and the last root_transl is the global trajectory of the person.        # 3 -> xyz

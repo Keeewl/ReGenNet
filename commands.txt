@@ -117,3 +117,9 @@ CUDA_VISIBLE_DEVICES=7 python -m src.train.train_stgcn \
   --datapath ../dataset/chi3d/smplx/conditioned/chi3d_smplx_train.h5 \
   --num_person 2 \
   --body_model smplx
+
+
+
+# Check
+1. Check chi3d_h5 files:
+python dataset/check/inspect_chi3d_h5.py
