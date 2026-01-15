@@ -147,8 +147,8 @@ def test_ccollate():
 def test_t2m_collate():
     print("== t2m_collate (humanml adapter) ==")
     # tuple format: (..., text at [2], motion at [4], length at [5], tokens at [6])
-    sample1 = (None, None, "turn left", None, [[1, 2], [3, 4], [5, 6]], 3, ["turn", "left"])
-    sample2 = (None, None, "sit down", None, [[7, 8], [9, 10]], 2, ["sit", "down"])
+    sample1 = (None, None, "turn left", None, torch.tensor([[1, 2], [3, 4], [5, 6]]), 3, ["turn", "left"])
+    sample2 = (None, None, "sit down", None, torch.tensor([[7, 8], [9, 10]]), 2, ["sit", "down"])
     motion, cond = t2m_collate([sample1, sample2])
     _print_tensor("motion", motion)
     _print_tensor("mask", cond["y"]["mask"])
