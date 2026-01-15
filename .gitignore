@@ -160,3 +160,6 @@ body_models/
 
 # 存放训练好的动作识别模型
 recognition_training/ 
+
+# outputs
+outputs/
