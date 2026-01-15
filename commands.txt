@@ -182,3 +182,6 @@ python -m eval.easy_table save/cmdm/chi3d_smplx/evaluation_results_iter120000_sa
 ==================== Check ====================
 1. Check chi3d_h5 files:
 python dataset/check/inspect_chi3d_h5.py
+
+2. Check data_loaders/tensors.py:
+python -m data_loaders.check.check_tensors
