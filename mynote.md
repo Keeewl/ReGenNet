@@ -46,3 +46,9 @@ right_hand_pose # [15, 3]
 root_transl # [1, 3]
 From body_pose to right_hand_pose are SMPLX-format rotational poses,    # 3 -> axis-angle
 and the last root_transl is the global trajectory of the person.        # 3 -> xyz
+
+
+## Weakness
+No containing or no considering:
+1. Motion respersentation: contact
+2. Loss: footcontact, vel, 
