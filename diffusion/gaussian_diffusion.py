@@ -15,7 +15,6 @@ import torch as th
 from copy import deepcopy
 from diffusion.nn import mean_flat, sum_flat
 from diffusion.losses import normal_kl, discretized_gaussian_log_likelihood
-from data_loaders.humanml.scripts import motion_process
 import utils.rotation_conversions as geometry
 
 def get_named_beta_schedule(schedule_name, num_diffusion_timesteps, scale_betas=1.):
@@ -1321,14 +1320,14 @@ class GaussianDiffusion:
                 terms["rcxyz_mse"] = self.masked_l2(target_xyz, model_output_xyz, mask)  # mean_flat((target_xyz - model_output_xyz) ** 2)
 
             if self.lambda_vel_rcxyz > 0.: # == 0
-                if self.data_rep == 'rot6d' and dataset.dataname in ['humanact12', 'uestc', 'ntu', 'chi3d']:
+                if self.data_rep == 'rot6d' and dataset.dataname == 'chi3d':
                     target_xyz_vel = (target_xyz[:, :, :, 1:] - target_xyz[:, :, :, :-1])
                     model_output_xyz_vel = (model_output_xyz[:, :, :, 1:] - model_output_xyz[:, :, :, :-1])
                     terms["vel_xyz_mse"] = self.masked_l2(target_xyz_vel, model_output_xyz_vel, mask[:, :, :, 1:])
 
             if self.lambda_fc > 0.:
                 with torch.autograd.set_detect_anomaly(True):
-                    if self.data_rep == 'rot6d' and dataset.dataname in ['humanact12', 'uestc', 'ntu', 'chi3d']:
+                    if self.data_rep == 'rot6d' and dataset.dataname == 'chi3d':
                         # 'L_Ankle',  # 7, 'R_Ankle',  # 8 , 'L_Foot',  # 10, 'R_Foot',  # 11
                         l_ankle_idx, r_ankle_idx, l_foot_idx, r_foot_idx = 7, 8, 10, 11
                         relevant_joints = [l_ankle_idx, l_foot_idx, r_ankle_idx, r_foot_idx]
@@ -1341,7 +1340,7 @@ class GaussianDiffusion:
                         terms["fc"] = self.masked_l2(pred_vel,
                                                     torch.zeros(pred_vel.shape, device=pred_vel.device),
                                                     mask[:, :, :, 1:])
-                    elif self.data_rep == 'xyz' and dataset.dataname in ['humanact12', 'uestc', 'ntu', 'chi3d']:
+                    elif self.data_rep == 'xyz' and dataset.dataname == 'chi3d':
                         l_ankle_idx, r_ankle_idx, l_foot_idx, r_foot_idx = 14, 18, 15, 19
                         relevant_joints = [l_ankle_idx, l_foot_idx, r_ankle_idx, r_foot_idx]
                         gt_joint_xyz = target[:, relevant_joints, :, :]  # [BatchSize, 4, 3, Frames]
@@ -1424,106 +1423,6 @@ class GaussianDiffusion:
 
         return self.masked_l2(pred_joint_vel, torch.zeros(pred_joint_vel.shape, device=pred_joint_vel.device),
                               mask[:, :, :, 1:])
-    # TODO - NOT USED YET, JUST COMMITING TO NOT DELETE THIS AND KEEP INITIAL IMPLEMENTATION, NOT DONE!
-    def foot_contact_loss_humanml3d(self, target, model_output):
-        # root_rot_velocity (B, seq_len, 1)
-        # root_linear_velocity (B, seq_len, 2)
-        # root_y (B, seq_len, 1)
-        # ric_data (B, seq_len, (joint_num - 1)*3) , XYZ
-        # rot_data (B, seq_len, (joint_num - 1)*6) , 6D
-        # local_velocity (B, seq_len, joint_num*3) , XYZ
-        # foot contact (B, seq_len, 4) ,
-
-        target_fc = target[:, -4:, :, :]
-        root_rot_velocity = target[:, :1, :, :]
-        root_linear_velocity = target[:, 1:3, :, :]
-        root_y = target[:, 3:4, :, :]
-        ric_data = target[:, 4:67, :, :]  # 4+(3*21)=67
-        rot_data = target[:, 67:193, :, :]  # 67+(6*21)=193
-        local_velocity = target[:, 193:259, :, :]  # 193+(3*22)=259
-        contact = target[:, 259:, :, :]  # 193+(3*22)=259
-        contact_mask_gt = contact > 0.5  # contact mask order for indexes are fid_l [7, 10], fid_r [8, 11]
-        vel_lf_7 = local_velocity[:, 7 * 3:8 * 3, :, :]
-        vel_rf_8 = local_velocity[:, 8 * 3:9 * 3, :, :]
-        vel_lf_10 = local_velocity[:, 10 * 3:11 * 3, :, :]
-        vel_rf_11 = local_velocity[:, 11 * 3:12 * 3, :, :]
-
-        calc_vel_lf_7 = ric_data[:, 6 * 3:7 * 3, :, 1:] - ric_data[:, 6 * 3:7 * 3, :, :-1]
-        calc_vel_rf_8 = ric_data[:, 7 * 3:8 * 3, :, 1:] - ric_data[:, 7 * 3:8 * 3, :, :-1]
-        calc_vel_lf_10 = ric_data[:, 9 * 3:10 * 3, :, 1:] - ric_data[:, 9 * 3:10 * 3, :, :-1]
-        calc_vel_rf_11 = ric_data[:, 10 * 3:11 * 3, :, 1:] - ric_data[:, 10 * 3:11 * 3, :, :-1]
-
-        for chosen_vel_foot_calc, chosen_vel_foot, joint_idx, contact_mask_idx in zip(
-                [calc_vel_lf_7, calc_vel_rf_8, calc_vel_lf_10, calc_vel_rf_11],
-                [vel_lf_7, vel_lf_10, vel_rf_8, vel_rf_11],
-                [7, 10, 8, 11],
-                [0, 1, 2, 3]):
-            tmp_mask_gt = contact_mask_gt[:, contact_mask_idx, :, :].cpu().detach().numpy().reshape(-1).astype(int)
-            chosen_vel_norm = np.linalg.norm(chosen_vel_foot.cpu().detach().numpy().reshape((3, -1)), axis=0)
-            chosen_vel_calc_norm = np.linalg.norm(chosen_vel_foot_calc.cpu().detach().numpy().reshape((3, -1)),
-                                                  axis=0)
-
-            print(tmp_mask_gt.shape)
-            print(chosen_vel_foot.shape)
-            print(chosen_vel_calc_norm.shape)
-            import matplotlib.pyplot as plt
-            plt.plot(tmp_mask_gt, label='FC mask')
-            plt.plot(chosen_vel_norm, label='Vel. XYZ norm (from vector)')
-            plt.plot(chosen_vel_calc_norm, label='Vel. XYZ norm (calculated diff XYZ)')
-
-            plt.title(f'FC idx {contact_mask_idx}, Joint Index {joint_idx}')
-            plt.legend()
-            plt.show()
-        return 0
-    # TODO - NOT USED YET, JUST COMMITING TO NOT DELETE THIS AND KEEP INITIAL IMPLEMENTATION, NOT DONE!
-    def velocity_consistency_loss_humanml3d(self, target, model_output):
-        # root_rot_velocity (B, seq_len, 1)
-        # root_linear_velocity (B, seq_len, 2)
-        # root_y (B, seq_len, 1)
-        # ric_data (B, seq_len, (joint_num - 1)*3) , XYZ
-        # rot_data (B, seq_len, (joint_num - 1)*6) , 6D
-        # local_velocity (B, seq_len, joint_num*3) , XYZ
-        # foot contact (B, seq_len, 4) ,
-
-        target_fc = target[:, -4:, :, :]
-        root_rot_velocity = target[:, :1, :, :]
-        root_linear_velocity = target[:, 1:3, :, :]
-        root_y = target[:, 3:4, :, :]
-        ric_data = target[:, 4:67, :, :]  # 4+(3*21)=67
-        rot_data = target[:, 67:193, :, :]  # 67+(6*21)=193
-        local_velocity = target[:, 193:259, :, :]  # 193+(3*22)=259
-        contact = target[:, 259:, :, :]  # 193+(3*22)=259
-
-        calc_vel_from_xyz = ric_data[:, :, :, 1:] - ric_data[:, :, :, :-1]
-        velocity_from_vector = local_velocity[:, 3:, :, 1:]  # Slicing out root
-        r_rot_quat, r_pos = motion_process.recover_root_rot_pos(target.permute(0, 2, 3, 1).type(th.FloatTensor))
-        print(f'r_rot_quat: {r_rot_quat.shape}')
-        print(f'calc_vel_from_xyz: {calc_vel_from_xyz.shape}')
-        calc_vel_from_xyz = calc_vel_from_xyz.permute(0, 2, 3, 1)
-        calc_vel_from_xyz = calc_vel_from_xyz.reshape((1, 1, -1, 21, 3)).type(th.FloatTensor)
-        r_rot_quat_adapted = r_rot_quat[..., :-1, None, :].repeat((1,1,1,21,1)).to(calc_vel_from_xyz.device)
-        print(f'calc_vel_from_xyz: {calc_vel_from_xyz.shape} , {calc_vel_from_xyz.device}')
-        print(f'r_rot_quat_adapted: {r_rot_quat_adapted.shape}, {r_rot_quat_adapted.device}')
-
-        calc_vel_from_xyz = motion_process.qrot(r_rot_quat_adapted, calc_vel_from_xyz)
-        calc_vel_from_xyz = calc_vel_from_xyz.reshape((1, 1, -1, 21 * 3))
-        calc_vel_from_xyz = calc_vel_from_xyz.permute(0, 3, 1, 2)
-        print(f'calc_vel_from_xyz: {calc_vel_from_xyz.shape} , {calc_vel_from_xyz.device}')
-
-        import matplotlib.pyplot as plt
-        for i in range(21):
-            plt.plot(np.linalg.norm(calc_vel_from_xyz[:,i*3:(i+1)*3,:,:].cpu().detach().numpy().reshape((3, -1)), axis=0), label='Calc Vel')
-            plt.plot(np.linalg.norm(velocity_from_vector[:,i*3:(i+1)*3,:,:].cpu().detach().numpy().reshape((3, -1)), axis=0), label='Vector Vel')
-            plt.title(f'Joint idx: {i}')
-            plt.legend()
-            plt.show()
-        print(calc_vel_from_xyz.shape)
-        print(velocity_from_vector.shape)
-        diff = calc_vel_from_xyz-velocity_from_vector
-        print(np.linalg.norm(diff.cpu().detach().numpy().reshape((63, -1)), axis=0))
-
-        return 0
-
 
     def _prior_bpd(self, x_start):
         """

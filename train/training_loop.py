@@ -17,8 +17,6 @@ from diffusion.fp16_util import MixedPrecisionTrainer
 from diffusion.resample import LossAwareSampler, UniformSampler
 from tqdm import tqdm
 from diffusion.resample import create_named_schedule_sampler
-from data_loaders.humanml.networks.evaluator_wrapper import EvaluatorMDMWrapper
-from eval import eval_humanml, eval_humanact12_uestc
 from data_loaders.get_data import get_dataset_loader
 
 # For ImageNet experiments, this was a good default value.
@@ -94,24 +92,6 @@ class TrainLoop:
         self.schedule_sampler_type = 'uniform'
         self.schedule_sampler = create_named_schedule_sampler(self.schedule_sampler_type, diffusion)
         self.eval_wrapper, self.eval_data, self.eval_gt_data = None, None, None
-        if args.dataset in ['kit', 'humanml'] and args.eval_during_training:
-            mm_num_samples = 0  # mm is super slow hence we won't run it during training
-            mm_num_repeats = 0  # mm is super slow hence we won't run it during training
-            gen_loader = get_dataset_loader(name=args.dataset, batch_size=args.eval_batch_size, num_frames=None,
-                                            split=args.eval_split,
-                                            hml_mode='eval')
-
-            self.eval_gt_data = get_dataset_loader(name=args.dataset, batch_size=args.eval_batch_size, num_frames=None,
-                                                   split=args.eval_split,
-                                                   hml_mode='gt')
-            self.eval_wrapper = EvaluatorMDMWrapper(args.dataset, dist_util.dev())
-            self.eval_data = {
-                'test': lambda: eval_humanml.get_mdm_loader(
-                    model, diffusion, args.eval_batch_size,
-                    gen_loader, mm_num_samples, mm_num_repeats, gen_loader.dataset.opt.max_motion_length,
-                    args.eval_num_samples, scale=1.,
-                )
-            }
         if torch.cuda.is_available():
             self.use_ddp = True
             self.ddp_model = DDP(
@@ -239,19 +219,6 @@ class TrainLoop:
                 else:
                     self.train_platform.report_scalar(name=k, value=v, iteration=self.step + self.resume_step,
                                                       group_name='Eval')
-
-        elif self.dataset in ['humanact12', 'uestc']:
-            eval_args = SimpleNamespace(num_seeds=self.args.eval_rep_times, num_samples=self.args.eval_num_samples,
-                                        batch_size=self.args.eval_batch_size, device=self.device, guidance_param = 1,
-                                        dataset=self.dataset, unconstrained=self.args.unconstrained,
-                                        model_path=os.path.join(self.save_dir, self.ckpt_file_name()))
-            eval_dict = eval_humanact12_uestc.evaluate(eval_args, model=self.model, diffusion=self.diffusion, data=self.data.dataset)
-            print(f'Evaluation results on {self.dataset}: {sorted(eval_dict["feats"].items())}')
-            for k, v in eval_dict["feats"].items():
-                if 'unconstrained' not in k:
-                    self.train_platform.report_scalar(name=k, value=np.array(v).astype(float).mean(), iteration=self.step, group_name='Eval')
-                else:
-                    self.train_platform.report_scalar(name=k, value=np.array(v).astype(float).mean(), iteration=self.step, group_name='Eval Unconstrained')
 
         end_eval = time.time()
         print(f'Evaluation time: {round(end_eval-start_eval)/60}min')

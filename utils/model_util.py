@@ -24,8 +24,6 @@ def get_model_args(args, data):
     action_emb = 'tensor'
     if args.unconstrained:
         cond_mode = 'no_cond'
-    elif args.dataset in ['kit', 'humanml']:
-        cond_mode = 'text'
     else:
         cond_mode = 'action'
     if hasattr(data.dataset, 'num_actions'):
@@ -49,19 +47,7 @@ def get_model_args(args, data):
     elif data_rep == 'xyz':
         nfeats = 3
 
-    if args.dataset == 'humanml':
-        data_rep = 'hml_vec'
-        njoints = 263
-        nfeats = 1
-    elif args.dataset == 'kit':
-        data_rep = 'hml_vec'
-        njoints = 251
-        nfeats = 1
-
-    if args.dataset == 'ntu':
-        num_frames = 60
-    elif args.dataset == 'chi3d':
-        num_frames = 150
+    num_frames = 150
 
     return {'modeltype': '', 'njoints': njoints, 'nfeats': nfeats, 'num_actions': num_actions, 'num_person': num_person, 
             'num_frames': num_frames,

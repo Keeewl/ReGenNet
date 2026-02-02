@@ -142,8 +142,8 @@ def add_model_options(parser):
 
 def add_data_options(parser):
     group = parser.add_argument_group('dataset')
-    group.add_argument("--dataset", default='humanml', choices=['humanml', 'kit', 'humanact12', 'uestc', 'ntu', 'chi3d', 'gta', 'sbu'], type=str,
-                       help="Dataset name (choose from list).")
+    group.add_argument("--dataset", default='chi3d', choices=['chi3d'], type=str,
+                       help="Dataset name.")
     group.add_argument("--data_dir", default="", type=str,
                        help="If empty, will use defaults according to the specified dataset.")
     group.add_argument("--num_person", default=1, type=int, help="number of persons")
@@ -211,30 +211,11 @@ def add_generate_options(parser):
     group.add_argument("--input_text", default='', type=str,
                        help="Path to a text file lists text prompts to be synthesized. If empty, will take text prompts from dataset.")
     group.add_argument("--action_file", default='', type=str,
-                       help="Path to a text file that lists names of actions to be synthesized. Names must be a subset of dataset/uestc/info/action_classes.txt if sampling from uestc, "
-                            "or a subset of [warm_up,walk,run,jump,drink,lift_dumbbell,sit,eat,turn steering wheel,phone,boxing,throw] if sampling from humanact12. "
-                            "If no file is specified, will take action names from dataset.")
+                       help="Path to a text file that lists names of actions to be synthesized.")
     group.add_argument("--text_prompt", default='', type=str,
                        help="A text prompt to be generated. If empty, will take text prompts from dataset.")
     group.add_argument("--action_name", default='', type=str,
                        help="An action name to be generated. If empty, will take text prompts from dataset.")
-
-
-def add_edit_options(parser):
-    group = parser.add_argument_group('edit')
-    group.add_argument("--edit_mode", default='in_between', choices=['in_between', 'upper_body'], type=str,
-                       help="Defines which parts of the input motion will be edited.\n"
-                            "(1) in_between - suffix and prefix motion taken from input motion, "
-                            "middle motion is generated.\n"
-                            "(2) upper_body - lower body joints taken from input motion, "
-                            "upper body is generated.")
-    group.add_argument("--text_condition", default='', type=str,
-                       help="Editing will be conditioned on this text prompt. "
-                            "If empty, will perform unconditioned editing.")
-    group.add_argument("--prefix_end", default=0.25, type=float,
-                       help="For in_between editing - Defines the end of input prefix (ratio from all frames).")
-    group.add_argument("--suffix_start", default=0.75, type=float,
-                       help="For in_between editing - Defines the start of input suffix (ratio from all frames).")
 
 
 def add_evaluation_options(parser):
@@ -276,15 +257,6 @@ def cgenerate_args():
     add_sampling_options(parser)
     add_generate_options(parser)
     return parse_and_load_from_model_wo_data(parser)
-
-
-def edit_args():
-    parser = ArgumentParser()
-    # args specified by the user: (all other will be loaded from the model)
-    add_base_options(parser)
-    add_sampling_options(parser)
-    add_edit_options(parser)
-    return parse_and_load_from_model(parser)
 
 
 def evaluation_parser():
