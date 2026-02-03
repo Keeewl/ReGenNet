@@ -1,6 +1,11 @@
 import argparse
 import os
+import sys
 from types import SimpleNamespace
+
+REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+if REPO_ROOT not in sys.path:
+    sys.path.insert(0, REPO_ROOT)
 
 import torch
 
@@ -33,6 +38,8 @@ def parse_args():
         type=str,
     )
     parser.add_argument("--num_person", default=None, type=int)
+    parser.add_argument("--vel_threshold", default=0.01, type=float)
+
     return parser.parse_args()
 
 
@@ -95,6 +102,7 @@ def build_diffusion_args(args, num_person):
         pose_rep=args.pose_rep,
         num_person=num_person,
         body_model=args.body_model,
+        vel_threshold=args.vel_threshold,
     )
 
 
