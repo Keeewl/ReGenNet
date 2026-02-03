@@ -1,4 +1,5 @@
 from model.cmdm import CMDM
+from model.net.cnet import CNet
 from diffusion import gaussian_diffusion as gd
 from diffusion.respace import SpacedDiffusion, space_timesteps
 
@@ -12,6 +13,11 @@ def create_model_and_diffusion(args, data):
     setting = args.setting
     if setting == 'cmdm':
         model = CMDM(**get_model_args(args, data))
+        args.num_person = 1 # Attention here
+    elif setting == 'cnet':
+        if not args.unconstrained:
+            raise ValueError("CNet currently supports no_cond only; run with --unconstrained.")
+        model = CNet(**get_model_args(args, data))
         args.num_person = 1 # Attention here
     diffusion = create_gaussian_diffusion(args)
     return model, diffusion
