@@ -94,10 +94,11 @@ class TrainLoop:
         self.eval_wrapper, self.eval_data, self.eval_gt_data = None, None, None
         if torch.cuda.is_available():
             self.use_ddp = True
+            device_id = torch.cuda.current_device()
             self.ddp_model = DDP(
                 self.model,
-                device_ids=[dist_util.dev()],
-                output_device=dist_util.dev(),
+                device_ids=[device_id],
+                output_device=device_id,
                 broadcast_buffers=False,
                 bucket_cap_mb=128,
                 find_unused_parameters=True,

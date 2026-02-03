@@ -10,7 +10,7 @@ import blobfile as bf
 from mpi4py import MPI
 import torch as th
 import torch.distributed as dist
-# Change this to reflect your cluster layout.
+# Change this to reflect your cluster layout (can be overridden by env).
 # The GPU for a given rank is (rank % GPUS_PER_NODE).
 GPUS_PER_NODE = 4
 
@@ -23,7 +23,6 @@ def setup_dist():
     """
     if dist.is_initialized():
         return
-    os.environ["CUDA_VISIBLE_DEVICES"] = f"{MPI.COMM_WORLD.Get_rank() % GPUS_PER_NODE}"
     comm = MPI.COMM_WORLD
     backend = "gloo" if not th.cuda.is_available() else "nccl"
 
@@ -38,7 +37,10 @@ def setup_dist():
     port = comm.bcast(_find_free_port(), root=0)
     os.environ["MASTER_PORT"] = str(port)
 
-    th.cuda.set_device(comm.rank)
+    if th.cuda.is_available():
+        local_rank = _get_local_rank(comm.rank)
+        os.environ.setdefault("LOCAL_RANK", str(local_rank))
+        th.cuda.set_device(local_rank)
     dist.init_process_group(backend=backend, init_method="env://")
 
 
@@ -47,7 +49,7 @@ def dev():
     Get the device to use for torch.distributed.
     """
     if th.cuda.is_available():
-        return th.device(f"cuda")
+        return th.device("cuda", th.cuda.current_device())
     return th.device("cpu")
 
 
@@ -91,3 +93,19 @@ def _find_free_port():
         return s.getsockname()[1]
     finally:
         s.close()
+
+
+def _get_local_rank(global_rank):
+    for key in ("LOCAL_RANK", "OMPI_COMM_WORLD_LOCAL_RANK", "MV2_COMM_WORLD_LOCAL_RANK"):
+        if key in os.environ:
+            try:
+                return int(os.environ[key])
+            except ValueError:
+                pass
+    try:
+        gpus_per_node = int(os.environ.get("GPUS_PER_NODE", GPUS_PER_NODE))
+    except ValueError:
+        gpus_per_node = GPUS_PER_NODE
+    if gpus_per_node <= 0:
+        gpus_per_node = th.cuda.device_count() if th.cuda.is_available() else 1
+    return global_rank % gpus_per_node
