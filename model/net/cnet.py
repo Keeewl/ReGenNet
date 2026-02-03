@@ -32,14 +32,13 @@ class CNet(nn.Module):
         clip_dim=512,
         arch="offline",
         cm_mode="concat",
-        body_model="smpl",
+        body_model="smplx",
         wo_pos_emb=False,
         clip_version=None,
         **kargs
     ):
         super().__init__()
 
-        self.legacy = legacy
         self.modeltype = modeltype
         self.njoints = njoints
         self.nfeats = nfeats
@@ -56,7 +55,6 @@ class CNet(nn.Module):
         self.num_layers = num_layers
         self.num_heads = num_heads
         self.dropout = dropout
-        self.ablation = ablation
         self.activation = activation
         self.clip_dim = clip_dim
         self.arch = arch
@@ -78,6 +76,13 @@ class CNet(nn.Module):
         self.register_buffer("body_joint_ids", body_joint_ids)
         self.register_buffer("hand_joint_ids", hand_joint_ids)
 
+        if self.arch != "offline":
+            raise ValueError("CNet v1 only supports offline mode.")
+        if self.cm_mode != "concat":
+            raise ValueError("CNet v1 only supports cm_mode='concat'.")
+        if self.dataset != "chi3d":
+            raise ValueError("CNet v1 only supports dataset='chi3d'.")
+
         self.actor_input_process = InputProcess(
             self.data_rep, self.input_feats, self.latent_dim
         )
@@ -88,9 +93,8 @@ class CNet(nn.Module):
             self.data_rep, int(self.hand_joint_ids.numel()) * self.nfeats, self.latent_dim
         )
 
-        if self.cm_mode == "concat":
-            self.body_fuse_process = nn.Linear(self.latent_dim * 2, self.latent_dim)
-            self.hand_fuse_process = nn.Linear(self.latent_dim * 2, self.latent_dim)
+        self.body_fuse_process = nn.Linear(self.latent_dim * 2, self.latent_dim)
+        self.hand_fuse_process = nn.Linear(self.latent_dim * 2, self.latent_dim)
 
         self.sequence_pos_encoder = PositionalEncoding(
             self.latent_dim, dropout=self.dropout
@@ -138,6 +142,8 @@ class CNet(nn.Module):
             self.rot2xyz = Rotation2xyz(device="cpu", dataset=self.dataset)
         elif body_model == "smplx":
             self.rot2xyz = Rotation2xyz_x(device="cpu", dataset=self.dataset)
+        else:
+            raise ValueError("CNet v1 only supports body_model='smpl' or 'smplx'.")
 
     def parameters_wo_clip(self):
         return [p for name, p in self.named_parameters() if not name.startswith("clip_model.")]
@@ -201,9 +207,6 @@ class CNet(nn.Module):
         timesteps: [batch_size]
         y: dict with actor motion and optional text condition
         """
-        if self.arch not in ["offline"]:
-            raise ValueError("CNet v1 only supports offline mode.")
-
         bs, njoints, nfeats, nframes = x.shape
         y = y or {}
         actor = y.get("actor", y.get("cmotion", None))
@@ -216,16 +219,10 @@ class CNet(nn.Module):
         body_embed = self.body_input_process(body)
         hand_embed = self.hand_input_process(hand)
 
-        if self.cm_mode == "add":
-            body_embed = body_embed + actor_embed
-            hand_embed = hand_embed + actor_embed
-        elif self.cm_mode == "concat":
-            body_embed = torch.cat([body_embed, actor_embed], dim=-1)
-            body_embed = self.body_fuse_process(body_embed)
-            hand_embed = torch.cat([hand_embed, actor_embed], dim=-1)
-            hand_embed = self.hand_fuse_process(hand_embed)
-        else:
-            raise NotImplementedError
+        body_embed = torch.cat([body_embed, actor_embed], dim=-1)
+        body_embed = self.body_fuse_process(body_embed)
+        hand_embed = torch.cat([hand_embed, actor_embed], dim=-1)
+        hand_embed = self.hand_fuse_process(hand_embed)
 
         cond = self.embed_timestep(timesteps)
         force_mask = y.get("uncond", False)
@@ -432,25 +429,7 @@ class Mlp(nn.Module):
 def _resolve_joint_splits(
     njoints, body_joint_ids, hand_joint_ids, body_joints, hand_joints
 ):
-    body = body_joint_ids if body_joint_ids is not None else body_joints
-    hand = hand_joint_ids if hand_joint_ids is not None else hand_joints
-
-    if body is None and hand is None:
-        if njoints == 56:
-            # Chi3D SMPL-X: 22 body + jaw/eyes + 15L hand + 15R hand + transl.
-            body = list(range(0, 25)) + [55]
-            hand = list(range(25, 55))
-        else:
-            split = njoints // 2
-            body = list(range(split))
-            hand = list(range(split, njoints))
-    elif body is None:
-        hand_set = set(hand)
-        body = [i for i in range(njoints) if i not in hand_set]
-    elif hand is None:
-        body_set = set(body)
-        hand = [i for i in range(njoints) if i not in body_set]
-
-    body = torch.tensor(body, dtype=torch.long)
-    hand = torch.tensor(hand, dtype=torch.long)
+    # Fixed v1 split: transl stays in body.
+    body = torch.tensor(list(range(0, 25)) + [55], dtype=torch.long)
+    hand = torch.tensor(list(range(25, 55)), dtype=torch.long)
     return body, hand
