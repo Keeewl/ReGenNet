@@ -5,6 +5,7 @@ Train a diffusion model on images.
 
 import os
 import json
+import time
 import torch as th
 from utils.fixseed import fixseed
 from utils.parser_util import train_args
@@ -58,6 +59,7 @@ def main():
         data_len = len(data)
         dataset_len = len(data.dataset) if hasattr(data, "dataset") else "n/a"
         print(f"[debug] rank={rank}/{world} local_rank={local_rank} device={device} len(data)={data_len} len(dataset)={dataset_len}", flush=True)
+        time.sleep(10)
 
     print("creating model and diffusion...")
     model, diffusion = create_model_and_diffusion(args, data)
