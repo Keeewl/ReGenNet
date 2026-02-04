@@ -1,0 +1,57 @@
+==================== Train ====================
+1. Train in 4 GPU:
+export CUDA_VISIBLE_DEVICES=4,5,6,7
+mpiexec -n 8 --allow-run-as-root python -m train.train_mdm \
+  --setting cnet \
+  --save_dir save/cnet/chi3d_smplx_offline_4gpu_v2 \
+  --dataset chi3d \
+  --cond_mask_prob 0 \
+  --num_person 2 \
+  --layers 8 \
+  --num_frames 150 \
+  --arch offline \
+  --cm_mode concat \
+  --overwrite \
+  --pose_rep rot6d \
+  --body_model smplx \
+  --data_path dataset/chi3d/chi3d_smplx_train.h5 \
+  --train_platform_type TensorboardPlatform \
+  --vel_threshold 0.01 \
+  --unconstrained
+
+*. Visualization
+tensorboard --logdir save/cnet/chi3d_smplx_offline_4gpu
+
+
+==================== Motion Synthesis and Visualize ====================
+1. Motion Synthesis
+python -m sample.cgenerate \
+  --model_path save/cnet/chi3d_smplx_offline_4gpu/model000070000.pt \
+  --dataset chi3d \
+  --body_model smplx \
+  --pose_rep rot6d \
+  --num_person 2 \
+  --data_path dataset/chi3d/chi3d_smplx_test.h5 \
+  --action_file assets/action_names_chi3d.txt \
+  --num_repetitions 10 \
+  --motion_length 150 \
+  --output_dir outputs/cnet_chi3d_train_v1
+
+2. Visualize:
+CUDA_VISIBLE_DEVICES=7
+python -m render.crendermotion \
+  --data_path outputs/cnet_chi3d_train_v1/results.npy \
+  --num_person 2 \
+  --setting cmdm \
+  --body_model smplx
+
+
+
+
+
+==================== Evaluation ====================
+python -m eval.eval_cmdm \
+  --model_path save/cnet/chi3d_smplx_offline_4gpu/model000070000.pt \
+  --rec_model_path recognition_training/chi3d_smplx_mytrain/checkpoint_0030.pth.tar \
+  --eval_mode full \
+  --device 0 --batch_size 64
