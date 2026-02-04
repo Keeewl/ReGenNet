@@ -5,6 +5,7 @@ Train a diffusion model on images.
 
 import os
 import json
+import torch as th
 from utils.fixseed import fixseed
 from utils.parser_util import train_args
 from utils import dist_util
@@ -47,6 +48,16 @@ def main():
     data = get_dataset_loader(name=args.dataset, batch_size=args.batch_size, num_frames=args.num_frames, 
                               num_person=args.num_person, data_path = args.data_path, pose_rep = args.pose_rep, body_model=args.body_model, setting=args.setting, ar_shuffle=args.shuffle,
                               shard=MPI.COMM_WORLD.Get_rank(), num_shards=MPI.COMM_WORLD.Get_size())
+
+    # dist util debug
+    if os.environ.get("REGENNET_DEBUG_RANKS", "0") == "1":
+        rank = MPI.COMM_WORLD.Get_rank()
+        world = MPI.COMM_WORLD.Get_size()
+        local_rank = os.environ.get("LOCAL_RANK", "unknown")
+        device = th.cuda.current_device() if th.cuda.is_available() else "cpu"
+        data_len = len(data)
+        dataset_len = len(data.dataset) if hasattr(data, "dataset") else "n/a"
+        print(f"[debug] rank={rank}/{world} local_rank={local_rank} device={device} len(data)={data_len} len(dataset)={dataset_len}", flush=True)
 
     print("creating model and diffusion...")
     model, diffusion = create_model_and_diffusion(args, data)

@@ -96,7 +96,7 @@ def _find_free_port():
 
 
 def _get_local_rank(global_rank):
-    for key in ("LOCAL_RANK", "OMPI_COMM_WORLD_LOCAL_RANK", "MV2_COMM_WORLD_LOCAL_RANK"):
+    for key in ("LOCAL_RANK", "OMPI_COMM_WORLD_LOCAL_RANK", "MV2_COMM_WORLD_LOCAL_RANK", "MPI_LOCALRANKID", "I_MPI_LOCAL_RANK", "SLURM_LOCALID", "PMI_LOCAL_RANK"):
         if key in os.environ:
             try:
                 return int(os.environ[key])
