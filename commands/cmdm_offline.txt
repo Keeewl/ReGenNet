@@ -149,28 +149,13 @@ tensorboard --logdir actor-x/recognition_training/chi3d_smplx_mytrain
 
 
 ==================== Evaluation ====================
-1. Eval author model:
 python -m eval.eval_cmdm \
---model_path save/chi3d/model000568404.pt \
---rec_model_path recognition_training/chi3d_smplx/checkpoint_0060.pth.tar \
---eval_mode full \
---device 0 --batch_size 64
-
-2. Eval author model (use ddim):
-python -m eval.eval_cmdm \
---model save/chi3d/model000568404.pt \
---rec_model_path recognition_training/chi3d_smplx/checkpoint_0060.pth.tar \
---eval_mode full \
---use_ddim \
---timestep_respacing ddim5
-
-3. Eval keeewl model (use ddim):
-python -m eval.eval_cmdm \
---model save/cmdm/chi3d_smplx/model000120000.pt \
---rec_model_path recognition_training/chi3d_smplx_mytrain/checkpoint_0030.pth.tar \
---eval_mode full \
---use_ddim \
---timestep_respacing ddim5
+  --model_path save/cmdm/chi3d_smplx_offline_4gpu_v1/model000090000.pt \
+  --rec_model_path recognition_training/chi3d_smplx_mytrain/checkpoint_0030.pth.tar \
+  --eval_mode full \
+  --use_ddim \
+  --device 0 --batch_size 64
+  --timestep_respacing ddim5
 
 *. Get a table:
 python -m eval.easy_table save/chi3d/evaluation_results_iter568404_samp1000_scale1_a2m_not_auto__full.yaml
