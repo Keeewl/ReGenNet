@@ -1,5 +1,6 @@
 from model.cmdm import CMDM
 from model.net.cnet import CNet
+from model.net.cnet_v2 import CNetV2
 from diffusion import gaussian_diffusion as gd
 from diffusion.respace import SpacedDiffusion, space_timesteps
 
@@ -18,6 +19,11 @@ def create_model_and_diffusion(args, data):
         if not args.unconstrained:
             raise ValueError("CNet currently supports no_cond only; run with --unconstrained.")
         model = CNet(**get_model_args(args, data))
+        args.num_person = 1 # Attention here
+    elif setting == 'cnet_v2':
+        if not args.unconstrained:
+            raise ValueError("CNetV2 currently supports no_cond only; run with --unconstrained.")
+        model = CNetV2(**get_model_args(args, data))
         args.num_person = 1 # Attention here
     diffusion = create_gaussian_diffusion(args)
     return model, diffusion
@@ -61,7 +67,7 @@ def get_model_args(args, data):
             'latent_dim': args.latent_dim, 'ff_size': 1024, 'num_layers': args.layers, 'num_heads': 4,
             'dropout': 0.1, 'activation': "gelu", 'data_rep': data_rep, 'cond_mode': cond_mode,
             'cond_mask_prob': args.cond_mask_prob, 'action_emb': action_emb, 'arch': args.arch, 'cm_mode': args.cm_mode,
-            'body_model': body_model, 'wo_pos_emb': args.wo_pos_emb, 'emb_trans_dec': args.emb_trans_dec, 'clip_version': clip_version, 'dataset': args.dataset}
+            'body_model': body_model, 'wo_pos_emb': args.wo_pos_emb, 'emb_trans_dec': args.emb_trans_dec, 'clip_version': clip_version, 'dataset': args.dataset, 'diffusion_steps': args.diffusion_steps}
 
 
 def create_gaussian_diffusion(args):
