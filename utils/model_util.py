@@ -1,6 +1,7 @@
 from model.cmdm import CMDM
 from model.net.cnet import CNet
 from model.net.cnet_v2 import CNetV2
+from model.net.cnet_v3 import CNetV3
 from diffusion import gaussian_diffusion as gd
 from diffusion.respace import SpacedDiffusion, space_timesteps
 
@@ -24,6 +25,11 @@ def create_model_and_diffusion(args, data):
         if not args.unconstrained:
             raise ValueError("CNetV2 currently supports no_cond only; run with --unconstrained.")
         model = CNetV2(**get_model_args(args, data))
+        args.num_person = 1 # Attention here
+    elif setting == 'cnet_v3':
+        if not args.unconstrained:
+            raise ValueError("CNetV3 currently supports no_cond only; run with --unconstrained.")
+        model = CNetV3(**get_model_args(args, data))
         args.num_person = 1 # Attention here
     diffusion = create_gaussian_diffusion(args)
     return model, diffusion
