@@ -299,6 +299,10 @@ class TimestepEmbedder(nn.Module):
 
 
 class InputProcess(nn.Module):
+    """
+    Input:  [B,J,F,T]
+    Output: []
+    """
     def __init__(self, data_rep, input_feats, latent_dim):
         super().__init__()
         self.data_rep = data_rep
