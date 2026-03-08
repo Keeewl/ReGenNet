@@ -8,33 +8,11 @@ from model.rotation2xyz import Rotation2xyz, Rotation2xyz_x
 
 class CNetV3(nn.Module):
     def __init__(
-        self,
-        modeltype,
-        njoints,
-        nfeats,
-        num_actions,
-        translation,
-        pose_rep,
-        glob,
-        glob_rot,
-        num_frames=60,
-        latent_dim=256,
-        ff_size=1024,
-        num_layers=8,
-        num_heads=4,
-        dropout=0.1,
-        ablation=None,
-        activation="gelu",
-        legacy=False,
-        data_rep="rot6d",
-        dataset="chi3d",
-        clip_dim=512,
-        arch="offline",
-        cm_mode="concat",
-        body_model="smplx",
-        wo_pos_emb=False,
-        clip_version=None,
-        **kargs
+        self, modeltype, njoints, nfeats, num_actions, translation, pose_rep, glob, glob_rot,
+        num_frames=60, latent_dim=256, ff_size=1024, num_layers=8, num_heads=4, dropout=0.1,
+        ablation=None, activation="gelu", legacy=False, data_rep="rot6d", dataset="chi3d",
+        clip_dim=512, arch="offline", cm_mode="concat", body_model="smplx", wo_pos_emb=False,
+        clip_version=None, **kargs
     ):
         super().__init__()
 
