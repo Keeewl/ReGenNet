@@ -74,6 +74,8 @@ def print_results(folder, evaluation):
     # print the GT, only if it is computed with respect to "another" GT
     if "fid_gt2" in a2m:
         a2m["fid_gt"] = a2m["fid_gt2"]
+    has_gt = any(key.format("gt") in a2m for key in keys)
+    if has_gt:
         lines = ["gt"] + lines
 
     rows = []
