@@ -53,8 +53,8 @@ class CNetV3(nn.Module):
         self.register_buffer("body_joint_ids", body_joint_ids)
         self.register_buffer("hand_joint_ids", hand_joint_ids)
 
-        if self.arch != "offline":
-            raise ValueError("CNet v3 only supports offline mode.")
+        if self.arch not in ["offline", "online"]:
+            raise ValueError("CNet v3 only supports arch='offline' or 'online'.")
         if self.cm_mode != "concat":
             raise ValueError("CNet v3 only supports cm_mode='concat'.")
         if self.dataset != "chi3d":
@@ -215,8 +215,13 @@ class CNetV3(nn.Module):
             body_seq = self.sequence_pos_encoder(body_seq)
             hand_seq = self.sequence_pos_encoder(hand_seq)
 
+        online = self.arch == "online"
+        attn_mask = None
+        if online:
+            attn_mask = _build_causal_mask(body_seq.shape[1], body_seq.device)
+
         for layer in self.transformer_layers:
-            body_seq, hand_seq = layer(body_seq, hand_seq)
+            body_seq, hand_seq = layer(body_seq, hand_seq, attn_mask=attn_mask, online=online)
 
         body_seq = body_seq[:, 1:, :]
         hand_seq = hand_seq[:, 1:, :]
@@ -259,17 +264,17 @@ class ParCoTransformerLayer(nn.Module):
 
         self.drop = nn.Dropout(dropout)
 
-    def forward(self, body, hand):
+    def forward(self, body, hand, attn_mask=None, online=False):
         body_norm = self.norm_body_attn(body)
         body = body + self.drop(
-            self.self_attn_body(body_norm, body_norm, body_norm)[0]
+            self.self_attn_body(body_norm, body_norm, body_norm, attn_mask=attn_mask)[0]
         )
         hand_norm = self.norm_hand_attn(hand)
         hand = hand + self.drop(
-            self.self_attn_hand(hand_norm, hand_norm, hand_norm)[0]
+            self.self_attn_hand(hand_norm, hand_norm, hand_norm, attn_mask=attn_mask)[0]
         )
 
-        body, hand = self.coord(body, hand)
+        body, hand = self.coord(body, hand, online=online)
 
         body = body + self.drop(self.mlp_body(self.norm_body_ffn(body)))
         hand = hand + self.drop(self.mlp_hand(self.norm_hand_ffn(hand)))
@@ -284,14 +289,36 @@ class ParCoCoord(nn.Module):
         self.norm_body = nn.LayerNorm(dim)
         self.norm_hand = nn.LayerNorm(dim)
 
-    def forward(self, body, hand):
+    def forward(self, body, hand, online=False):
         # body/hand: [B, 1+T, D], exclude cond token for summaries
-        s_body = body[:, 1:, :].mean(dim=1)
-        s_hand = hand[:, 1:, :].mean(dim=1)
-        m_body = self.mlp_body_from_hand(s_hand)
-        m_hand = self.mlp_hand_from_body(s_body)
-        body = self.norm_body(body + m_body[:, None, :])
-        hand = self.norm_hand(hand + m_hand[:, None, :])
+        body_tokens = body[:, 1:, :]
+        hand_tokens = hand[:, 1:, :]
+
+        if online:
+            # Prefix mean enforces strict causality for ParCoCoord.
+            body_cumsum = body_tokens.cumsum(dim=1)
+            hand_cumsum = hand_tokens.cumsum(dim=1)
+            denom = torch.arange(
+                1, body_tokens.shape[1] + 1, device=body_tokens.device, dtype=body_tokens.dtype
+            ).view(1, -1, 1)
+            prefix_body = body_cumsum / denom
+            prefix_hand = hand_cumsum / denom
+            m_body = self.mlp_body_from_hand(prefix_hand)
+            m_hand = self.mlp_hand_from_body(prefix_body)
+            body_tokens = body_tokens + m_body
+            hand_tokens = hand_tokens + m_hand
+        else:
+            s_body = body_tokens.mean(dim=1)
+            s_hand = hand_tokens.mean(dim=1)
+            m_body = self.mlp_body_from_hand(s_hand)
+            m_hand = self.mlp_hand_from_body(s_body)
+            body_tokens = body_tokens + m_body[:, None, :]
+            hand_tokens = hand_tokens + m_hand[:, None, :]
+
+        body = torch.cat([body[:, :1, :], body_tokens], dim=1)
+        hand = torch.cat([hand[:, :1, :], hand_tokens], dim=1)
+        body = self.norm_body(body)
+        hand = self.norm_hand(hand)
         return body, hand
 
 
@@ -407,6 +434,11 @@ class Mlp(nn.Module):
         x = self.fc2(x)
         x = self.drop(x)
         return x
+
+
+def _build_causal_mask(seq_len, device):
+    # True entries are masked (blocked). Includes cond token at position 0.
+    return torch.triu(torch.ones(seq_len, seq_len, device=device, dtype=torch.bool), diagonal=1)
 
 
 def _resolve_joint_splits(
