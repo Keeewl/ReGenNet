@@ -7,6 +7,10 @@ from model.rotation2xyz import Rotation2xyz, Rotation2xyz_x
 
 
 class CNetV3(nn.Module):
+    """
+    two-stream conditional denoiser
+    = body stream + hand stream + actor-conditioned fusion + ParCo coordination
+    """
     def __init__(
         self, modeltype, njoints, nfeats, num_actions, translation, pose_rep, glob, glob_rot,
         num_frames=60, latent_dim=256, ff_size=1024, num_layers=8, num_heads=4, dropout=0.1,
@@ -243,6 +247,17 @@ class CNetV3(nn.Module):
 
 
 class ParCoTransformerLayer(nn.Module):
+    """
+    body -> LN -> self-attn -> residual
+    hand -> LN -> self-attn -> residual
+    body, hand -> ParCoCoord
+    body -> LN -> MLP -> residual
+    hand -> LN -> MLP -> residual
+
+    Block: 
+    SelfAttn_body ​→ ParCoCoord(hand2body) → FFN_body
+    SelfAttn_hand ​→ ParCoCoord(body2hand) → FFN_hand
+    """
     def __init__(self, dim, num_heads, mlp_ratio=4.0, dropout=0.1, activation="gelu"):
         super().__init__()
         self.self_attn_body = nn.MultiheadAttention(
@@ -282,6 +297,9 @@ class ParCoTransformerLayer(nn.Module):
 
 
 class ParCoCoord(nn.Module):
+    """
+    part-aware global context exchange
+    """
     def __init__(self, dim, mlp_ratio=4.0, dropout=0.1, activation="gelu"):
         super().__init__()
         self.mlp_body_from_hand = Mlp(dim, int(dim * mlp_ratio), dropout, activation)
