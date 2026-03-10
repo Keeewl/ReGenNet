@@ -1,5 +1,5 @@
 ==================== Train ====================
-1. Train in 4 GPUs:
+1. Train in 4 GPUs (offline):
 export CUDA_VISIBLE_DEVICES=4,5,6,7
 mpiexec -n 4 --allow-run-as-root python -m train.train_mdm \
   --setting cmdm \
@@ -17,7 +17,7 @@ mpiexec -n 4 --allow-run-as-root python -m train.train_mdm \
   --train_platform_type TensorboardPlatform \
   --vel_threshold 0.01 \
   --unconstrained \
-  --resume_checkpoint save/cmdm/chi3d_smplx_offline_exp1/model000100000.pt
+  --resume_checkpoint save/cmdm/chi3d_smplx_offline_exp1/model000230000.pt
 
 *. Visualization
 tensorboard --logdir save/cmdm/chi3d_smplx_offline_exp1
@@ -27,10 +27,28 @@ tensorboard --logdir save/cmdm/chi3d_smplx_offline_exp1
 
 
 ==================== Evaluation ====================
-export CUDA_VISIBLE_DEVICES=7
+export CUDA_VISIBLE_DEVICES=1
 python -m eval.eval_cmdm \
-  --model_path save/cmdm/chi3d_smplx_offline_exp1/model000110000.pt \
-  --rec_model_path recognition_training/chi3d_smplx_mytrain/checkpoint_0030.pth.tar \
+  --model_path save/cmdm/chi3d_smplx_offline_exp1/model000120000.pt \
+  --rec_model_path recognition_training/chi3d_smplx_exp1/checkpoint_0050.pth.tar \
+  --eval_mode full \
+  --use_ddim \
+  --device 0 --batch_size 64
+  --timestep_respacing ddim5
+
+export CUDA_VISIBLE_DEVICES=1
+python -m eval.eval_cmdm \
+  --model_path save/cmdm/chi3d_smplx_offline_exp1/model000200000.pt \
+  --rec_model_path recognition_training/chi3d_smplx_exp1/checkpoint_0100.pth.tar \
+  --eval_mode full \
+  --use_ddim \
+  --device 0 --batch_size 64
+  --timestep_respacing ddim5
+
+export CUDA_VISIBLE_DEVICES=1
+python -m eval.eval_cmdm \
+  --model_path save/cmdm/chi3d_smplx_offline_exp1/model000240000.pt \
+  --rec_model_path recognition_training/chi3d_smplx_exp1/checkpoint_0100.pth.tar \
   --eval_mode full \
   --use_ddim \
   --device 0 --batch_size 64
@@ -41,17 +59,5 @@ python -m eval.easy_table save/chi3d/evaluation_results_iter568404_samp1000_scal
 python -m eval.easy_table save/chi3d/evaluation_results_iter568404_samp1000_scale1_a2m_not_auto_ddim5_full.yaml
 
 python -m eval.easy_table save/cmdm/chi3d_smplx_offline_exp1/evaluation_results_iter120000_samp1000_scale1_a2m_not_auto__full.yaml
-
-
-
-
-
-==================== Check ====================
-1. Check chi3d_h5 files:
-python dataset/check/inspect_chi3d_h5.py
-
-2. Check data_loaders/tensors.py:
-python -m data_loaders.checks.check_tensors
-
-3. Check cmdm batch:
-python data_loaders/checks/check_cmdm_batch.py
+python -m eval.easy_table save/cmdm/chi3d_smplx_offline_exp1/evaluation_results_iter200000_samp1000_scale1_a2m_not_auto__full.yaml
+python -m eval.easy_table save/cmdm/chi3d_smplx_offline_exp1/evaluation_results_iter240000_samp1000_scale1_a2m_not_auto__full.yaml

@@ -1,5 +1,5 @@
 ==================== Train action recognition model ====================
-CUDA_VISIBLE_DEVICES=7 
+CUDA_VISIBLE_DEVICES=1
 python -m src.train.train_stgcn \
   --dataset chi3d \
   --pose_rep rot6d \
@@ -12,10 +12,10 @@ python -m src.train.train_stgcn \
   --sampling_step 1 \
   --glob \
   --translation \
-  --folder recognition_training/chi3d_smplx_mytrain \
+  --folder recognition_training/chi3d_smplx_exp1 \
   --datapath ../dataset/chi3d/smplx/conditioned/chi3d_smplx_train.h5 \
   --num_person 2 \
   --body_model smplx
 
 *. Visualization
-tensorboard --logdir actor-x/recognition_training/chi3d_smplx_mytrain
+tensorboard --logdir actor-x/recognition_training/chi3d_smplx_exp1

@@ -416,7 +416,3 @@ def _resolve_joint_splits(
     body = torch.tensor(list(range(0, 25)) + [55], dtype=torch.long)
     hand = torch.tensor(list(range(25, 55)), dtype=torch.long)
     return body, hand
-
-
-# Optional alias to match older naming patterns if needed.
-CNet = CNetV3
