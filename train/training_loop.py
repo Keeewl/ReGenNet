@@ -179,7 +179,12 @@ class TrainLoop:
                         if k in ['step', 'samples'] or '_q' in k:
                             continue
                         else:
-                            self.train_platform.report_scalar(name=k, value=v, iteration=self.step, group_name='Loss')
+                            self.train_platform.report_scalar(
+                                name=k,
+                                value=v,
+                                iteration=self.step + self.resume_step, # The training curve continues if resume checkpoint
+                                group_name='Loss',
+                            )
 
                 if self.step % self.save_interval == 0:
                     self.save()
