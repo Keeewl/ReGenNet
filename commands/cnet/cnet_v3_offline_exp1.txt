@@ -34,7 +34,7 @@ python -m eval.eval_cmdm \
   --rec_model_path recognition_training/chi3d_smplx_exp1/checkpoint_0100.pth.tar \
   --eval_mode full \
   --use_ddim \
-  --device 0 --batch_size 64
+  --device 0 --batch_size 64 \
   --timestep_respacing ddim5
 
 export CUDA_VISIBLE_DEVICES=0
