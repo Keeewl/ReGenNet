@@ -1,39 +1,38 @@
 #####################
 ## Online Setting ##
 #####################
+
 ==================== Train ====================
-cnet_v3_online:
-    - Times: 1.10it/s
-    - Durations: 30 hours
-    - Total params: 52.56M
-    - GPU Memory Usage: 31796MiB
-
 cmdm_online:
-    - Times: 1.02it/s
-    - Durations: 30 hours
+    - Times: 3.85it/s
+    - Durations: 8 hours
     - Total params: 26.80M
-    - GPU Memory Usage: 26084MiB
+    - GPU Memory Usage: 7880MiB
 
-==================== Evaluation ====================
-
-==================== Motion Synthesis and Visualize ====================
-
-
-
+cnetv3_online:
+    - Times: 3.26it/s
+    - Durations: 8 hours
+    - Total params: 52.56M
+    - GPU Memory Usage: 9534MiB
 
 
 #####################
 ## Offline Setting ##
 #####################
-==================== Train ====================
-cnet_v3_offline:
-    - Times: 1.04it/s
-    - Durations: 30 hours
-    - Total params: 52.56M
-    - GPU Memory Usage: 30070MiB
 
+==================== Train ====================
 cmdm_offline:
-    - Times: 1.02it/s
-    - Durations: 30 hours
-    - Total params: 18.39M
-    - GPU Memory Usage: 25126MiB
+    - Times: 4.25it/s
+    - Durations: 8 hours
+    - Total params: 26.80M
+    - GPU Memory Usage: 7426MiB
+
+cnetv3_offline:
+    - Times: 3.18it/s
+    - Durations: 8 hours
+    - Total params: 52.56M
+    - GPU Memory Usage: 9092MiB
+
+==================== Evaluation ====================
+cnetv3_offline:
+    - Durations: 4 minutes

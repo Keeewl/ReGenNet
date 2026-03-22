@@ -1,15 +1,17 @@
 ==================== Train ====================
-1. Train in 4 GPUs (online):
+1. Train in 4 GPUs:
 export CUDA_VISIBLE_DEVICES=4,5,6,7
 mpiexec -n 4 --allow-run-as-root python -m train.train_mdm \
+  --batch_size 16 \
   --setting cmdm \
-  --save_dir save/cmdm/chi3d_smplx_online_exp1 \
+  --save_dir save/cmdm/chi3d_smplx_online_exp2 \
   --dataset chi3d \
   --cond_mask_prob 0 \
   --num_person 2 \
   --layers 8 \
   --num_frames 150 \
   --arch online \
+  --cm_mode concat \
   --overwrite \
   --pose_rep rot6d \
   --body_model smplx \
@@ -17,19 +19,19 @@ mpiexec -n 4 --allow-run-as-root python -m train.train_mdm \
   --train_platform_type TensorboardPlatform \
   --vel_threshold 0.01 \
   --unconstrained \
-  --resume_checkpoint save/cmdm/chi3d_smplx_online_exp1/model000120000.pt
+  --resume_checkpoint xxx
 
 *. Visualization
-tensorboard --logdir save/cmdm/chi3d_smplx_online_exp1
+tensorboard --logdir save/cmdm/chi3d_smplx_online_exp2
 
 
 
 
 
 ==================== Evaluation ====================
-export CUDA_VISIBLE_DEVICES=0
+export CUDA_VISIBLE_DEVICES=3
 python -m eval.eval_cmdm \
-  --model_path save/cmdm/chi3d_smplx_online_exp1/model000120000.pt \
+  --model_path save/cmdm/chi3d_smplx_online_exp2/model000141176.pt \
   --rec_model_path recognition_training/chi3d_smplx_exp1/checkpoint_0100.pth.tar \
   --eval_mode full \
   --use_ddim \
@@ -37,122 +39,7 @@ python -m eval.eval_cmdm \
   --timestep_respacing ddim5
 
 *. Get a table:
-DDPM:
-python -m eval.easy_table save/cmdm/chi3d_smplx_online_exp1/evaluation_results_iter120000_samp1000_scale1_a2m_not_auto__full.yaml
-DDIM:
-python -m eval.easy_table save/cmdm/chi3d_smplx_online_exp1/evaluation_results_iter120000_samp1000_scale1_a2m_not_auto_ddim5_full.yaml
-
-
-
-
-
-
-
-
-
-
+python -m eval.easy_table save/cmdm/chi3d_smplx_online_exp2/evaluation_results_iter141176_samp1000_scale1_a2m_not_auto_ddim5_full.yaml
 
 
 ==================== Motion Synthesis and Visualize ====================
-1. Motion Synthesis
-1.1 Test conditioned (author):
-python -m sample.cgenerate \
-  --model_path save/chi3d/model000568404.pt \
-  --dataset chi3d \
-  --body_model smplx \
-  --pose_rep rot6d \
-  --num_person 2 \
-  --data_path dataset/chi3d/chi3d_smplx_test.h5 \
-  --action_file assets/action_names_chi3d.txt \
-  --num_repetitions 10 \
-  --motion_length 150 \
-  --output_dir outputs/chi3d_test_v1
-
-1.2 Train conditioned (author):
-python -m sample.cgenerate \
-  --model_path save/chi3d/model000568404.pt \
-  --dataset chi3d \
-  --body_model smplx \
-  --pose_rep rot6d \
-  --num_person 2 \
-  --data_path dataset/chi3d/chi3d_smplx_train.h5 \
-  --action_file assets/action_names_chi3d.txt \
-  --num_repetitions 10 \
-  --motion_length 150 \
-  --output_dir outputs/chi3d_train_v1
-
-1.3 Test conditioned:
-python -m sample.cgenerate \
-  --model_path save/cmdm/chi3d_smplx/model000120000.pt \
-  --dataset chi3d \
-  --body_model smplx \
-  --pose_rep rot6d \
-  --num_person 2 \
-  --data_path dataset/chi3d/chi3d_smplx_test.h5 \
-  --action_file assets/action_names_chi3d.txt \
-  --num_repetitions 10 \
-  --motion_length 150 \
-  --output_dir outputs/my_chi3d_test_v1
-
-1.4 Train conditioned:
-python -m sample.cgenerate \
-  --model_path save/cmdm/chi3d_smplx/model000120000.pt \
-  --dataset chi3d \
-  --body_model smplx \
-  --pose_rep rot6d \
-  --num_person 2 \
-  --data_path dataset/chi3d/chi3d_smplx_train.h5 \
-  --action_file assets/action_names_chi3d.txt \
-  --num_repetitions 10 \
-  --motion_length 150 \
-  --output_dir outputs/my_chi3d_train_v1
-
-2. Visualize:
-2.1 Test conditioned (author):
-python -m render.crendermotion \
-  --data_path outputs/chi3d_test_v1/results.npy \
-  --num_person 2 \
-  --setting cmdm \
-  --body_model smplx
-
-2.2 Train conditioned (author):
-python -m render.crendermotion \
-  --data_path outputs/chi3d_train_v1/results.npy \
-  --num_person 2 \
-  --setting cmdm \
-  --body_model smplx
-
-2.3 Test conditioned:
-python -m render.crendermotion \
-  --data_path outputs/my_chi3d_test_v1/results.npy \
-  --num_person 2 \
-  --setting cmdm \
-  --body_model smplx
-
-2.4 Train conditioned:
-python -m render.crendermotion \
-  --data_path outputs/my_chi3d_train_v1/results.npy \
-  --num_person 2 \
-  --setting cmdm \
-  --body_model smplx
-
-
-
-
-==================== Author ====================
-
-Eval:
-1. Eval author model:
-python -m eval.eval_cmdm \
---model_path save/chi3d/model000568404.pt \
---rec_model_path recognition_training/chi3d_smplx/checkpoint_0060.pth.tar \
---eval_mode full \
---device 0 --batch_size 64
-
-2. Eval author model (use ddim):
-python -m eval.eval_cmdm \
---model save/chi3d/model000568404.pt \
---rec_model_path recognition_training/chi3d_smplx/checkpoint_0060.pth.tar \
---eval_mode full \
---use_ddim \
---timestep_respacing ddim5

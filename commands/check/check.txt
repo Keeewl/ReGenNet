@@ -3,6 +3,11 @@
 python dataset/check/inspect_h5.py --dataset chi3d
 python dataset/check/inspect_h5.py --dataset interx
 
+python dataset/check/inspect_chi3d_h5.py \
+    --train dataset/interx/motions/train.h5 \
+    --test dataset/interx/motions/test.h5
+
+
 2. Check data_loaders/tensors.py:
 python -m data_loaders.checks.check_tensors
 

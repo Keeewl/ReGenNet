@@ -1,9 +1,10 @@
 ==================== Train ====================
-1. Train in 4 GPU:
+1. Train in 4 GPUs:
 export CUDA_VISIBLE_DEVICES=4,5,6,7
 mpiexec -n 4 --allow-run-as-root python -m train.train_mdm \
+  --batch_size 16 \
   --setting cnet_v3 \
-  --save_dir save/cnet_v3/chi3d_smplx_online_exp1 \
+  --save_dir save/cnet_v3/chi3d_smplx_online_exp2 \
   --dataset chi3d \
   --cond_mask_prob 0 \
   --num_person 2 \
@@ -18,29 +19,31 @@ mpiexec -n 4 --allow-run-as-root python -m train.train_mdm \
   --train_platform_type TensorboardPlatform \
   --vel_threshold 0.01 \
   --unconstrained \
-  --resume_checkpoint save/cnet_v3/chi3d_smplx_online_exp1/model000120000.pt
+  --resume_checkpoint xxx
  
 *. Visualization
-tensorboard --logdir save/cnet_v3/chi3d_smplx_online_exp1
+tensorboard --logdir save/cnet_v3/chi3d_smplx_online_exp2
 
 
 
 
 
 ==================== Evaluation ====================
-export CUDA_VISIBLE_DEVICES=7
+export CUDA_VISIBLE_DEVICES=3
 python -m eval.eval_cmdm \
-  --model_path save/cnet_v3/chi3d_smplx_online_exp1/model000120000.pt \
+  --model_path save/cnet_v3/chi3d_smplx_online_exp2/model000141176.pt \
   --rec_model_path recognition_training/chi3d_smplx_exp1/checkpoint_0100.pth.tar \
   --eval_mode full \
   --use_ddim \
   --device 0 --batch_size 64 \
   --timestep_respacing ddim5
 
-python -m eval.easy_table save/cnet_v3/chi3d_smplx_online_exp1/evaluation_results_iter120000_samp1000_scale1_a2m_not_auto_ddim5_full.yaml
+*. Get a table:
+python -m eval.easy_table save/cnet_v3/chi3d_smplx_online_exp2/evaluation_results_iter141176_samp1000_scale1_a2m_not_auto_ddim5_full.yaml
 
 
-DDPM:
-python -m eval.easy_table save/cnet_v3/chi3d_smplx_online_exp1/evaluation_results_iter120000_samp1000_scale1_a2m_not_auto__full.yaml
-DDIM:
-python -m eval.easy_table save/cnet_v3/chi3d_smplx_online_exp1/evaluation_results_iter120000_samp1000_scale1_a2m_not_auto_ddim5_full.yaml
+
+
+
+
+==================== Motion Synthesis and Visualize ====================

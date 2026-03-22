@@ -1,15 +1,17 @@
 ==================== Train ====================
-1. Train in 4 GPUs (offline):
+1. Train in 4 GPUs:
 export CUDA_VISIBLE_DEVICES=4,5,6,7
 mpiexec -n 4 --allow-run-as-root python -m train.train_mdm \
+  --batch_size 16 \
   --setting cmdm \
-  --save_dir save/cmdm/chi3d_smplx_offline_exp1 \
+  --save_dir save/cmdm/chi3d_smplx_offline_exp2 \
   --dataset chi3d \
   --cond_mask_prob 0 \
   --num_person 2 \
   --layers 8 \
   --num_frames 150 \
   --arch offline \
+  --cm_mode concat \
   --overwrite \
   --pose_rep rot6d \
   --body_model smplx \
@@ -17,50 +19,28 @@ mpiexec -n 4 --allow-run-as-root python -m train.train_mdm \
   --train_platform_type TensorboardPlatform \
   --vel_threshold 0.01 \
   --unconstrained \
-  --resume_checkpoint save/cmdm/chi3d_smplx_offline_exp1/model000230000.pt
+  --resume_checkpoint xxx
 
 *. Visualization
-tensorboard --logdir save/cmdm/chi3d_smplx_offline_exp1
+tensorboard --logdir save/cmdm/chi3d_smplx_offline_exp2
 
 
 
 
 
 ==================== Evaluation ====================
-export CUDA_VISIBLE_DEVICES=1
+export CUDA_VISIBLE_DEVICES=4
 python -m eval.eval_cmdm \
-  --model_path save/cmdm/chi3d_smplx_offline_exp1/model000120000.pt \
-  --rec_model_path recognition_training/chi3d_smplx_exp1/checkpoint_0050.pth.tar \
-  --eval_mode full \
-  --use_ddim \
-  --device 0 --batch_size 64
-  --timestep_respacing ddim5
-
-export CUDA_VISIBLE_DEVICES=1
-python -m eval.eval_cmdm \
-  --model_path save/cmdm/chi3d_smplx_offline_exp1/model000200000.pt \
+  --model_path save/cmdm/chi3d_smplx_offline_exp2/model000141176.pt \
   --rec_model_path recognition_training/chi3d_smplx_exp1/checkpoint_0100.pth.tar \
   --eval_mode full \
   --use_ddim \
-  --device 0 --batch_size 64
-  --timestep_respacing ddim5
-
-export CUDA_VISIBLE_DEVICES=1
-python -m eval.eval_cmdm \
-  --model_path save/cmdm/chi3d_smplx_offline_exp1/model000240000.pt \
-  --rec_model_path recognition_training/chi3d_smplx_exp1/checkpoint_0100.pth.tar \
-  --eval_mode full \
-  --use_ddim \
-  --device 0 --batch_size 64
+  --device 0 --batch_size 64 \
   --timestep_respacing ddim5
 
 *. Get a table:
-python -m eval.easy_table save/chi3d/evaluation_results_iter568404_samp1000_scale1_a2m_not_auto__full.yaml
-python -m eval.easy_table save/chi3d/evaluation_results_iter568404_samp1000_scale1_a2m_not_auto_ddim5_full.yaml
+python -m eval.easy_table save/cmdm/chi3d_smplx_offline_exp2/evaluation_results_iter141176_samp1000_scale1_a2m_not_auto_ddim5_full.yaml
 
-python -m eval.easy_table save/cmdm/chi3d_smplx_offline_exp1/evaluation_results_iter120000_samp1000_scale1_a2m_not_auto__full.yaml
-python -m eval.easy_table save/cmdm/chi3d_smplx_offline_exp1/evaluation_results_iter200000_samp1000_scale1_a2m_not_auto__full.yaml
-python -m eval.easy_table save/cmdm/chi3d_smplx_offline_exp1/evaluation_results_iter240000_samp1000_scale1_a2m_not_auto__full.yaml
 
 
 
@@ -69,9 +49,9 @@ python -m eval.easy_table save/cmdm/chi3d_smplx_offline_exp1/evaluation_results_
 ==================== Motion Synthesis and Visualize ====================
 1. Motion Synthesis
 1.1 Train conditioned:
-export CUDA_VISIBLE_DEVICES=1
+export CUDA_VISIBLE_DEVICES=4
 python -m sample.cgenerate \
-  --model_path save/cmdm/chi3d_smplx_offline_exp1/model000200000.pt \
+  --model_path save/cmdm/chi3d_smplx_offline_exp2/model000141176.pt \
   --dataset chi3d \
   --body_model smplx \
   --pose_rep rot6d \
@@ -80,6 +60,4 @@ python -m sample.cgenerate \
   --action_file assets/action_names_chi3d.txt \
   --num_repetitions 10 \
   --motion_length 150 \
-  --output_dir outputs/cmdm_chi3d_offline_200K
-
-1.2 Test conditioned:
+  --output_dir outputs/cmdm_chi3d_offline_exp2_140K
