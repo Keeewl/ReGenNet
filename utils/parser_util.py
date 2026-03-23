@@ -108,8 +108,8 @@ def add_diffusion_options(parser):
 
 def add_model_options(parser):
     group = parser.add_argument_group('model')
-    group.add_argument("--setting", default='mdm', choices=['mdm', 'cmdm', 'cnet', 'cnet_v2', 'cnet_v3'], type=str,
-                       help="Training MDM, CMDM, CNet, or CNetV2 or CNetV3 framework")
+    group.add_argument("--setting", default='mdm', choices=['mdm', 'cmdm', 'cnet', 'cnet_v2', 'cnet_v3', 'cnet_v4'], type=str,
+                       help="Training MDM, CMDM, CNet, or CNetV2/V3/V4 framework")
     group.add_argument("--arch", default='trans_enc',
                        choices=['trans_enc', 'trans_dec', 'gru', 'mlp', 'online', 'offline'], type=str,
                        help="Architecture types as reported in the paper.")

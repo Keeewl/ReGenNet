@@ -13,7 +13,7 @@ def get_dataset_class(name):
 def get_collate_fn(name, setting, hml_mode='train'):
     if setting == 'mdm':
         return all_collate
-    elif setting in ['cmdm', 'cnet', 'cnet_v2', 'cnet_v3']:
+    elif setting in ['cmdm', 'cnet', 'cnet_v2', 'cnet_v3', 'cnet_v4']:
         return all_ccollate
 
 
