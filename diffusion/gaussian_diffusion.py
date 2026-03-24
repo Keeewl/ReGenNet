@@ -1320,14 +1320,14 @@ class GaussianDiffusion:
                 terms["rcxyz_mse"] = self.masked_l2(target_xyz, model_output_xyz, mask)  # mean_flat((target_xyz - model_output_xyz) ** 2)
 
             if self.lambda_vel_rcxyz > 0.: # == 0
-                if self.data_rep == 'rot6d' and dataset.dataname == 'chi3d':
+                if self.data_rep == 'rot6d' and dataset.dataname in ['chi3d', 'interx']:
                     target_xyz_vel = (target_xyz[:, :, :, 1:] - target_xyz[:, :, :, :-1])
                     model_output_xyz_vel = (model_output_xyz[:, :, :, 1:] - model_output_xyz[:, :, :, :-1])
                     terms["vel_xyz_mse"] = self.masked_l2(target_xyz_vel, model_output_xyz_vel, mask[:, :, :, 1:])
 
             if self.lambda_fc > 0.:
                 with torch.autograd.set_detect_anomaly(True):
-                    if self.data_rep == 'rot6d' and dataset.dataname == 'chi3d':
+                    if self.data_rep == 'rot6d' and dataset.dataname in ['chi3d', 'interx']:
                         # 'L_Ankle',  # 7, 'R_Ankle',  # 8 , 'L_Foot',  # 10, 'R_Foot',  # 11
                         l_ankle_idx, r_ankle_idx, l_foot_idx, r_foot_idx = 7, 8, 10, 11
                         relevant_joints = [l_ankle_idx, l_foot_idx, r_ankle_idx, r_foot_idx]
@@ -1340,7 +1340,7 @@ class GaussianDiffusion:
                         terms["fc"] = self.masked_l2(pred_vel,
                                                     torch.zeros(pred_vel.shape, device=pred_vel.device),
                                                     mask[:, :, :, 1:])
-                    elif self.data_rep == 'xyz' and dataset.dataname == 'chi3d':
+                    elif self.data_rep == 'xyz' and dataset.dataname in ['chi3d', 'interx']:
                         l_ankle_idx, r_ankle_idx, l_foot_idx, r_foot_idx = 14, 18, 15, 19
                         relevant_joints = [l_ankle_idx, l_foot_idx, r_ankle_idx, r_foot_idx]
                         gt_joint_xyz = target[:, relevant_joints, :, :]  # [BatchSize, 4, 3, Frames]

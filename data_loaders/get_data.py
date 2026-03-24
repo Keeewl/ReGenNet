@@ -3,7 +3,7 @@ from data_loaders.tensors import collate as all_collate
 from data_loaders.tensors import ccollate as all_ccollate
 
 def get_dataset_class(name):
-    if name == "chi3d":
+    if name in ["chi3d", "interx"]:
         from .a2m.feeder import Feeder
         return Feeder
     else:

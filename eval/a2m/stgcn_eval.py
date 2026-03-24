@@ -14,6 +14,21 @@ from .tools import format_metrics
 import utils.rotation_conversions as geometry
 from utils import dist_util
 
+def _load_interx_action_names(data_path):
+    candidates = []
+    if data_path:
+        abs_path = os.path.abspath(data_path)
+        dataset_dir = os.path.dirname(os.path.dirname(abs_path))
+        candidates.append(os.path.join(dataset_dir, "annots", "action_setting.txt"))
+    repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
+    candidates.append(os.path.join(repo_root, "dataset", "interx", "annots", "action_setting.txt"))
+
+    for path in candidates:
+        if os.path.exists(path):
+            with open(path, "r", encoding="utf-8") as f:
+                return [line.strip() for line in f if line.strip()]
+    return []
+
 def convert_x_to_rot6d(x, pose_rep):
     # convert rotation to rot6d
     if pose_rep == "rotvec":
@@ -127,6 +142,12 @@ def evaluate(args, model, diffusion, data, rec_model_path, setting, acc_only, au
         # args.model_path = '/mnt/yardcephfs/mmyard/g_wxg_td_mmk/lxxu/projects/actor-x/recognition_training/ntu_smplx_cgen/checkpoint_0100.pth.tar'
     elif args.dataset == 'chi3d':
         args.num_classes = 8
+        args.nfeats = 6
+    elif args.dataset == 'interx':
+        action_names = _load_interx_action_names(args.data_path)
+        if not action_names:
+            raise ValueError("InterX action_setting.txt not found or empty.")
+        args.num_classes = len(action_names)
         args.nfeats = 6
     args.model_path = rec_model_path
     

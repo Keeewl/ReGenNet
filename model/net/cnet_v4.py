@@ -427,8 +427,8 @@ class CNetV4(nn.Module):
 
         if self.arch not in ["offline", "online"]:
             raise ValueError("CNet v4 only supports arch='offline' or 'online'.")
-        if self.dataset != "chi3d":
-            raise ValueError("CNet v4 only supports dataset='chi3d'.")
+        if self.dataset not in ["chi3d", "interx"]:
+            raise ValueError("CNet v4 only supports dataset in ['chi3d', 'interx'].")
 
         self.actor_global_input_process = InputProcess(
             self.data_rep, self.input_feats, self.latent_dim

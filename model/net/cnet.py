@@ -80,8 +80,8 @@ class CNet(nn.Module):
             raise ValueError("CNet v1 only supports offline mode.")
         if self.cm_mode != "concat":
             raise ValueError("CNet v1 only supports cm_mode='concat'.")
-        if self.dataset != "chi3d":
-            raise ValueError("CNet v1 only supports dataset='chi3d'.")
+        if self.dataset not in ["chi3d", "interx"]:
+            raise ValueError("CNet v1 only supports dataset in ['chi3d', 'interx'].")
 
         self.actor_input_process = InputProcess(
             self.data_rep, self.input_feats, self.latent_dim

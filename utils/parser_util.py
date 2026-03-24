@@ -142,7 +142,7 @@ def add_model_options(parser):
 
 def add_data_options(parser):
     group = parser.add_argument_group('dataset')
-    group.add_argument("--dataset", default='chi3d', choices=['chi3d'], type=str,
+    group.add_argument("--dataset", default='chi3d', choices=['chi3d', 'interx'], type=str,
                        help="Dataset name.")
     group.add_argument("--data_dir", default="", type=str,
                        help="If empty, will use defaults according to the specified dataset.")

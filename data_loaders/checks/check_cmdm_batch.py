@@ -18,7 +18,7 @@ def parse_args():
     parser = argparse.ArgumentParser(
         description="Load one CMDM/MDM batch and print tensor shapes/statistics."
     )
-    parser.add_argument("--dataset", default="chi3d", choices=["chi3d"], type=str)
+    parser.add_argument("--dataset", default="chi3d", choices=["chi3d", "interx"], type=str)
     parser.add_argument("--setting", default="cmdm", choices=["mdm", "cmdm"], type=str)
     parser.add_argument(
         "--body_model", default="smplx", choices=["smpl", "smplx"], type=str
@@ -32,11 +32,7 @@ def parse_args():
     parser.add_argument("--batch_size", default=4, type=int)
     parser.add_argument("--num_frames", default=150, type=int)
     parser.add_argument("--pose_rep", default="rot6d", type=str)
-    parser.add_argument(
-        "--data_path",
-        default="dataset/chi3d/smplx/conditioned/chi3d_smplx_train.h5",
-        type=str,
-    )
+    parser.add_argument("--data_path", default="", type=str)
     parser.add_argument("--num_person", default=None, type=int)
     parser.add_argument("--vel_threshold", default=0.01, type=float)
 
@@ -112,6 +108,12 @@ def main():
         num_person = 2 if args.setting == "cmdm" else 1
     else:
         num_person = args.num_person
+
+    if not args.data_path:
+        if args.dataset == "chi3d":
+            args.data_path = "dataset/chi3d/smplx/conditioned/chi3d_smplx_train.h5"
+        elif args.dataset == "interx":
+            args.data_path = "dataset/interx/regen/train.h5"
 
     if not os.path.exists(args.data_path):
         print(f"data_path not found: {args.data_path}")

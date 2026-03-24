@@ -26,7 +26,7 @@ def main():
     out_path = args.output_dir
     name = os.path.basename(os.path.dirname(args.model_path))
     niter = os.path.basename(args.model_path).replace('model', '').replace('.pt', '')
-    max_frames = 150 if args.dataset in ['chi3d'] else 60
+    max_frames = 150 if args.dataset in ['chi3d', 'interx'] else 60
     n_frames = min(max_frames, int(args.motion_length))
     is_using_data = not any([args.input_text, args.text_prompt, args.action_file, args.action_name])
     dist_util.setup_dist()

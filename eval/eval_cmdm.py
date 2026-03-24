@@ -25,7 +25,7 @@ def evaluate(args, model, diffusion, data, rec_model_path, setting, acc_only, au
     model.eval()  # disable random masking
 
     folder, ckpt_name = os.path.split(args.model_path)
-    if args.dataset == "ntu" or args.dataset == 'chi3d':
+    if args.dataset in ["ntu", "chi3d", "interx"]:
         from eval.a2m.stgcn_eval import evaluate
         eval_results = evaluate(args, model, diffusion, data, rec_model_path, setting, acc_only, auto_regressive=auto_regressive)
     else:
@@ -63,6 +63,8 @@ def main():
     if args.dataset == 'ntu':
         num_frames = 60
     elif args.dataset == 'chi3d':
+        num_frames = 150
+    elif args.dataset == 'interx':
         num_frames = 150
     data_path = args.data_path
     data_loader = get_dataset_loader(name=args.dataset, num_frames=num_frames, batch_size=args.batch_size, num_person=args.num_person, data_path=data_path, pose_rep=args.pose_rep,

@@ -1,9 +1,43 @@
 import os
+import re
 import h5py
 import numpy as np
 import random
 
 from .dataset import Dataset
+
+_INTERX_ACTION_RE = re.compile(r"A(\d+)")
+
+
+def _parse_chi3d_action(key):
+    try:
+        return int(key.split('_')[-1])
+    except (IndexError, ValueError):
+        return None
+
+
+def _parse_interx_action(key):
+    match = _INTERX_ACTION_RE.search(key)
+    if match:
+        return int(match.group(1))
+    return None
+
+
+def _load_interx_action_names(data_path):
+    candidates = []
+    if data_path:
+        abs_path = os.path.abspath(data_path)
+        dataset_dir = os.path.dirname(os.path.dirname(abs_path))
+        candidates.append(os.path.join(dataset_dir, "annots", "action_setting.txt"))
+    repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+    candidates.append(os.path.join(repo_root, "dataset", "interx", "annots", "action_setting.txt"))
+
+    for path in candidates:
+        if os.path.exists(path):
+            with open(path, "r", encoding="utf-8") as f:
+                return [line.strip() for line in f if line.strip()]
+    return []
+
 
 class Feeder(Dataset):
 
@@ -16,6 +50,9 @@ class Feeder(Dataset):
         self._num_frames_in_video = {}
         self._actions = {}
         self.val_file = self.data_path.replace('train', 'test')
+        self._action_names = []
+        if self.dataname == 'interx':
+            self._action_names = _load_interx_action_names(self.data_path)
 
         with h5py.File(self.data_path, 'r') as f:
             self.keys = list(f.keys())
@@ -28,14 +65,20 @@ class Feeder(Dataset):
 
                 # get label
                 if self.dataname == 'chi3d': # chi3d dataset
-                    self._actions[k] = int(k.split('_')[-1])
+                    action_id = _parse_chi3d_action(k)
+                    if action_id is None:
+                        raise ValueError(f"Chi3D key has no action id: {k}")
+                    self._actions[k] = action_id
+                elif self.dataname == 'interx':
+                    action_id = _parse_interx_action(k)
+                    if action_id is None:
+                        raise ValueError(f"InterX key has no action id: {k}")
+                    if self._action_names and action_id >= len(self._action_names):
+                        raise ValueError(f"InterX action id out of range: {k} -> {action_id}")
+                    self._actions[k] = action_id
                 else:
                     raise NotImplementedError
         f.close()
-        if self.dataname == 'chi3d': # chi3d dataset
-            self.num_actions = 8
-        else:
-            raise NotImplementedError
 
         N1 = len(self._poses)
         self._train = np.arange(N1)
@@ -53,7 +96,17 @@ class Feeder(Dataset):
 
                     # get label
                     if self.dataname == 'chi3d': # chi3d dataset
-                        self._actions[k] = int(k.split('_')[-1])
+                        action_id = _parse_chi3d_action(k)
+                        if action_id is None:
+                            raise ValueError(f"Chi3D key has no action id: {k}")
+                        self._actions[k] = action_id
+                    elif self.dataname == 'interx':
+                        action_id = _parse_interx_action(k)
+                        if action_id is None:
+                            raise ValueError(f"InterX key has no action id: {k}")
+                        if self._action_names and action_id >= len(self._action_names):
+                            raise ValueError(f"InterX action id out of range: {k} -> {action_id}")
+                        self._actions[k] = action_id
                     else:
                         raise NotImplementedError
             f.close()
@@ -61,14 +114,26 @@ class Feeder(Dataset):
             N2 = len(self._poses)
             self._test = np.arange(N1 ,N2)
 
-        keep_actions = list(range(0, self.num_actions))
-        self._action_to_label = {x: i for i, x in enumerate(keep_actions)}
-        self._label_to_action = {i: x for i, x in enumerate(keep_actions)}
-
         if self.dataname == 'chi3d':
+            self.num_actions = 8
+            keep_actions = list(range(0, self.num_actions))
             self._action_classes = chi3d_action_enumerator
+        elif self.dataname == 'interx':
+            if self._action_names:
+                self.num_actions = len(self._action_names)
+                keep_actions = list(range(0, self.num_actions))
+                self._action_classes = {i: name for i, name in enumerate(self._action_names)}
+            else:
+                keep_actions = sorted(set(self._actions.values()))
+                if not keep_actions:
+                    keep_actions = [0]
+                self.num_actions = len(keep_actions)
+                self._action_classes = {x: f"action_{x}" for x in keep_actions}
         else:
             raise NotImplementedError
+
+        self._action_to_label = {x: i for i, x in enumerate(keep_actions)}
+        self._label_to_action = {i: x for i, x in enumerate(keep_actions)}
 
         self._train = self._train[self.shard:][::self.num_shards]
 
