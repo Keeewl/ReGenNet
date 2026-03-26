@@ -8,7 +8,7 @@ def get_dataset(name="ntu13"):
     elif name == "humanact12":
         from .humanact12poses import HumanAct12Poses
         return HumanAct12Poses
-    elif name == 'ntu120_2p_smpl' or name == 'ntu120_1p_smpl' or name == 'chi3d' or name == 'ntu120_2p_smplx' or name == 'hhi':
+    elif name == 'ntu120_2p_smpl' or name == 'ntu120_1p_smpl' or name == 'chi3d' or name == 'ntu120_2p_smplx' or name == 'hhi' or name == 'interx':
         from .feeder_2p import Feeder_2P
         return Feeder_2P
 

@@ -1,9 +1,36 @@
 import os
+import re
 import h5py
 import numpy as np
 import random
 
 from .dataset import Dataset
+
+_INTERX_ACTION_RE = re.compile(r"A(\d+)")
+
+
+def _parse_interx_action(key):
+    match = _INTERX_ACTION_RE.search(key)
+    if match:
+        return int(match.group(1))
+    return None
+
+
+def _load_interx_action_names(data_path):
+    candidates = []
+    if data_path:
+        abs_path = os.path.abspath(data_path)
+        dataset_dir = os.path.dirname(os.path.dirname(abs_path))
+        candidates.append(os.path.join(dataset_dir, "annots", "action_setting.txt"))
+    repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
+    candidates.append(os.path.join(repo_root, "dataset", "interx", "annots", "action_setting.txt"))
+
+    for path in candidates:
+        if os.path.exists(path):
+            with open(path, "r", encoding="utf-8") as f:
+                return [line.strip() for line in f if line.strip()]
+    return []
+
 
 class Feeder_2P(Dataset):
 
@@ -16,6 +43,11 @@ class Feeder_2P(Dataset):
         self._num_frames_in_video = {}
         self._actions = {}
         self.val_file = self.data_path.replace('train', 'test')
+        self._interx_action_names = []
+        if self.dataname == 'interx':
+            self._interx_action_names = _load_interx_action_names(self.data_path)
+            if not self._interx_action_names:
+                raise ValueError("InterX action_setting.txt not found or empty.")
 
         with h5py.File(self.data_path, 'r') as f:
             self.keys = list(f.keys())
@@ -32,6 +64,13 @@ class Feeder_2P(Dataset):
                     self._actions[k] = int(k[i + 1:i + 4]) - 1
                 elif self.dataname == 'chi3d': # chi3d dataset
                     self._actions[k] = int(k.split('_')[-1])
+                elif self.dataname == 'interx':
+                    action_id = _parse_interx_action(k)
+                    if action_id is None:
+                        raise ValueError(f"InterX key has no action id: {k}")
+                    if action_id >= len(self._interx_action_names):
+                        raise ValueError(f"InterX action id out of range: {k} -> {action_id}")
+                    self._actions[k] = action_id
                 elif self.dataname == 'hhi':
                     i = k.rfind('A')
                     self._actions[k] = int(k[i + 1:i + 4])
@@ -42,6 +81,8 @@ class Feeder_2P(Dataset):
             self.num_classes = 26 # ntu 2p
         elif self.dataname == 'chi3d': # chi3d dataset
             self.num_classes = 8
+        elif self.dataname == 'interx':
+            self.num_classes = len(self._interx_action_names)
         elif self.dataname == 'ntu120_1p' or self.dataname == 'ntu120_1p_smpl':
             self.num_classes = 94
         elif self.dataname == 'gta':
@@ -71,6 +112,13 @@ class Feeder_2P(Dataset):
                         self._actions[k] = int(k[i + 1:i + 4]) - 1
                     elif self.dataname == 'chi3d': # chi3d dataset
                         self._actions[k] = int(k.split('_')[-1])
+                    elif self.dataname == 'interx':
+                        action_id = _parse_interx_action(k)
+                        if action_id is None:
+                            raise ValueError(f"InterX key has no action id: {k}")
+                        if action_id >= len(self._interx_action_names):
+                            raise ValueError(f"InterX action id out of range: {k} -> {action_id}")
+                        self._actions[k] = action_id
                     elif self.dataname == 'hhi':
                         i = k.rfind('A')
                         self._actions[k] = int(k[i + 1:i + 4])
@@ -88,6 +136,8 @@ class Feeder_2P(Dataset):
             self._action_classes = ntu_action_enumerator
         elif self.dataname == 'chi3d' or self.dataname == 'chi3d_smpl':
             self._action_classes = chi3d_action_enumerator
+        elif self.dataname == 'interx':
+            self._action_classes = {i: name for i, name in enumerate(self._interx_action_names)}
         elif self.dataname == 'ntu120_1p' or self.dataname == 'ntu120_1p_smpl':
             self._action_classes = ntu1p_action_enumerator
         elif self.dataname == 'gta':
