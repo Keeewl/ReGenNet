@@ -163,3 +163,6 @@ recognition_training/
 
 # outputs
 outputs/
+
+# commands
+commands/

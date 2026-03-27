@@ -26,6 +26,30 @@ tensorboard --logdir save/cmdm/chi3d_smplx_offline_exp2
 
 
 
+2. Train in interx:
+export CUDA_VISIBLE_DEVICES=3,5,6,7
+mpiexec -n 4 --allow-run-as-root python -m train.train_mdm \
+  --batch_size 32 \
+  --setting cmdm \
+  --save_dir save/cmdm/interx_smplx_offline_exp1 \
+  --dataset interx \
+  --cond_mask_prob 0 \
+  --num_person 2 \
+  --layers 8 \
+  --num_frames 150 \
+  --arch offline \
+  --cm_mode concat \
+  --overwrite \
+  --pose_rep rot6d \
+  --body_model smplx \
+  --data_path dataset/interx/regen/train.h5 \
+  --train_platform_type TensorboardPlatform \
+  --vel_threshold 0.01 \
+  --unconstrained \
+  --resume_checkpoint xxx
+
+
+
 
 
 ==================== Evaluation ====================
