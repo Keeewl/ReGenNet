@@ -182,7 +182,7 @@ class TrainLoop:
                             self.train_platform.report_scalar(
                                 name=k,
                                 value=v,
-                                iteration=self.step + self.resume_step, # The training curve continues if resume checkpoint
+                                iteration=self.step,
                                 group_name='Loss',
                             )
 
@@ -220,10 +220,10 @@ class TrainLoop:
                 if k.startswith('R_precision'):
                     for i in range(len(v)):
                         self.train_platform.report_scalar(name=f'top{i + 1}_' + k, value=v[i],
-                                                          iteration=self.step + self.resume_step,
+                                                          iteration=self.step,
                                                           group_name='Eval')
                 else:
-                    self.train_platform.report_scalar(name=k, value=v, iteration=self.step + self.resume_step,
+                    self.train_platform.report_scalar(name=k, value=v, iteration=self.step,
                                                       group_name='Eval')
 
         end_eval = time.time()

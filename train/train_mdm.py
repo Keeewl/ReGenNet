@@ -10,7 +10,7 @@ import torch as th
 from utils.fixseed import fixseed
 from utils.parser_util import train_args
 from utils import dist_util
-from train.training_loop import TrainLoop
+from train.training_loop import TrainLoop, parse_resume_step_from_filename
 from data_loaders.get_data import get_dataset_loader
 from utils.model_util import create_model_and_diffusion
 from train.train_platforms import ClearmlPlatform, TensorboardPlatform, NoPlatform  # required for the eval operation
@@ -21,7 +21,32 @@ def main():
     args = train_args()
     fixseed(args.seed)
     train_platform_type = eval(args.train_platform_type)
-    train_platform = train_platform_type(args.save_dir)
+    
+    # Separate TensorBoard runs per resume to avoid step stitching.
+    if train_platform_type is TensorboardPlatform:
+        tb_root = os.path.join(args.save_dir, "tb")
+        os.makedirs(tb_root, exist_ok=True)
+        existing = []
+        for name in os.listdir(tb_root):
+            if not name.startswith("run_"):
+                continue
+            parts = name.split("_", 2)
+            if len(parts) >= 2 and parts[1].isdigit():
+                existing.append(int(parts[1]))
+        next_idx = max(existing) + 1 if existing else 0
+        if args.resume_checkpoint:
+            resume_step = parse_resume_step_from_filename(args.resume_checkpoint)
+            run_name = f"run_{next_idx:03d}_resume_from_{resume_step}"
+        else:
+            run_name = (
+                "run_000_initial"
+                if next_idx == 0
+                else f"run_{next_idx:03d}_initial"
+            )
+        tb_dir = os.path.join(tb_root, run_name)
+        train_platform = train_platform_type(tb_dir)
+    else:
+        train_platform = train_platform_type(args.save_dir)
     train_platform.report_args(args, name='Args')
 
     if args.save_dir is None:
