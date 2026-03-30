@@ -14,7 +14,7 @@ POSE_REPS = ["xyz", "rotvec", "rotmat", "rotquat", "rot6d"]
 
 class Dataset(torch.utils.data.Dataset):
     def __init__(self, num_frames=1, sampling="conseq", sampling_step=1, split="train",
-                 pose_rep="rot6d", dataname='ntu', translation=True, glob=True, max_len=-1, min_len=-1, num_seq_max=-1, **kwargs):
+                 pose_rep="rot6d", dataname='chi3d', translation=True, glob=True, max_len=-1, min_len=-1, num_seq_max=-1, **kwargs):
         self.num_frames = num_frames
         self.sampling = sampling
         self.sampling_step = sampling_step

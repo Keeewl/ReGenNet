@@ -72,9 +72,6 @@ This repository contains the content of the following paper:
 
 ## Data Preparation
 
-### NTU RGB+D 120
-Since the license of NTU RGB+D 120 dataset does not allow us to distribute its data and annotations, we cannot release the processed NTU RGB+D 120 dataset publicly. If someone is interested at the processed data, please email me.
-
 ### Chi3D
 
 You can download the original dataset [here](https://ci3d.imar.ro/download) and the actor-reactor order annotations [here](https://drive.google.com/file/d/1OvdOGgH1JpVL7viTgPOKHzJSVRB3NczN/view?usp=sharing).
@@ -87,14 +84,9 @@ You can download the original dataset [here](https://tr3e.github.io/intergen-pag
 
 
 ## Training
-We provide the script to train the model of the `online` and `unconstrained` setting for human action-reaction synthesis on the `NTU120-AS` dataset. `--arch`, `--unconstrained` and `--dataset` can be customized for different settings.
+We provide the script to train the model of the `online` and `unconstrained` setting for human action-reaction synthesis. `--arch`, `--unconstrained` and `--dataset` can be customized for different settings.
 
 * Training with 1 GPU:
-
-  ```
-  # NTU RGB+D 120 Dataset
-  python -m train.train_mdm --setting cmdm --save_dir save/cmdm/ntu_smplx --dataset ntu --cond_mask_prob 0 --num_person 2 --layers 8 --num_frames 60 --arch online --overwrite --pose_rep rot6d --body_model smplx --data_path PATH/TO/xsub.train.h5 --train_platform_type TensorboardPlatform --vel_threshold 0.03 --unconstrained
-  ```
 
   ```
   # Chi3D dataset
@@ -104,7 +96,7 @@ We provide the script to train the model of the `online` and `unconstrained` set
 * Training with multiple GPUs (4 GPUs in the example):
 
   ```
-  mpiexec -n 4 --allow-run-as-root python -m train.train_mdm --setting cmdm --save_dir save/cmdm/ntu_smplx --dataset ntu --cond_mask_prob 0 --num_person 2 --layers 8 --num_frames 60 --arch online --overwrite --pose_rep rot6d --body_model smplx --data_path PATH/TO/xsub.train.h5 --train_platform_type TensorboardPlatform --vel_threshold 0.03 --unconstrained
+  mpiexec -n 4 --allow-run-as-root python -m train.train_mdm --setting cmdm --save_dir save/cmdm/chi3d_smplx --dataset chi3d --cond_mask_prob 0 --num_person 2 --layers 8 --num_frames 150 --arch online --overwrite --pose_rep rot6d --body_model smplx --data_path PATH/TO/chi3d_smplx_train.h5 --train_platform_type TensorboardPlatform --vel_threshold 0.01 --unconstrained
   ```
 
 
@@ -123,9 +115,6 @@ For the action recognition model, you can
       ```python
       cd actor-x;
       # Before training, you need to set up the `dataset` and folder of the `SMPL-X models`
-      ### NTU RGB+D 120 ###
-      python -m src.train.train_stgcn --dataset ntu120_2p_smplx --pose_rep rot6d --num_epochs 100 --snapshot 10 --batch_size 64 --lr 0.0001 --num_frames 60 --sampling conseq --sampling_step 1 --glob --translation --folder recognition_training/ntu_smplx --datapath dataset/ntu120/smplx/conditioned/xsub.train.h5 --num_person 2 --body_model smplx
-
       ### Chi3D ###
       python -m src.train.train_stgcn --dataset chi3d --pose_rep rot6d --num_epochs 100 --snapshot 10 --batch_size 64 --lr 0.0001 --num_frames 150 --sampling conseq --sampling_step 1 --glob --translation --folder recognition_training/chi3d_smplx --datapath dataset/chi3d/smplx/conditioned/chi3d_smplx_train.h5 --num_person 2 --body_model smplx
       ```
@@ -148,7 +137,7 @@ python -m eval.easy_table PATH/TO/evaluation_results_XXXX_full.yaml
 1. Generate the results, and the results will be saved to `results.npy`.
 
     ```
-    python -m sample.cgenerate --model_path PATH/TO/model_XXXX.pt --action_file assets/action_names_XXX.txt --num_repetitions 10 --dataset ntu --body_model smplx --num_person 2 --pose_rep rot6d --data_path PATH/TO/xsub.test.h5 --output_dir XXX
+    python -m sample.cgenerate --model_path PATH/TO/model_XXXX.pt --action_file assets/action_names_chi3d.txt --num_repetitions 10 --dataset chi3d --body_model smplx --num_person 2 --pose_rep rot6d --data_path PATH/TO/chi3d_smplx_test.h5 --output_dir XXX
     ```
 
 2. Render the results

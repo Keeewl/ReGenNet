@@ -75,7 +75,7 @@ class GAN(nn.Module):
         #                   "jointstype": 'vertices',
         #                   "translation": True,
         #                   "vertstrans": False}
-        # self.param2xyz = {"pose_rep": 'rot6d', # NTU_Mocap 1p & babel smpl
+        # self.param2xyz = {"pose_rep": 'rot6d', # Babel SMPL
         #                   "glob_rot": [3.141592653589793, 0, 0],
         #                   "glob": False,
         #                   "jointstype": 'vertices',
@@ -518,7 +518,7 @@ class GAN(nn.Module):
         parser.add_argument('--start_epoch', type=int, default=0, help='start training from which epoch')
         parser.add_argument('--num_epoch', type=int, default=80, help='stop training in which epoch')
         parser.add_argument('--device', type=int, default=0, nargs='+', help='the indexes of GPUs for training or testing')
-        parser.add_argument('--dataset', type=str, default='ntu13', help='dataset name')
+        parser.add_argument('--dataset', type=str, default='chi3d', help='dataset name')
 
         # Visualize and debug
         parser.add_argument('--log_interval', type=int, default=100, help='the interval for printing messages (#iteration)')

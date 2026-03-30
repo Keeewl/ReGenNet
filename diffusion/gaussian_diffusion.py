@@ -127,11 +127,7 @@ class GaussianDiffusion:
         rescale_timesteps=False,
         lambda_rcxyz=0.,
         lambda_vel=0.,
-        lambda_pose=1.,
-        lambda_loc=1.,
         data_rep='rot6d',
-        lambda_root_vel=0.,
-        lambda_vel_rcxyz=0.,
         lambda_fc=0.,
         lambda_orient=0.,
         lambda_body=0.,
@@ -146,16 +142,9 @@ class GaussianDiffusion:
         self.rescale_timesteps = rescale_timesteps
         self.data_rep = data_rep
 
-        if data_rep != 'rot_vel' and lambda_pose != 1.:
-            raise ValueError('lambda_pose is relevant only when training on velocities!')
-        self.lambda_pose = lambda_pose
         self.lambda_orient = lambda_orient
-        self.lambda_loc = lambda_loc
-
         self.lambda_rcxyz = lambda_rcxyz
         self.lambda_vel = lambda_vel
-        self.lambda_root_vel = lambda_root_vel
-        self.lambda_vel_rcxyz = lambda_vel_rcxyz
         self.lambda_fc = lambda_fc
         self.lambda_orient = lambda_orient
         self.lambda_body = lambda_body
@@ -164,8 +153,7 @@ class GaussianDiffusion:
         self.body_model = body_model
         self.vel_threshold = vel_threshold
 
-        if self.lambda_rcxyz > 0. or self.lambda_vel > 0. or self.lambda_root_vel > 0. or \
-                self.lambda_vel_rcxyz > 0. or self.lambda_fc > 0. or self.lambda_orient > 0. or self.lambda_body > 0. or self.lambda_transl > 0.:
+        if self.lambda_rcxyz > 0. or self.lambda_vel > 0. or self.lambda_fc > 0. or self.lambda_orient > 0. or self.lambda_body > 0. or self.lambda_transl > 0.:
             assert self.loss_type == LossType.MSE, 'Geometric losses are supported by MSE loss type only!'
 
         # Use float64 for accuracy.
@@ -1318,12 +1306,6 @@ class GaussianDiffusion:
 
             if self.lambda_rcxyz > 0.:
                 terms["rcxyz_mse"] = self.masked_l2(target_xyz, model_output_xyz, mask)  # mean_flat((target_xyz - model_output_xyz) ** 2)
-
-            if self.lambda_vel_rcxyz > 0.: # == 0
-                if self.data_rep == 'rot6d' and dataset.dataname in ['chi3d', 'interx']:
-                    target_xyz_vel = (target_xyz[:, :, :, 1:] - target_xyz[:, :, :, :-1])
-                    model_output_xyz_vel = (model_output_xyz[:, :, :, 1:] - model_output_xyz[:, :, :, :-1])
-                    terms["vel_xyz_mse"] = self.masked_l2(target_xyz_vel, model_output_xyz_vel, mask[:, :, :, 1:])
 
             if self.lambda_fc > 0.:
                 with torch.autograd.set_detect_anomaly(True):

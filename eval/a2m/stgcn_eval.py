@@ -136,11 +136,7 @@ def evaluate(args, model, diffusion, data, rec_model_path, setting, acc_only, au
     torch.multiprocessing.set_sharing_strategy('file_system')
 
     bs = args.batch_size
-    if args.dataset == 'ntu':
-        args.num_classes = 26
-        args.nfeats = 6
-        # args.model_path = '/mnt/yardcephfs/mmyard/g_wxg_td_mmk/lxxu/projects/actor-x/recognition_training/ntu_smplx_cgen/checkpoint_0100.pth.tar'
-    elif args.dataset == 'chi3d':
+    if args.dataset == 'chi3d':
         args.num_classes = 8
         args.nfeats = 6
     elif args.dataset == 'interx':
@@ -149,6 +145,8 @@ def evaluate(args, model, diffusion, data, rec_model_path, setting, acc_only, au
             raise ValueError("InterX action_setting.txt not found or empty.")
         args.num_classes = len(action_names)
         args.nfeats = 6
+    else:
+        raise NotImplementedError("This dataset is not supported.")
     args.model_path = rec_model_path
     
     device = dist_util.dev()

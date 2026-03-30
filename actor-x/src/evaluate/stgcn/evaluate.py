@@ -9,14 +9,10 @@ from src.recognition.models.stgcn import STGCN
 
 class Evaluation:
     def __init__(self, dataname, parameters, model_path, device, seed=None):
-        # layout = "smpl" if parameters["glob"] else "smpl_noglobal"
-        if parameters['pose_rep'] == 'xyz':
-            layout = "ntu-rgb+d" if parameters["glob"] else "ntu_edge"
+        if parameters["body_model"] == "smplx":
+            layout = "smplx"
         else:
-            if parameters["body_model"] == "smplx":
-                layout = "smplx"
-            else:
-                layout = "smpl" if parameters["glob"] else "smpl_noglobal"
+            layout = "smpl" if parameters["glob"] else "smpl_noglobal"
         model = STGCN(in_channels=parameters["nfeats"],
                       num_class=parameters["num_classes"],
                       num_person=parameters["num_person"],

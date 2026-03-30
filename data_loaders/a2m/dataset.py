@@ -10,7 +10,7 @@ import utils.rotation_conversions as geometry
 
 class Dataset(torch.utils.data.Dataset):
     def __init__(self, shard=0, num_shards=1, num_frames=1, num_person=1, sampling="conseq", sampling_step=1, split="train",
-                 pose_rep="rot6d", dataname='ntu', body_model='smpl', ar_shuffle=False, translation=True, glob=True, max_len=-1, min_len=-1, num_seq_max=-1, **kwargs):
+                 pose_rep="rot6d", dataname='chi3d', body_model='smpl', ar_shuffle=False, translation=True, glob=True, max_len=-1, min_len=-1, num_seq_max=-1, **kwargs):
         self.shard = shard
         self.num_shards = num_shards                
         self.num_frames = num_frames

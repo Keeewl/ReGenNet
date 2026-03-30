@@ -59,10 +59,7 @@ class Feeder_2P(Dataset):
                 self._num_frames_in_video[k] = tmp.shape[0]
 
                 # get label
-                if 'ntu' in self.dataname:
-                    i = k.rfind('A')
-                    self._actions[k] = int(k[i + 1:i + 4]) - 1
-                elif self.dataname == 'chi3d': # chi3d dataset
+                if self.dataname == 'chi3d': # chi3d dataset
                     self._actions[k] = int(k.split('_')[-1])
                 elif self.dataname == 'interx':
                     action_id = _parse_interx_action(k)
@@ -77,14 +74,10 @@ class Feeder_2P(Dataset):
                 else:
                     self._actions[k] = 0
         f.close()
-        if self.dataname == 'ntu120_2p' or self.dataname == 'ntu120_2p_smpl' or self.dataname == 'ntu120_2p_smplx':
-            self.num_classes = 26 # ntu 2p
-        elif self.dataname == 'chi3d': # chi3d dataset
+        if self.dataname == 'chi3d': # chi3d dataset
             self.num_classes = 8
         elif self.dataname == 'interx':
             self.num_classes = len(self._interx_action_names)
-        elif self.dataname == 'ntu120_1p' or self.dataname == 'ntu120_1p_smpl':
-            self.num_classes = 94
         elif self.dataname == 'gta':
             self.num_classes = 1
         elif self.dataname == 'hhi':
@@ -107,10 +100,7 @@ class Feeder_2P(Dataset):
                     self._num_frames_in_video[k] = tmp.shape[0]
 
                     # get label
-                    if 'ntu' in self.dataname:
-                        i = k.rfind('A')
-                        self._actions[k] = int(k[i + 1:i + 4]) - 1
-                    elif self.dataname == 'chi3d': # chi3d dataset
+                    if self.dataname == 'chi3d': # chi3d dataset
                         self._actions[k] = int(k.split('_')[-1])
                     elif self.dataname == 'interx':
                         action_id = _parse_interx_action(k)
@@ -132,14 +122,10 @@ class Feeder_2P(Dataset):
         self._action_to_label = {x: i for i, x in enumerate(keep_actions)}
         self._label_to_action = {i: x for i, x in enumerate(keep_actions)}
 
-        if self.dataname == 'ntu120_2p' or self.dataname == 'ntu120_2p_smpl' or self.dataname == 'ntu120_2p_smplx':
-            self._action_classes = ntu_action_enumerator
-        elif self.dataname == 'chi3d' or self.dataname == 'chi3d_smpl':
+        if self.dataname == 'chi3d' or self.dataname == 'chi3d_smpl':
             self._action_classes = chi3d_action_enumerator
         elif self.dataname == 'interx':
             self._action_classes = {i: name for i, name in enumerate(self._interx_action_names)}
-        elif self.dataname == 'ntu120_1p' or self.dataname == 'ntu120_1p_smpl':
-            self._action_classes = ntu1p_action_enumerator
         elif self.dataname == 'gta':
             self._action_classes = gta_action_enumerator
         elif self.dataname == 'hhi':
@@ -229,132 +215,6 @@ class Feeder_2P(Dataset):
     def get_action(self, ind):
         return self._actions[self.keys[ind]]
 
-
-ntu_action_enumerator = {
-    0: "punching or slapping other person",
-    1: "kicking other person",
-    2: "pushing other person",
-    3: "pat on back of other person",
-    4: "point finger at the other person",
-    5: "hugging other person",
-    6: "giving something to other person",
-    7: "touch other person's pocket",
-    8: "handshaking",
-    9: "walking towards each other",
-    10: "walking apart from each other",
-    11: "hit other person with something",
-    12: "wield knife towards other person",
-    13: "knock over other person (hit with body)",
-    14: "grab other person’s stuff",
-    15: "shoot at other person with a gun",
-    16: "step on foot",
-    17: "high-five",
-    18: "cheers and drink",
-    19: "carry something with other person",
-    20: "take a photo of other person",
-    21: "follow other person",
-    22: "whisper in other person’s ear",
-    23: "exchange things with other person",
-    24: "support somebody with hand",
-    25: "finger-guessing game (playing rock-paper-scissors)",
-}
-
-ntu1p_action_enumerator = {
-    0: "drink water",
-    1: "eat meal or snack",
-    2: "brushing teeth",
-    3: "brushing hair",
-    4: "drop",
-    5: "pickup",
-    6: "throw",
-    7: "sitting down",
-    8: "standing up (from sitting position)",
-    9: "clapping",
-    10: "reading",
-    11: "writing",
-    12: "tear up paper",
-    13: "wear jacket",
-    14: "take off jacket",
-    15: "wear a shoe",
-    16: "take off a shoe",
-    17: "wear on glasses",
-    18: "take off glasses",
-    19: "put on a hat or cap",
-    20: "take off a hat or cap",
-    21: "cheer up",
-    22: "hand waving",
-    23: "kicking something",
-    24: "reach into pocket",
-    25: "hopping (one foot jumping)", 
-    26: "jump up",
-    27: "make a phone call or answer phone",
-    28: "playing with phone or tablet",
-    29: "typing on a keyboard",
-    30: "pointing to something with finger",
-    31: "taking a selfie",
-    32: "check time (from watch)",
-    33: "rub two hands together",
-    34: "nod head or bow",
-    35: "shake head",
-    36: "wipe face",
-    37: "salute",
-    38: "put the palms together",
-    39: "cross hands in front (say stop)",
-    40: "sneeze or cough",
-    41: "staggering",
-    42: "falling",
-    43: "touch head (headache)",
-    44: "touch chest (stomachache or heart pain)",
-    45: "touch back (backache)",
-    46: "touch neck (neckache)",
-    47: "nausea or vomiting condition",
-    48: "use a fan (with hand or paper) or feeling warm",
-    49: "put on headphone",
-    50: "take off headphone",
-    51: "shoot at the basket",
-    52: "bounce ball",
-    53: "tennis bat swing",
-    54: "juggling table tennis balls",
-    55: "hush (quite)",
-    56: "flick hair",
-    57: "thumb up",
-    58: "thumb down",
-    59: "make ok sign",
-    60: "make victory sign",
-    61: "staple book",
-    62: "counting money",
-    63: "cutting nails",
-    64: "cutting paper (using scissors)",
-    65: "snapping fingers",
-    66: "open bottle",
-    67: "sniff (smell)",
-    68: "squat down",
-    69: "toss a coin",
-    70: "fold paper",
-    71: "ball up paper",
-    72: "play magic cube",
-    73: "apply cream on face",
-    74: "apply cream on hand back",
-    75: "put on bag",
-    76: "take off bag",
-    77: "put something into a bag",
-    78: "take something out of a bag",
-    79: "open a box",
-    80: "move heavy objects",
-    81: "shake fist",
-    82: "throw up cap or hat",
-    83: "hands up (both hands)",
-    84: "cross arms",
-    85: "arm circles",
-    86: "arm swings",
-    87: "running on the spot",
-    88: "butt kicks (kick backward)",
-    89: "cross toe touch",
-    90: "side kick",
-    91: "yawn", 
-    92: "stretch oneself",
-    93: "blow nose",
-}
 
 chi3d_action_enumerator = {
     0: "Grab",

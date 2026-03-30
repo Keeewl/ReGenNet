@@ -136,7 +136,7 @@ def add_model_options(parser):
     group.add_argument("--lambda_transl", default=1.0, type=float, help="Explicit root translation loss.")
     group.add_argument("--unconstrained", action='store_true',
                        help="Model is trained unconditionally. That is, it is constrained by neither text nor action. "
-                            "Currently tested on HumanAct12 only.")
+                            "Currently intended for unconditional training.")
 
 
 
@@ -183,7 +183,7 @@ def add_training_options(parser):
     group.add_argument("--num_steps", default=600_000, type=int,
                        help="Training will stop after the specified number of steps.")
     group.add_argument("--num_frames", default=60, type=int,
-                       help="Limit for the maximal number of frames. In HumanML3D and KIT this field is ignored.")
+                       help="Limit for the maximal number of frames.")
     group.add_argument("--resume_checkpoint", default="", type=str,
                        help="If not empty, will start from the specified checkpoint (path to model###.pt file).")
 

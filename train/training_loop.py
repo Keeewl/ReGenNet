@@ -1,7 +1,6 @@
 import copy
 import functools
 import os
-import time
 from types import SimpleNamespace
 import numpy as np
 
@@ -206,28 +205,7 @@ class TrainLoop:
     def evaluate(self):
         if not self.args.eval_during_training:
             return
-        start_eval = time.time()
-        if self.eval_wrapper is not None:
-            print('Running evaluation loop: [Should take about 90 min]')
-            log_file = os.path.join(self.save_dir, f'eval_humanml_{(self.step + self.resume_step):09d}.log')
-            diversity_times = 300
-            mm_num_times = 0  # mm is super slow hence we won't run it during training
-            eval_dict = eval_humanml.evaluation(
-                self.eval_wrapper, self.eval_gt_data, self.eval_data, log_file,
-                replication_times=self.args.eval_rep_times, diversity_times=diversity_times, mm_num_times=mm_num_times, run_mm=False)
-            print(eval_dict)
-            for k, v in eval_dict.items():
-                if k.startswith('R_precision'):
-                    for i in range(len(v)):
-                        self.train_platform.report_scalar(name=f'top{i + 1}_' + k, value=v[i],
-                                                          iteration=self.step,
-                                                          group_name='Eval')
-                else:
-                    self.train_platform.report_scalar(name=k, value=v, iteration=self.step,
-                                                      group_name='Eval')
-
-        end_eval = time.time()
-        print(f'Evaluation time: {round(end_eval-start_eval)/60}min')
+        print("Evaluation during training is not configured in this trimmed setup.")
 
 
     def run_step(self, batch, cond):

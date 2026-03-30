@@ -125,7 +125,7 @@ def main():
         model = get_model(parameters)
     else:
         model, datasets = get_model_and_data(parameters)
-        dataset = datasets["train"]  # same for ntu
+        dataset = datasets["train"]
 
     print("Restore weights..")
     checkpointpath = os.path.join(folder, checkpointname)

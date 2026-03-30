@@ -17,8 +17,6 @@ class Graph:
         layout (string): must be one of the follow candidates
         - openpose: Is consists of 18 joints. For more information, please
             refer to https://github.com/CMU-Perceptual-Computing-Lab/openpose#output
-        - ntu-rgb+d: Is consists of 25 joints. For more information, please
-            refer to https://github.com/shahroudy/NTURGB-D
         - smpl: Consists of 24/23 joints with without global rotation.
         max_hop (int): the maximal distance between two connected nodes
         dilation (int): controls the spacing between the kernel points
@@ -94,28 +92,6 @@ class Graph:
             #     (0, 55)] # link root rotational pose and root translation
             self.edge = self_link + neighbor_link
             self.center = 0
-        elif layout == 'ntu-rgb+d': # limb or without global rotation
-            self.num_node = 25
-            self_link = [(i, i) for i in range(self.num_node)]
-            neighbor_1base = [(1, 2), (2, 21), (3, 21), (4, 3), (5, 21),
-                              (6, 5), (7, 6), (8, 7), (9, 21), (10, 9),
-                              (11, 10), (12, 11), (13, 1), (14, 13), (15, 14),
-                              (16, 15), (17, 1), (18, 17), (19, 18), (20, 19),
-                              (22, 23), (23, 8), (24, 25), (25, 12)]
-            neighbor_link = [((i - 2)%self.num_node, (j - 2)%self.num_node) for (i, j) in neighbor_1base]
-            self.edge = self_link + neighbor_link # root translation in the last dim
-            self.center = 21 - 2
-        elif layout == 'ntu_edge':
-            self.num_node = 24
-            self_link = [(i, i) for i in range(self.num_node)]
-            neighbor_1base = [(1, 2), (3, 2), (4, 3), (5, 2), (6, 5), (7, 6),
-                              (8, 7), (9, 2), (10, 9), (11, 10), (12, 11),
-                              (13, 1), (14, 13), (15, 14), (16, 15), (17, 1),
-                              (18, 17), (19, 18), (20, 19), (21, 22), (22, 8),
-                              (23, 24), (24, 12)]
-            neighbor_link = [(i - 1, j - 1) for (i, j) in neighbor_1base]
-            self.edge = self_link + neighbor_link
-            self.center = 2
         # elif layout=='customer settings'
         #     pass
         else:

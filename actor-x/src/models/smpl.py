@@ -8,7 +8,7 @@ from smplx.lbs import vertices2joints
 
 from smplx import SMPLXLayer as _SMPLXLayer
 
-from src.datasets.ntu13 import action2motion_joints
+action2motion_joints = [8, 1, 2, 3, 4, 5, 6, 7, 0, 9, 10, 11, 12, 13, 14, 21, 24, 38]
 
 from src.config import SMPL_MODEL_PATH, JOINT_REGRESSOR_TRAIN_EXTRA
 from src.config import SMPLX_MODEL_PATH

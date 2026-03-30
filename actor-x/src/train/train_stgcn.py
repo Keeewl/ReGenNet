@@ -58,16 +58,6 @@ def main():
 
     datasets.pop("test")
 
-    if parameters["dataset"] == "uestcpartial":
-        dt = datasets["train"]
-        normal_length = dt._oldN
-        realratio = parameters["realratio"]
-        withgen = parameters["withgen"]
-        withreal = parameters["withreal"]
-        print(f"Real ratio: {realratio}, withgen: {withgen==1}, withreal: {withreal==1}")
-        expected = normal_length*realratio/100 * (2 if (withgen == 1) and (withreal == 1) else 1)
-        print(f"Normal len: {len(dt)}, expected: {expected}")
-
     # optimizer
     optimizer = torch.optim.AdamW(model.parameters(), lr=parameters["lr"])
 

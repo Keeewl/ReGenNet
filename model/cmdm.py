@@ -174,7 +174,7 @@ class CMDM(nn.Module):
     def encode_text(self, raw_text):
         # raw_text - list (batch_size length) of strings with input text prompts
         device = next(self.parameters()).device
-        max_text_len = 20 if self.dataset in ['humanml', 'kit'] else None  # Specific hardcoding for humanml dataset
+        max_text_len = None
         if max_text_len is not None:
             default_context_length = 77
             context_length = max_text_len + 2 # start_token + 20 + end_token
@@ -357,26 +357,15 @@ class InputProcess(nn.Module):
         self.input_feats = input_feats
         self.latent_dim = latent_dim
         self.poseEmbedding = nn.Linear(self.input_feats, self.latent_dim)
-        if self.data_rep == 'rot_vel':
-            self.velEmbedding = nn.Linear(self.input_feats, self.latent_dim)
 
     def forward(self, x):
         bs, njoints, nfeats, nframes = x.shape
         x = x.permute((3, 0, 1, 2)).reshape(nframes, bs, njoints*nfeats)
 
-        if self.data_rep in ['rot6d', 'xyz', 'hml_vec']:
+        if self.data_rep in ['rot6d', 'xyz']:
             x = self.poseEmbedding(x)  # [seqlen, bs, np, d]
             return x
-        elif self.data_rep == 'rot_vel':
-            #TODO not implemented
-            # first_pose is pose in first frame, the following frames is velocity token, need two embed
-            first_pose = x[[0]]  # [1, bs, 150]
-            first_pose = self.poseEmbedding(first_pose)  # [1, bs, d]
-            vel = x[1:]  # [seqlen-1, bs, 150]
-            vel = self.velEmbedding(vel)  # [seqlen-1, bs, d]
-            return torch.cat((first_pose, vel), axis=0)  # [seqlen, bs, d]
-        else:
-            raise ValueError
+        raise ValueError
 
 
 class OutputProcess(nn.Module):
@@ -392,20 +381,11 @@ class OutputProcess(nn.Module):
         self.njoints = njoints
         self.nfeats = nfeats
         self.poseFinal = nn.Linear(self.latent_dim, self.input_feats)
-        if self.data_rep == 'rot_vel':
-            self.velFinal = nn.Linear(self.latent_dim, self.input_feats)
 
     def forward(self, output):
         nframes, bs, d = output.shape
-        if self.data_rep in ['rot6d', 'xyz', 'hml_vec']:
+        if self.data_rep in ['rot6d', 'xyz']:
             output = self.poseFinal(output)  # [seqlen, bs, input_feats]
-        elif self.data_rep == 'rot_vel':
-            # not implement
-            first_pose = output[[0]]  # [1, bs, d]
-            first_pose = self.poseFinal(first_pose)  # [1, bs, 150]
-            vel = output[1:]  # [seqlen-1, bs, d]
-            vel = self.velFinal(vel)  # [seqlen-1, bs, 150]
-            output = torch.cat((first_pose, vel), axis=0)  # [seqlen, bs, 150]
         else:
             raise ValueError
         output = output.reshape(nframes, bs, self.njoints, self.nfeats)

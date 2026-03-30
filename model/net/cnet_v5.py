@@ -91,22 +91,14 @@ class InputProcess(nn.Module):
         self.input_feats = input_feats
         self.latent_dim = latent_dim
         self.poseEmbedding = nn.Linear(self.input_feats, self.latent_dim)
-        if self.data_rep == "rot_vel":
-            self.velEmbedding = nn.Linear(self.input_feats, self.latent_dim)
 
     def forward(self, x):
         bs, njoints, nfeats, nframes = x.shape
         x = x.permute((0, 3, 1, 2)).reshape(bs, nframes, njoints * nfeats)
 
-        if self.data_rep in ["rot6d", "xyz", "hml_vec"]:
+        if self.data_rep in ["rot6d", "xyz"]:
             x = self.poseEmbedding(x)
             return x
-        if self.data_rep == "rot_vel":
-            first_pose = x[:, [0]]
-            first_pose = self.poseEmbedding(first_pose)
-            vel = x[:, 1:]
-            vel = self.velEmbedding(vel)
-            return torch.cat((first_pose, vel), dim=1)
         raise ValueError
 
 
@@ -119,19 +111,11 @@ class OutputProcess(nn.Module):
         self.njoints = njoints
         self.nfeats = nfeats
         self.poseFinal = nn.Linear(self.latent_dim, self.input_feats)
-        if self.data_rep == "rot_vel":
-            self.velFinal = nn.Linear(self.latent_dim, self.input_feats)
 
     def forward(self, output):
         bs, nframes, d = output.shape
-        if self.data_rep in ["rot6d", "xyz", "hml_vec"]:
+        if self.data_rep in ["rot6d", "xyz"]:
             output = self.poseFinal(output)
-        elif self.data_rep == "rot_vel":
-            first_pose = output[:, [0]]
-            first_pose = self.poseFinal(first_pose)
-            vel = output[:, 1:]
-            vel = self.velFinal(vel)
-            output = torch.cat((first_pose, vel), dim=1)
         else:
             raise ValueError
         output = output.reshape(bs, nframes, self.njoints, self.nfeats)
@@ -543,7 +527,7 @@ class CNetV5(nn.Module):
 
     def encode_text(self, raw_text):
         device = next(self.parameters()).device
-        max_text_len = 20 if self.dataset in ["humanml", "kit"] else None
+        max_text_len = None
         if max_text_len is not None:
             default_context_length = 77
             context_length = max_text_len + 2
