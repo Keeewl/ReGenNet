@@ -18,9 +18,9 @@ def create_model_and_diffusion(args, data):
     if setting == 'cmdm':
         model = CMDM(**get_model_args(args, data))
         args.num_person = 1 # Attention here
-    elif setting == 'cnet':
+    elif setting == 'cnet_v1':
         if not args.unconstrained:
-            raise ValueError("CNet currently supports no_cond only; run with --unconstrained.")
+            raise ValueError("CNetV1 currently supports no_cond only; run with --unconstrained.")
         model = CNet(**get_model_args(args, data))
         args.num_person = 1 # Attention here
     elif setting == 'cnet_v2':
