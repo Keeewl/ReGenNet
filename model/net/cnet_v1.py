@@ -7,7 +7,7 @@ import clip
 from model.rotation2xyz import Rotation2xyz, Rotation2xyz_x
 
 
-class CNet(nn.Module):
+class CNetV1(nn.Module):
     def __init__(
         self,
         modeltype,

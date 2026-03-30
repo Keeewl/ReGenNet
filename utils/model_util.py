@@ -1,5 +1,5 @@
 from model.cmdm import CMDM
-from model.net.cnet import CNet
+from model.net.cnet_v1 import CNetV1
 from model.net.cnet_v2 import CNetV2
 from model.net.cnet_v3 import CNetV3
 from model.net.cnet_v4 import CNetV4
