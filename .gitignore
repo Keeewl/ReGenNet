@@ -155,14 +155,20 @@ dmypy.json
 
 
 
-# my added files
+# SMPLX and SMPL model
 body_models/
 
-# 存放训练好的动作识别模型
-recognition_training/ 
+# Server commands
+commands/
 
-# outputs
+# Dataset
+dataset/
+
+# Outputs from Motion Synthesis
 outputs/
 
-# commands
-commands/
+# Trained action recognition model
+recognition_training/ 
+
+# Save model
+save/
