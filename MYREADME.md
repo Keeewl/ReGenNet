@@ -24,7 +24,7 @@ Done:
 Todo:
 - [] 用 chi3d 原始数据集跑实验
 
-
+s
 ## Train
 完全没跑过 ⌛️
 
