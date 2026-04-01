@@ -188,6 +188,67 @@ def add_training_options(parser):
                        help="If not empty, will start from the specified checkpoint (path to model###.pt file).")
 
 
+def add_refine_training_options(parser):
+    group = parser.add_argument_group('refine_training')
+    group.add_argument("--cache_path", required=True, type=str,
+                       help="Path to coarse cache (.npz or .h5).")
+    group.add_argument("--save_dir", required=True, type=str,
+                       help="Path to save checkpoints and logs.")
+    group.add_argument("--overwrite", action='store_true',
+                       help="If True, will enable to use an already existing save_dir.")
+    group.add_argument("--num_steps", default=100_000, type=int,
+                       help="Training will stop after the specified number of steps.")
+    group.add_argument("--log_interval", default=100, type=int,
+                       help="Log losses each N steps.")
+    group.add_argument("--save_interval", default=2_000, type=int,
+                       help="Save checkpoints each N steps.")
+    group.add_argument("--lr", default=1e-4, type=float, help="Learning rate.")
+    group.add_argument("--weight_decay", default=0.0, type=float, help="Optimizer weight decay.")
+    group.add_argument("--resume_checkpoint", default="", type=str,
+                       help="If not empty, will start from the specified checkpoint.")
+    group.add_argument("--num_workers", default=4, type=int, help="DataLoader workers.")
+    group.add_argument("--max_batches", default=-1, type=int,
+                       help="Limit the number of batches per epoch (debug).")
+    group.add_argument("--top_k", default=5, type=int, help="Active window top-k.")
+    group.add_argument("--window_size", default=5, type=int, help="Active window size.")
+    group.add_argument("--vel_threshold", default=None, type=float,
+                       help="Velocity threshold for active selection.")
+    group.add_argument("--geom_sigma", default=0.1, type=float,
+                       help="Sigma for contact score.")
+    group.add_argument("--hidden_dim", default=256, type=int, help="Refine head hidden dim.")
+    group.add_argument("--dropout", default=0.1, type=float, help="Refine head dropout.")
+    group.add_argument("--lambda_residual", default=1.0, type=float,
+                       help="Residual supervision weight.")
+    group.add_argument("--lambda_reg", default=0.01, type=float,
+                       help="Residual regularization weight.")
+    group.add_argument("--lambda_coord", default=0.05, type=float,
+                       help="Coordination regularization weight.")
+    group.add_argument("--lambda_contact", default=0.0, type=float,
+                       help="Local distance/contact loss weight.")
+
+
+def add_refine_sampling_options(parser):
+    group = parser.add_argument_group('refine_sampling')
+    group.add_argument("--stage1_model_path", required=False, type=str,
+                       help="Path to Stage1 checkpoint (cnet_v5).")
+    group.add_argument("--stage2_model_path", required=True, type=str,
+                       help="Path to Stage2 checkpoint (rnet_v1).")
+    group.add_argument("--output_path", required=True, type=str,
+                       help="Path to save refined results (.npz or .h5).")
+    group.add_argument("--data_path", default="", type=str,
+                       help="Path to dataset h5 (optional override).")
+    group.add_argument("--dataset", default="", type=str,
+                       help="Dataset name (optional override).")
+    group.add_argument("--split", default="test", type=str,
+                       help="Dataset split.")
+    group.add_argument("--max_batches", default=-1, type=int,
+                       help="Limit the number of batches (debug).")
+    group.add_argument("--num_samples", default=-1, type=int,
+                       help="Limit the number of samples (debug).")
+    group.add_argument("--coarse_cache", default="", type=str,
+                       help="Optional coarse cache to skip Stage1 sampling.")
+
+
 def add_sampling_options(parser):
     group = parser.add_argument_group('sampling')
     group.add_argument("--model_path", required=True, type=str,
@@ -238,6 +299,20 @@ def train_args():
     add_model_options(parser)
     add_diffusion_options(parser)
     add_training_options(parser)
+    return parser.parse_args()
+
+
+def refine_train_args():
+    parser = ArgumentParser()
+    add_base_options(parser)
+    add_refine_training_options(parser)
+    return parser.parse_args()
+
+
+def refine_sample_args():
+    parser = ArgumentParser()
+    add_base_options(parser)
+    add_refine_sampling_options(parser)
     return parser.parse_args()
 
 
