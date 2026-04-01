@@ -5,6 +5,7 @@ import os
 import h5py
 import numpy as np
 import torch
+from tqdm import tqdm
 
 from data_loaders.get_data import get_dataset_loader
 from diffusion import gaussian_diffusion as gd
@@ -220,8 +221,16 @@ def main():
     indices_list = []
 
     total = 0
+    total_batches = len(data)
+    if args.max_batches > 0:
+        total_batches = min(total_batches, args.max_batches)
     with torch.no_grad():
-        for batch_idx, (motion, cond) in enumerate(data):
+        pbar = tqdm(
+            enumerate(data),
+            total=total_batches,
+            desc="Generate coarse cache",
+        )
+        for batch_idx, (motion, cond) in pbar:
             if args.max_batches > 0 and batch_idx >= args.max_batches:
                 break
             if args.num_samples > 0 and total >= args.num_samples:
@@ -252,6 +261,7 @@ def main():
             lengths_list.append(lengths[:keep].cpu().numpy())
             indices_list.append(np.arange(total, total + keep, dtype=np.int64))
             total += keep
+            pbar.set_postfix(samples=total)
 
     actor_motion = np.concatenate(actor_list, axis=0).astype(np.float32)
     reactor_gt = np.concatenate(gt_list, axis=0).astype(np.float32)
