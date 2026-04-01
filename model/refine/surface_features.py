@@ -29,7 +29,8 @@ class SurfaceFeatureBuilder:
         return 9
 
     def _ensure_device(self, device):
-        model_device = next(self.rot2xyz.smpl_model.parameters()).device
+        param = next(self.rot2xyz.smpl_model.parameters(), None)
+        model_device = param.device if param is not None else torch.device("cpu")
         if model_device != device:
             self.rot2xyz.smpl_model.to(device)
 
