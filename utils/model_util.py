@@ -1,9 +1,9 @@
 from model.cmdm import CMDM
-from model.net.cnet_v1 import CNetV1
-from model.net.cnet_v2 import CNetV2
-from model.net.cnet_v3 import CNetV3
-from model.net.cnet_v4 import CNetV4
-from model.net.cnet_v5 import CNetV5
+from model.cnet.cnet_v1 import CNetV1
+from model.cnet.cnet_v2 import CNetV2
+from model.cnet.cnet_v3 import CNetV3
+from model.cnet.cnet_v4 import CNetV4
+from model.cnet.cnet_v5 import CNetV5
 from diffusion import gaussian_diffusion as gd
 from diffusion.respace import SpacedDiffusion, space_timesteps
 
