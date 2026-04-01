@@ -19,6 +19,8 @@ def create_gaussian_diffusion(args):
     steps = args.diffusion_steps
     scale_beta = 1.0
     timestep_respacing = args.timestep_respacing
+    if getattr(args, "use_ddim", False) and not timestep_respacing:
+        timestep_respacing = "ddim5"
     learn_sigma = False
     rescale_timesteps = False
 
