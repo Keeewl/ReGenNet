@@ -340,3 +340,12 @@ def evaluation_parser():
     add_base_options(parser)
     add_evaluation_options(parser)
     return parse_and_load_from_model(parser)
+
+
+def refine_evaluation_parser():
+    parser = ArgumentParser()
+    add_base_options(parser)
+    add_evaluation_options(parser)
+    parser.add_argument("--stage2_model_path", required=True, type=str,
+                       help="Path to Stage2 checkpoint (rnet_v1).")
+    return parse_and_load_from_model(parser)
