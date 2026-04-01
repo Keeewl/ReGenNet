@@ -64,22 +64,35 @@ def print_results(folder, evaluation):
 
     a2m = metrics["feats"]
 
-    if "fid_gen_test" in a2m:
+    has_split_keys = any(k.endswith("_train") or k.endswith("_test") for k in a2m)
+    if "fid_gen_test" in a2m or has_split_keys:
         # keys = ["fid_{}_train", "fid_{}_test", "accuracy_{}_train", "accuracy_{}_test", "diversity_{}_train", "multimodality_{}_train", "diversity_{}_test", "multimodality_{}_test"]
         keys = ["fid_{}_train", "accuracy_{}_train", "multimodality_{}_train",  "diversity_{}_train", "fid_{}_test",  "accuracy_{}_test", "multimodality_{}_test", "diversity_{}_test"]
     else:
         keys = ["fid_{}", "accuracy_{}", "diversity_{}", "multimodality_{}"]
 
-    lines = ["gen", "recons"]
-    # print the GT, only if it is computed with respect to "another" GT
-    if "fid_gt2" in a2m:
+    model_names = set()
+    for key in a2m:
+        if key.startswith("fid_"):
+            tail = key[len("fid_") :]
+            if tail.endswith("_train"):
+                model_names.add(tail[: -len("_train")])
+            elif tail.endswith("_test"):
+                model_names.add(tail[: -len("_test")])
+            else:
+                model_names.add(tail)
+
+    if "fid_gt2" in a2m and "fid_gt" not in a2m:
         a2m["fid_gt"] = a2m["fid_gt2"]
-    has_gt = any(key.format("gt") in a2m for key in keys)
-    if has_gt:
-        lines = ["gt"] + lines
+        model_names.add("gt")
+
+    order_priority = ["gt", "coarse", "refined", "gen", "recons"]
+    lines = [name for name in order_priority if name in model_names]
+    lines += sorted([name for name in model_names if name not in order_priority])
 
     rows = []
     rows_latex = []
+    line_to_row_idx = {}
 
     for model in lines:
         row = ["{:6}".format(model)]
@@ -94,8 +107,29 @@ def print_results(folder, evaluation):
                 row_latex.append(string_latex)
             rows.append(" | ".join(row))
             rows_latex.append(" & ".join(row_latex) + r"\\")
+            line_to_row_idx[model] = len(rows) - 1
         except KeyError:
             continue
+
+    if "refined" in model_names and "coarse" in model_names:
+        diff_row = ["{:6}".format("ref-c")]
+        diff_row_latex = ["{:6}".format("ref-c")]
+        has_all = True
+        for key in keys:
+            ckey_ref = key.format("refined")
+            ckey_coarse = key.format("coarse")
+            if ckey_ref not in a2m or ckey_coarse not in a2m:
+                has_all = False
+                break
+            values_ref = np.array([float(x) for x in a2m[ckey_ref]])
+            values_coarse = np.array([float(x) for x in a2m[ckey_coarse]])
+            diff_values = values_ref - values_coarse
+            diff_row.append(format_values(diff_values, key, latex=False))
+            diff_row_latex.append(format_values(diff_values, key, latex=True))
+        if has_all:
+            insert_at = line_to_row_idx.get("refined", len(rows) - 1) + 1
+            rows.insert(insert_at, " | ".join(diff_row))
+            rows_latex.insert(insert_at, " & ".join(diff_row_latex) + r"\\")
 
     table = "\n".join(rows)
     table_latex = "\n".join(rows_latex)
