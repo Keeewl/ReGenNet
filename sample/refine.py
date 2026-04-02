@@ -10,6 +10,7 @@ from diffusion import gaussian_diffusion as gd
 from diffusion.respace import SpacedDiffusion, space_timesteps
 from model.cnet.cnet_v5 import CNetV5
 from model.refine.refine_model import RNetV1
+from model.rotation2xyz import Rotation2xyz_x
 from utils.fixseed import fixseed
 from utils.parser_util import refine_sample_args
 
@@ -159,27 +160,51 @@ def local_pose_error(pred, gt, joint_ids, mask):
     return (diff * diff * mask).sum() / denom
 
 
-def save_results(path, actor, coarse, refined, gt, lengths, sample_indices):
+def save_results(
+    path,
+    motion_xyz,
+    output_rot6d,
+    cmotion_rot6d,
+    text,
+    lengths,
+    num_samples,
+    num_repetitions,
+    extra=None,
+):
     os.makedirs(os.path.dirname(path), exist_ok=True)
-    if path.endswith(".h5"):
-        import h5py
-        with h5py.File(path, "w") as f:
-            f.create_dataset("actor_motion", data=actor)
-            f.create_dataset("coarse_motion", data=coarse)
-            f.create_dataset("refined_motion", data=refined)
-            if gt is not None:
-                f.create_dataset("gt_motion", data=gt)
-            f.create_dataset("lengths", data=lengths)
-            f.create_dataset("sample_indices", data=sample_indices)
-        return
-    np.savez_compressed(
-        path,
-        actor_motion=actor,
-        coarse_motion=coarse,
-        refined_motion=refined,
-        gt_motion=gt,
-        lengths=lengths,
-        sample_indices=sample_indices,
+    root, ext = os.path.splitext(path)
+    if ext != ".npy":
+        path = root + ".npy"
+    payload = {
+        "motion": motion_xyz,
+        "output": output_rot6d,
+        "cmotion": cmotion_rot6d,
+        "text": text,
+        "lengths": lengths,
+        "num_samples": num_samples,
+        "num_repetitions": num_repetitions,
+    }
+    if extra:
+        payload.update(extra)
+    np.save(path, payload)
+    return path
+
+
+def to_xyz(rot2xyz, motion, lengths):
+    batch_size, _, _, num_frames = motion.shape
+    mask = torch.arange(num_frames, device=motion.device).view(1, -1) < lengths.view(-1, 1)
+    return rot2xyz(
+        x=motion,
+        mask=mask,
+        pose_rep="rot6d",
+        glob=True,
+        translation=True,
+        jointstype="smplx",
+        vertstrans=True,
+        betas=None,
+        beta=0,
+        glob_rot=None,
+        num_person=1,
     )
 
 
@@ -203,24 +228,32 @@ def main():
         rnet = load_rnet_checkpoint(args_cli.stage2_model_path, device)
 
         refined_list = []
+        motion_xyz_list = []
+        rot2xyz = Rotation2xyz_x(device=device)
         for i in range(len(lengths_all)):
             actor = torch.from_numpy(actor_all[i:i+1]).to(device)
             coarse = torch.from_numpy(coarse_all[i:i+1]).to(device)
             lengths = torch.as_tensor([lengths_all[i]], device=device)
             refined, _ = rnet(actor, coarse, lengths=lengths)
             refined_list.append(refined.cpu().numpy())
+            motion_xyz = to_xyz(rot2xyz, refined, lengths)
+            motion_xyz_list.append(motion_xyz.cpu().numpy())
 
         refined_all = np.concatenate(refined_list, axis=0)
-        save_results(
+        motion_xyz_all = np.concatenate(motion_xyz_list, axis=0)
+        text_all = [""] * len(lengths_all)
+        saved_path = save_results(
             args_cli.output_path,
-            actor_all,
-            coarse_all,
+            motion_xyz_all,
             refined_all,
-            gt_all,
+            actor_all,
+            text_all,
             lengths_all,
-            sample_indices_all,
+            num_samples=len(lengths_all),
+            num_repetitions=1,
+            extra={"coarse_output": coarse_all, "gt_motion": gt_all},
         )
-        print(f"Saved refined results to {args_cli.output_path}")
+        print(f"Saved refined results to {saved_path}")
         return
 
     if not args_cli.stage1_model_path:
@@ -272,6 +305,8 @@ def main():
     gt_list = []
     lengths_list = []
     indices_list = []
+    text_list = []
+    motion_xyz_list = []
 
     total = 0
     total_coarse_err = 0.0
@@ -300,6 +335,8 @@ def main():
             actor = cond["y"]["cmotion"]
             lengths = cond["y"]["lengths"]
             refined, aux = rnet(actor, coarse, lengths=lengths)
+            rot2xyz = stage1.rot2xyz
+            motion_xyz = to_xyz(rot2xyz, refined, lengths)
 
             bs = motion.shape[0]
             keep = bs
@@ -312,6 +349,11 @@ def main():
             gt_list.append(motion[:keep].cpu().numpy())
             lengths_list.append(lengths[:keep].cpu().numpy())
             indices_list.append(np.arange(total, total + keep, dtype=np.int64))
+            if "action_text" in cond["y"]:
+                text_list += cond["y"]["action_text"][:keep]
+            else:
+                text_list += [""] * keep
+            motion_xyz_list.append(motion_xyz[:keep].cpu().numpy())
 
             num_frames = motion.shape[-1]
             mask = torch.arange(num_frames, device=device).view(1, -1) < lengths.view(-1, 1)
@@ -330,15 +372,18 @@ def main():
     gt_all = np.concatenate(gt_list, axis=0)
     lengths_all = np.concatenate(lengths_list, axis=0)
     sample_indices_all = np.concatenate(indices_list, axis=0)
+    motion_xyz_all = np.concatenate(motion_xyz_list, axis=0)
 
-    save_results(
+    saved_path = save_results(
         args.output_path,
-        actor_all,
-        coarse_all,
+        motion_xyz_all,
         refined_all,
-        gt_all,
+        actor_all,
+        text_list,
         lengths_all,
-        sample_indices_all,
+        num_samples=len(lengths_all),
+        num_repetitions=1,
+        extra={"coarse_output": coarse_all, "gt_motion": gt_all, "sample_indices": sample_indices_all},
     )
 
     if total_frames > 0:
@@ -346,7 +391,7 @@ def main():
             f"local_pose_err coarse={total_coarse_err/total_frames:.6f} "
             f"refined={total_refined_err/total_frames:.6f}"
         )
-    print(f"Saved refined results to {args.output_path}")
+    print(f"Saved refined results to {saved_path}")
 
 
 if __name__ == "__main__":
