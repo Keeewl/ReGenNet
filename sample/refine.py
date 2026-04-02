@@ -217,6 +217,46 @@ def main():
     else:
         device = torch.device("cpu")
 
+    if args_cli.cgenerate_results:
+        data = np.load(args_cli.cgenerate_results, allow_pickle=True).item()
+        actor_all = data["cmotion"]
+        coarse_all = data["output"]
+        lengths_all = data["lengths"]
+        text_all = list(data.get("text", [""] * len(lengths_all)))
+        num_samples = data.get("num_samples", len(lengths_all))
+        num_repetitions = data.get("num_repetitions", 1)
+
+        rnet = load_rnet_checkpoint(args_cli.stage2_model_path, device)
+        rot2xyz = Rotation2xyz_x(device=device)
+
+        refined_list = []
+        motion_xyz_list = []
+        batch_size = args_cli.batch_size
+        for start in range(0, len(lengths_all), batch_size):
+            end = min(len(lengths_all), start + batch_size)
+            actor = torch.from_numpy(actor_all[start:end]).to(device)
+            coarse = torch.from_numpy(coarse_all[start:end]).to(device)
+            lengths = torch.as_tensor(lengths_all[start:end], device=device)
+            refined, _ = rnet(actor, coarse, lengths=lengths)
+            refined_list.append(refined.detach().cpu().numpy())
+            motion_xyz = to_xyz(rot2xyz, refined, lengths)
+            motion_xyz_list.append(motion_xyz.detach().cpu().numpy())
+
+        refined_all = np.concatenate(refined_list, axis=0)
+        motion_xyz_all = np.concatenate(motion_xyz_list, axis=0)
+        saved_path = save_results(
+            args_cli.output_path,
+            motion_xyz_all,
+            refined_all,
+            actor_all,
+            text_all,
+            lengths_all,
+            num_samples=num_samples,
+            num_repetitions=num_repetitions,
+        )
+        print(f"Saved refined results to {saved_path}")
+        return
+
     if args_cli.coarse_cache:
         data_cache = np.load(args_cli.coarse_cache, allow_pickle=True)
         actor_all = data_cache["actor_motion"]

@@ -247,6 +247,8 @@ def add_refine_sampling_options(parser):
                        help="Limit the number of samples (debug).")
     group.add_argument("--coarse_cache", default="", type=str,
                        help="Optional coarse cache to skip Stage1 sampling.")
+    group.add_argument("--cgenerate_results", default="", type=str,
+                       help="Path to sample.cgenerate results.npy to refine.")
 
 
 def add_sampling_options(parser):
