@@ -251,7 +251,6 @@ def main():
             lengths_all,
             num_samples=len(lengths_all),
             num_repetitions=1,
-            extra={"coarse_output": coarse_all, "gt_motion": gt_all},
         )
         print(f"Saved refined results to {saved_path}")
         return
@@ -383,7 +382,6 @@ def main():
         lengths_all,
         num_samples=len(lengths_all),
         num_repetitions=1,
-        extra={"coarse_output": coarse_all, "gt_motion": gt_all, "sample_indices": sample_indices_all},
     )
 
     if total_frames > 0:
