@@ -235,9 +235,9 @@ def main():
             coarse = torch.from_numpy(coarse_all[i:i+1]).to(device)
             lengths = torch.as_tensor([lengths_all[i]], device=device)
             refined, _ = rnet(actor, coarse, lengths=lengths)
-            refined_list.append(refined.cpu().numpy())
+            refined_list.append(refined.detach().cpu().numpy())
             motion_xyz = to_xyz(rot2xyz, refined, lengths)
-            motion_xyz_list.append(motion_xyz.cpu().numpy())
+            motion_xyz_list.append(motion_xyz.detach().cpu().numpy())
 
         refined_all = np.concatenate(refined_list, axis=0)
         motion_xyz_all = np.concatenate(motion_xyz_list, axis=0)
@@ -345,7 +345,7 @@ def main():
 
             actor_list.append(actor[:keep].cpu().numpy())
             coarse_list.append(coarse[:keep].cpu().numpy())
-            refined_list.append(refined[:keep].cpu().numpy())
+            refined_list.append(refined[:keep].detach().cpu().numpy())
             gt_list.append(motion[:keep].cpu().numpy())
             lengths_list.append(lengths[:keep].cpu().numpy())
             indices_list.append(np.arange(total, total + keep, dtype=np.int64))
@@ -353,7 +353,7 @@ def main():
                 text_list += cond["y"]["action_text"][:keep]
             else:
                 text_list += [""] * keep
-            motion_xyz_list.append(motion_xyz[:keep].cpu().numpy())
+            motion_xyz_list.append(motion_xyz[:keep].detach().cpu().numpy())
 
             num_frames = motion.shape[-1]
             mask = torch.arange(num_frames, device=device).view(1, -1) < lengths.view(-1, 1)
