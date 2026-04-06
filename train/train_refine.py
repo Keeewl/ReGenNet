@@ -5,13 +5,47 @@ import torch
 from torch.utils.data import DataLoader
 
 from data.refine_dataset import RefineCacheDataset, refine_collate
-from model.refine.refine_model import RNetV1
+from model.refine.refine_model import RNetV1, RNetV2
 from train.refine_training_loop import RefineTrainLoop
 from utils.fixseed import fixseed
 from utils.parser_util import refine_train_args
 
 
 def build_model_from_args(args):
+    if args.rnet_version == "v2":
+        model = RNetV2(
+            njoints=56,
+            nfeats=6,
+            body_model="smplx",
+            pose_rep="rot6d",
+            top_k=args.top_k,
+            window_size=args.window_size,
+            vel_threshold=args.vel_threshold,
+            geom_sigma=args.geom_sigma,
+            selector_sigma=args.selector_sigma,
+            selector_alpha=args.selector_alpha,
+            selector_beta=args.selector_beta,
+            selector_gamma=args.selector_gamma,
+            hidden_dim=args.hidden_dim,
+            num_temporal_blocks=args.num_temporal_blocks,
+            dropout=args.dropout,
+        )
+        model.config = {
+            "version": "v2",
+            "top_k": args.top_k,
+            "window_size": args.window_size,
+            "vel_threshold": args.vel_threshold,
+            "geom_sigma": args.geom_sigma,
+            "selector_sigma": args.selector_sigma,
+            "selector_alpha": args.selector_alpha,
+            "selector_beta": args.selector_beta,
+            "selector_gamma": args.selector_gamma,
+            "hidden_dim": args.hidden_dim,
+            "num_temporal_blocks": args.num_temporal_blocks,
+            "dropout": args.dropout,
+        }
+        return model
+
     model = RNetV1(
         njoints=56,
         nfeats=6,
@@ -25,6 +59,7 @@ def build_model_from_args(args):
         dropout=args.dropout,
     )
     model.config = {
+        "version": "v1",
         "top_k": args.top_k,
         "window_size": args.window_size,
         "vel_threshold": args.vel_threshold,

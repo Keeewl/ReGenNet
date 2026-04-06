@@ -6,6 +6,9 @@ import torch
 from torch.optim import AdamW
 
 from model.refine.losses import (
+    distance_prior_loss,
+    soft_contact_loss,
+    smoothness_loss,
     build_time_mask,
     coordination_reg,
     local_distance_loss,
@@ -93,19 +96,58 @@ class RefineTrainLoop:
                 loss_coord = coordination_reg(delta_pred, joint_ids, mask)
 
                 loss_contact = torch.tensor(0.0, device=self.device)
-                if self.args.lambda_contact > 0:
+                loss_dist_prior = torch.tensor(0.0, device=self.device)
+                loss_soft_contact = torch.tensor(0.0, device=self.device)
+                loss_smooth = torch.tensor(0.0, device=self.device)
+
+                need_xyz = (
+                    self.args.lambda_contact > 0
+                    or self.args.lambda_dist_prior > 0
+                    or self.args.lambda_soft_contact > 0
+                )
+                if need_xyz:
                     actor_xyz = self.model.surface_builder.to_xyz(actor)
                     refined_xyz = self.model.surface_builder.to_xyz(refined)
                     gt_xyz = self.model.surface_builder.to_xyz(gt)
+
+                if self.args.lambda_contact > 0:
                     loss_contact = local_distance_loss(
                         actor_xyz, refined_xyz, gt_xyz, joint_ids, mask
                     )
+
+                if self.args.lambda_dist_prior > 0:
+                    loss_dist_prior = distance_prior_loss(
+                        actor_xyz,
+                        refined_xyz,
+                        gt_xyz,
+                        joint_ids,
+                        joint_ids,
+                        mask,
+                        tau=self.args.dist_prior_tau,
+                    )
+
+                if self.args.lambda_soft_contact > 0:
+                    loss_soft_contact = soft_contact_loss(
+                        actor_xyz,
+                        refined_xyz,
+                        gt_xyz,
+                        joint_ids,
+                        joint_ids,
+                        mask,
+                        sigma=self.args.soft_contact_sigma,
+                    )
+
+                if self.args.lambda_smooth > 0:
+                    loss_smooth = smoothness_loss(delta_pred, mask)
 
                 loss = (
                     self.args.lambda_residual * loss_res
                     + self.args.lambda_reg * loss_reg
                     + self.args.lambda_coord * loss_coord
                     + self.args.lambda_contact * loss_contact
+                    + self.args.lambda_dist_prior * loss_dist_prior
+                    + self.args.lambda_soft_contact * loss_soft_contact
+                    + self.args.lambda_smooth * loss_smooth
                 )
 
                 self.opt.zero_grad()
@@ -119,7 +161,10 @@ class RefineTrainLoop:
                         f"res={loss_res.item():.6f} "
                         f"reg={loss_reg.item():.6f} "
                         f"coord={loss_coord.item():.6f} "
-                        f"contact={loss_contact.item():.6f}"
+                        f"contact={loss_contact.item():.6f} "
+                        f"dist={loss_dist_prior.item():.6f} "
+                        f"scontact={loss_soft_contact.item():.6f} "
+                        f"smooth={loss_smooth.item():.6f}"
                     )
 
                 if self.step % self.args.save_interval == 0 and self.step > 0:

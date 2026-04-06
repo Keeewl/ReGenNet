@@ -95,3 +95,91 @@ class SurfaceFeatureBuilder:
             feat = feat * active_mask[:, :, None, None].float()
 
         return feat
+
+
+def _build_time_mask(lengths, num_frames, active_mask=None, device=None):
+    """
+    lengths: [B]
+    active_mask: [B, T] or None
+    returns mask: [B, T]
+    """
+    device = device or lengths.device
+    frame_ids = torch.arange(num_frames, device=device).view(1, -1)
+    lengths = torch.as_tensor(lengths, device=device, dtype=torch.long)
+    mask = frame_ids < lengths.view(-1, 1)
+    if active_mask is not None:
+        mask = mask & active_mask.to(device)
+    return mask.float()
+
+
+def _pairwise_distance(actor_xyz, reactor_xyz, actor_ids, reactor_ids):
+    """
+    actor_xyz/reactor_xyz: [B, J, 3, T]
+    actor_ids/reactor_ids: list[int] or 1D tensor with length P
+    returns dist: [B, T, P]
+    """
+    device = actor_xyz.device
+    actor_ids = torch.as_tensor(actor_ids, device=device, dtype=torch.long)
+    reactor_ids = torch.as_tensor(reactor_ids, device=device, dtype=torch.long)
+    if actor_ids.numel() != reactor_ids.numel():
+        raise ValueError("actor_ids and reactor_ids must have same length")
+    actor_sel = actor_xyz.index_select(1, actor_ids)
+    reactor_sel = reactor_xyz.index_select(1, reactor_ids)
+    dist = torch.linalg.norm(actor_sel - reactor_sel, dim=2)
+    return dist.permute(0, 2, 1).contiguous()
+
+
+def build_pairwise_contact_stats(
+    actor_xyz,
+    reactor_xyz,
+    actor_ids,
+    reactor_ids,
+    lengths=None,
+    active_mask=None,
+    sigma=0.1,
+):
+    """
+    actor_xyz/reactor_xyz: [B, J, 3, T]
+    actor_ids/reactor_ids: list[int] length P
+    returns dict:
+        dist: [B, T, P]
+        soft_contact: [B, T, P]
+        mask: [B, T]
+    """
+    dist = _pairwise_distance(actor_xyz, reactor_xyz, actor_ids, reactor_ids)
+    soft_contact = torch.exp(-dist / max(float(sigma), 1e-6))
+    mask = None
+    if lengths is not None or active_mask is not None:
+        num_frames = dist.shape[1]
+        mask = _build_time_mask(lengths, num_frames, active_mask=active_mask, device=dist.device)
+        dist = dist * mask[:, :, None]
+        soft_contact = soft_contact * mask[:, :, None]
+    return {"dist": dist, "soft_contact": soft_contact, "mask": mask}
+
+
+def build_distance_prior_targets(
+    actor_xyz,
+    gt_xyz,
+    actor_ids,
+    reactor_ids,
+    lengths=None,
+    active_mask=None,
+    tau=0.1,
+):
+    """
+    actor_xyz/gt_xyz: [B, J, 3, T]
+    actor_ids/reactor_ids: list[int] length P
+    returns dict:
+        dist_gt: [B, T, P]
+        weight: [B, T, P]
+        mask: [B, T]
+    """
+    dist_gt = _pairwise_distance(actor_xyz, gt_xyz, actor_ids, reactor_ids)
+    weight = torch.exp(-dist_gt / max(float(tau), 1e-6))
+    mask = None
+    if lengths is not None or active_mask is not None:
+        num_frames = dist_gt.shape[1]
+        mask = _build_time_mask(lengths, num_frames, active_mask=active_mask, device=dist_gt.device)
+        dist_gt = dist_gt * mask[:, :, None]
+        weight = weight * mask[:, :, None]
+    return {"dist_gt": dist_gt, "weight": weight, "mask": mask}

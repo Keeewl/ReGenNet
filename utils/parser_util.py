@@ -216,6 +216,18 @@ def add_refine_training_options(parser):
     group.add_argument("--geom_sigma", default=0.1, type=float,
                        help="Sigma for contact score.")
     group.add_argument("--hidden_dim", default=256, type=int, help="Refine head hidden dim.")
+    group.add_argument("--rnet_version", default="v1", type=str, choices=["v1", "v2"],
+                       help="RNet version to train.")
+    group.add_argument("--num_temporal_blocks", default=2, type=int,
+                       help="Number of temporal blocks for v2 head.")
+    group.add_argument("--selector_sigma", default=0.1, type=float,
+                       help="Sigma for v2 selector soft contact.")
+    group.add_argument("--selector_alpha", default=1.0, type=float,
+                       help="Weight for v2 selector distance risk.")
+    group.add_argument("--selector_beta", default=0.5, type=float,
+                       help="Weight for v2 selector approach risk.")
+    group.add_argument("--selector_gamma", default=0.5, type=float,
+                       help="Weight for v2 selector contact risk.")
     group.add_argument("--dropout", default=0.1, type=float, help="Refine head dropout.")
     group.add_argument("--lambda_residual", default=1.0, type=float,
                        help="Residual supervision weight.")
@@ -225,6 +237,17 @@ def add_refine_training_options(parser):
                        help="Coordination regularization weight.")
     group.add_argument("--lambda_contact", default=0.0, type=float,
                        help="Local distance/contact loss weight.")
+    group.add_argument("--lambda_dist_prior", default=0.0, type=float,
+                       help="Distance prior loss weight.")
+    group.add_argument("--lambda_soft_contact", default=0.0, type=float,
+                       help="Soft contact prior loss weight.")
+    group.add_argument("--lambda_smooth", default=0.0, type=float,
+                       help="Temporal smoothness loss weight.")
+    group.add_argument("--dist_prior_tau", default=0.1, type=float,
+                       help="Tau for distance prior weighting.")
+    group.add_argument("--soft_contact_sigma", default=0.1, type=float,
+                       help="Sigma for soft contact prior loss.")
+
 
 
 def add_refine_sampling_options(parser):
@@ -233,6 +256,8 @@ def add_refine_sampling_options(parser):
                        help="Path to Stage1 checkpoint (cnet_v5).")
     group.add_argument("--stage2_model_path", required=True, type=str,
                        help="Path to Stage2 checkpoint (rnet_v1).")
+    group.add_argument("--rnet_version", default="", type=str, choices=["", "v1", "v2"],
+                       help="Optional override for Stage2 version.")
     group.add_argument("--output_path", required=True, type=str,
                        help="Path to save refined results (.npz or .h5).")
     group.add_argument("--data_path", default="", type=str,

@@ -9,7 +9,7 @@ from data_loaders.get_data import get_dataset_loader
 from diffusion import gaussian_diffusion as gd
 from diffusion.respace import SpacedDiffusion, space_timesteps
 from model.cnet.cnet_v5 import CNetV5
-from model.refine.refine_model import RNetV1
+from model.refine.refine_model import RNetV1, RNetV2
 from model.rotation2xyz import Rotation2xyz_x
 from utils.fixseed import fixseed
 from utils.parser_util import refine_sample_args
@@ -118,21 +118,42 @@ def load_stage1_weights(model, model_path):
         print(f"[warn] missing keys: {missing[:3]} ...")
 
 
-def load_rnet_checkpoint(path, device):
+def load_rnet_checkpoint(path, device, override_version=""):
     checkpoint = torch.load(path, map_location="cpu")
     config = checkpoint.get("config", {})
-    model = RNetV1(
-        njoints=56,
-        nfeats=6,
-        body_model="smplx",
-        pose_rep="rot6d",
-        top_k=config.get("top_k", 5),
-        window_size=config.get("window_size", 5),
-        vel_threshold=config.get("vel_threshold", None),
-        geom_sigma=config.get("geom_sigma", 0.1),
-        hidden_dim=config.get("hidden_dim", 256),
-        dropout=config.get("dropout", 0.1),
-    )
+    version = override_version or config.get("version", "v1")
+
+    if version == "v2":
+        model = RNetV2(
+            njoints=56,
+            nfeats=6,
+            body_model="smplx",
+            pose_rep="rot6d",
+            top_k=config.get("top_k", 5),
+            window_size=config.get("window_size", 5),
+            vel_threshold=config.get("vel_threshold", None),
+            geom_sigma=config.get("geom_sigma", 0.1),
+            selector_sigma=config.get("selector_sigma", 0.1),
+            selector_alpha=config.get("selector_alpha", 1.0),
+            selector_beta=config.get("selector_beta", 0.5),
+            selector_gamma=config.get("selector_gamma", 0.5),
+            hidden_dim=config.get("hidden_dim", 256),
+            num_temporal_blocks=config.get("num_temporal_blocks", 2),
+            dropout=config.get("dropout", 0.1),
+        )
+    else:
+        model = RNetV1(
+            njoints=56,
+            nfeats=6,
+            body_model="smplx",
+            pose_rep="rot6d",
+            top_k=config.get("top_k", 5),
+            window_size=config.get("window_size", 5),
+            vel_threshold=config.get("vel_threshold", None),
+            geom_sigma=config.get("geom_sigma", 0.1),
+            hidden_dim=config.get("hidden_dim", 256),
+            dropout=config.get("dropout", 0.1),
+        )
     model.load_state_dict(checkpoint["model"], strict=True)
     model.to(device)
     model.eval()
@@ -226,7 +247,7 @@ def main():
         num_samples = data.get("num_samples", len(lengths_all))
         num_repetitions = data.get("num_repetitions", 1)
 
-        rnet = load_rnet_checkpoint(args_cli.stage2_model_path, device)
+        rnet = load_rnet_checkpoint(args_cli.stage2_model_path, device, args_cli.rnet_version)
         rot2xyz = Rotation2xyz_x(device=device)
 
         refined_list = []
@@ -265,7 +286,7 @@ def main():
         lengths_all = data_cache["lengths"]
         sample_indices_all = data_cache.get("sample_indices", np.arange(len(lengths_all)))
 
-        rnet = load_rnet_checkpoint(args_cli.stage2_model_path, device)
+        rnet = load_rnet_checkpoint(args_cli.stage2_model_path, device, args_cli.rnet_version)
 
         refined_list = []
         motion_xyz_list = []
@@ -334,7 +355,7 @@ def main():
     stage1.eval()
     load_stage1_weights(stage1, args.stage1_model_path)
 
-    rnet = load_rnet_checkpoint(args_cli.stage2_model_path, device)
+    rnet = load_rnet_checkpoint(args_cli.stage2_model_path, device, args_cli.rnet_version)
 
     sample_fn = diffusion.ddim_sample_loop if args.use_ddim else diffusion.p_sample_loop
 

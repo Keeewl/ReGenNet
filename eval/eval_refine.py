@@ -11,11 +11,105 @@ from data_loaders.tensors import collate, ccollate
 from eval.a2m.stgcn.evaluate import Evaluation as STGCNEvaluation
 from eval.a2m.stgcn_eval import _load_interx_action_names
 from eval.a2m.tools import save_metrics, format_metrics
-from model.refine.refine_model import RNetV1
+from eval.metrics_contact import contact_distance
+from model.refine.refine_model import RNetV1, RNetV2
 from utils import dist_util
 from utils.fixseed import fixseed
 from utils.model_util import create_model_and_diffusion, load_model_wo_clip
 from utils.parser_util import refine_evaluation_parser
+
+
+
+def split_actor_reactor_xyz(output_xyz):
+    """
+    output_xyz: [B, J, C, T] with C in {3, 6}
+    returns actor_xyz/reactor_xyz: [B, J, 3, T]
+    """
+    if output_xyz.shape[2] == 6:
+        actor_xyz = output_xyz[:, :, :3, :]
+        reactor_xyz = output_xyz[:, :, 3:, :]
+        return actor_xyz, reactor_xyz
+    if output_xyz.shape[2] == 3 and output_xyz.shape[1] % 2 == 0:
+        half = output_xyz.shape[1] // 2
+        actor_xyz = output_xyz[:, :half, :, :]
+        reactor_xyz = output_xyz[:, half:, :, :]
+        return actor_xyz, reactor_xyz
+    raise ValueError(f"Unexpected output_xyz shape: {tuple(output_xyz.shape)}")
+
+
+
+def _accumulate_cd(stats, key, value, count):
+    stats[f"{key}_sum"] += value * count
+    stats[f"{key}_count"] += count
+
+
+
+def _finalize_cd(stats, key):
+    denom = stats[f"{key}_count"].clamp(min=1.0)
+    return (stats[f"{key}_sum"] / denom).item()
+
+
+
+def evaluate_contact_distance(coarse_loader, refined_loader, rnet, tau_contact=0.1):
+    """
+    Aggregate CD metrics with count-weighted averaging.
+    """
+    pair_ids = rnet.refine_joint_ids
+    stats = {}
+
+    def _init_stats(device):
+        for name in ["coarse", "refined", "active_coarse", "active_refined"]:
+            stats[f"{name}_sum"] = torch.zeros((), device=device)
+            stats[f"{name}_count"] = torch.zeros((), device=device)
+
+    for mode, loader in [("coarse", coarse_loader), ("refined", refined_loader)]:
+        for batch in loader:
+            output_xyz = batch["output_xyz"]
+            gt_xyz = batch["gt_xyz"]
+            lengths = batch["lengths"]
+            active_mask = batch.get("active_mask", None)
+
+            actor_xyz, pred_xyz = split_actor_reactor_xyz(output_xyz)
+            _, gt_reactor_xyz = split_actor_reactor_xyz(gt_xyz)
+
+            metrics = contact_distance(
+                actor_xyz,
+                pred_xyz,
+                gt_reactor_xyz,
+                pair_ids,
+                pair_ids,
+                tau_contact=tau_contact,
+                lengths=lengths,
+                active_mask=None,
+            )
+
+            if not stats:
+                _init_stats(metrics["cd"].device)
+
+            _accumulate_cd(stats, mode, metrics["cd"], metrics["count"])
+
+            if active_mask is not None:
+                metrics_active = contact_distance(
+                    actor_xyz,
+                    pred_xyz,
+                    gt_reactor_xyz,
+                    pair_ids,
+                    pair_ids,
+                    tau_contact=tau_contact,
+                    lengths=lengths,
+                    active_mask=active_mask,
+                )
+                _accumulate_cd(stats, f"active_{mode}", metrics_active["cd"], metrics_active["count"])
+
+    results = {
+        "cd_coarse": _finalize_cd(stats, "coarse"),
+        "cd_refined": _finalize_cd(stats, "refined"),
+    }
+    results["cd_improve"] = results["cd_coarse"] - results["cd_refined"]
+    results["cd_active_coarse"] = _finalize_cd(stats, "active_coarse")
+    results["cd_active_refined"] = _finalize_cd(stats, "active_refined")
+    results["cd_active_improve"] = results["cd_active_coarse"] - results["cd_active_refined"]
+    return results
 
 
 class RefineDataloader:
@@ -59,10 +153,12 @@ class RefineDataloader:
                     )
                     if mode == "refined":
                         lengths = model_kwargs["y"]["lengths"]
-                        refined, _ = rnet(model_kwargs["y"]["cmotion"], coarse, lengths=lengths)
+                        refined, aux = rnet(model_kwargs["y"]["cmotion"], coarse, lengths=lengths)
                         output_reactor = refined
+                        active_mask = aux["active_mask"]
                     else:
                         output_reactor = coarse
+                        active_mask = None
 
                     batch["output"] = torch.cat((model_kwargs["y"]["cmotion"], output_reactor), axis=2)
                     batch["text"] = model_kwargs["y"]["action_text"]
@@ -86,6 +182,30 @@ class RefineDataloader:
                 )
                 batch["lengths"] = model_kwargs["y"]["lengths"].to(device)
                 batch["y"] = model_kwargs["y"]["action"].squeeze().long().cpu()
+
+                if mode != "gt":
+                    gt_output = torch.cat((model_kwargs["y"]["cmotion"], motions), axis=2)
+                    batch["gt_xyz"] = stage1_model.rot2xyz(
+                        x=gt_output,
+                        mask=mask,
+                        pose_rep="rot6d",
+                        glob=True,
+                        translation=True,
+                        jointstype=body_model,
+                        vertstrans=True,
+                        betas=None,
+                        beta=0,
+                        glob_rot=None,
+                        get_rotations_back=False,
+                        num_person=num_person,
+                    )
+                    actor_xyz, reactor_xyz = split_actor_reactor_xyz(batch["output_xyz"])
+                    if active_mask is None:
+                        active_mask, _, _ = rnet.active_selector.select(
+                            actor_xyz, reactor_xyz, lengths=batch["lengths"]
+                        )
+                    batch["active_mask"] = active_mask
+
                 self.batches.append(batch)
 
             num_samples_last_batch = num_samples % dataiterator.batch_size
@@ -100,18 +220,39 @@ class RefineDataloader:
 def build_rnet(checkpoint_path, device):
     checkpoint = torch.load(checkpoint_path, map_location="cpu")
     config = checkpoint.get("config", {})
-    model = RNetV1(
-        njoints=56,
-        nfeats=6,
-        body_model="smplx",
-        pose_rep="rot6d",
-        top_k=config.get("top_k", 5),
-        window_size=config.get("window_size", 5),
-        vel_threshold=config.get("vel_threshold", None),
-        geom_sigma=config.get("geom_sigma", 0.1),
-        hidden_dim=config.get("hidden_dim", 256),
-        dropout=config.get("dropout", 0.1),
-    )
+    version = config.get("rnet_version", config.get("version", "v1"))
+
+    if version == "v2":
+        model = RNetV2(
+            njoints=56,
+            nfeats=6,
+            body_model="smplx",
+            pose_rep="rot6d",
+            top_k=config.get("top_k", 5),
+            window_size=config.get("window_size", 5),
+            vel_threshold=config.get("vel_threshold", None),
+            geom_sigma=config.get("geom_sigma", 0.1),
+            selector_sigma=config.get("selector_sigma", 0.1),
+            selector_alpha=config.get("selector_alpha", 1.0),
+            selector_beta=config.get("selector_beta", 0.5),
+            selector_gamma=config.get("selector_gamma", 0.5),
+            hidden_dim=config.get("hidden_dim", 256),
+            num_temporal_blocks=config.get("num_temporal_blocks", 2),
+            dropout=config.get("dropout", 0.1),
+        )
+    else:
+        model = RNetV1(
+            njoints=56,
+            nfeats=6,
+            body_model="smplx",
+            pose_rep="rot6d",
+            top_k=config.get("top_k", 5),
+            window_size=config.get("window_size", 5),
+            vel_threshold=config.get("vel_threshold", None),
+            geom_sigma=config.get("geom_sigma", 0.1),
+            hidden_dim=config.get("hidden_dim", 256),
+            dropout=config.get("dropout", 0.1),
+        )
     model.load_state_dict(checkpoint["model"], strict=True)
     model.to(device)
     model.eval()
@@ -154,6 +295,8 @@ def evaluate_refine(args, stage1_model, diffusion, rnet, data, acc_only=False):
 
     allseeds = list(range(args.num_seeds))
     stgcn_metrics = {}
+
+    cd_metrics = {}
 
     sample_fn = diffusion.ddim_sample_loop if args.use_ddim else diffusion.p_sample_loop
 
@@ -225,10 +368,28 @@ def evaluate_refine(args, stage1_model, diffusion, rnet, data, acc_only=False):
             stgcn_metrics[seed] = stgcn_eval.evaluate(stage1_model, loaders, setting="cmdm")
         del loaders
 
+        cd_metrics[seed] = {}
+        for split in data_types:
+            cd_result = evaluate_contact_distance(
+                coarse_loaders[split],
+                refined_loaders[split],
+                rnet,
+                tau_contact=0.1,
+            )
+            for key, val in cd_result.items():
+                cd_metrics[seed][f"{key}_{split}"] = val
+
+    combined = {}
+    for seed in allseeds:
+        merged = {}
+        merged.update(stgcn_metrics[seed])
+        merged.update(cd_metrics[seed])
+        combined[seed] = merged
+
     metrics = {
         "feats": {
-            key: [format_metrics(stgcn_metrics[seed])[key] for seed in allseeds]
-            for key in stgcn_metrics[allseeds[0]]
+            key: [format_metrics(combined[seed])[key] for seed in allseeds]
+            for key in combined[allseeds[0]]
         }
     }
     return metrics
