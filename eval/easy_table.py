@@ -140,6 +140,47 @@ def print_results(folder, evaluation):
     print(table_latex)
 
 
+    cd_keys = [
+        "cd_coarse",
+        "cd_refined",
+        "cd_improve",
+        "cd_active_coarse",
+        "cd_active_refined",
+        "cd_active_improve",
+    ]
+    cd_splits = []
+    if any(f"{k}_train" in a2m for k in cd_keys):
+        cd_splits.append("train")
+    if any(f"{k}_test" in a2m for k in cd_keys):
+        cd_splits.append("test")
+    if not cd_splits and all(k in a2m for k in cd_keys):
+        cd_splits.append(None)
+
+    cd_rows = []
+    cd_rows_latex = []
+    for split in cd_splits:
+        label = "cd" if split is None else f"cd_{split}"
+        row = ["{:6}".format(label)]
+        row_latex = ["{:6}".format(label)]
+        for key in cd_keys:
+            ckey = key if split is None else f"{key}_{split}"
+            values = np.array([float(x) for x in a2m[ckey]])
+            row.append(format_values(values, ckey, latex=False))
+            row_latex.append(format_values(values, ckey, latex=True))
+        cd_rows.append(" | ".join(row))
+        cd_rows_latex.append(" & ".join(row_latex) + r"\")
+
+    if cd_rows:
+        print()
+        print("CD Results")
+        print("
+".join(cd_rows))
+        print()
+        print("CD Latex table")
+        print("
+".join(cd_rows_latex))
+
+
 if __name__ == "__main__":
     import argparse
 
