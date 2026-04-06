@@ -168,17 +168,15 @@ def print_results(folder, evaluation):
             row.append(format_values(values, ckey, latex=False))
             row_latex.append(format_values(values, ckey, latex=True))
         cd_rows.append(" | ".join(row))
-        cd_rows_latex.append(" & ".join(row_latex) + r"\")
+        cd_rows_latex.append(" & ".join(row_latex) + "\\")
 
     if cd_rows:
         print()
         print("CD Results")
-        print("
-".join(cd_rows))
+        print("\n".join(cd_rows))
         print()
         print("CD Latex table")
-        print("
-".join(cd_rows_latex))
+        print("\n".join(cd_rows_latex))
 
 
 if __name__ == "__main__":
