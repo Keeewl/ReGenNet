@@ -89,7 +89,9 @@ class RNetV1(nn.Module):
         delta = delta * active_mask[:, :, None, None].float()
         delta_full = torch.zeros_like(coarse_motion)
         delta_full.index_copy_(1, joint_ids, delta.permute(0, 2, 3, 1))
-        delta_full = delta_full * joint_mask[None, :, None, None].float()
+        joint_mask_full = torch.zeros(num_joints, device=device, dtype=torch.bool)
+        joint_mask_full[joint_ids] = True
+        delta_full = delta_full * joint_mask_full[None, :, None, None].float()
 
         refined = coarse_motion + delta_full
 
@@ -197,7 +199,9 @@ class RNetV2(nn.Module):
         delta = delta * active_mask[:, :, None, None].float()
         delta_full = torch.zeros_like(coarse_motion)
         delta_full.index_copy_(1, joint_ids, delta.permute(0, 2, 3, 1))
-        delta_full = delta_full * joint_mask[None, :, None, None].float()
+        joint_mask_full = torch.zeros(num_joints, device=device, dtype=torch.bool)
+        joint_mask_full[joint_ids] = True
+        delta_full = delta_full * joint_mask_full[None, :, None, None].float()
 
         refined = coarse_motion + delta_full
 
