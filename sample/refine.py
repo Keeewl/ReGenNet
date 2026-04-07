@@ -9,7 +9,7 @@ from data_loaders.get_data import get_dataset_loader
 from diffusion import gaussian_diffusion as gd
 from diffusion.respace import SpacedDiffusion, space_timesteps
 from model.cnet.cnet_v5 import CNetV5
-from model.refine.refine_model import RNetV1, RNetV2
+from model.refine.refine_model import RNetV1, RNetV2, RNetV3
 from model.rotation2xyz import Rotation2xyz_x
 from utils.fixseed import fixseed
 from utils.parser_util import refine_sample_args
@@ -121,9 +121,42 @@ def load_stage1_weights(model, model_path):
 def load_rnet_checkpoint(path, device, override_version=""):
     checkpoint = torch.load(path, map_location="cpu")
     config = checkpoint.get("config", {})
-    version = override_version or config.get("version", "v1")
+    version = override_version or config.get("rnet_version", config.get("version", "v1"))
 
-    if version == "v2":
+    if version == "v3":
+        model = RNetV3(
+            njoints=56,
+            nfeats=6,
+            body_model="smplx",
+            pose_rep="rot6d",
+            top_k=config.get("top_k", 5),
+            window_size=config.get("window_size", 7),
+            train_window_size=config.get("train_window_size", 10),
+            vel_threshold=config.get("vel_threshold", None),
+            geom_sigma=config.get("geom_sigma", 0.1),
+            selector_sigma=config.get("selector_sigma", 0.1),
+            selector_alpha=config.get("selector_alpha", 1.0),
+            selector_beta=config.get("selector_beta", 0.5),
+            selector_gamma=config.get("selector_gamma", 0.5),
+            hidden_dim=config.get("hidden_dim", 256),
+            num_temporal_blocks=config.get("num_temporal_blocks", 2),
+            dropout=config.get("dropout", 0.1),
+            pair_mode=config.get("pair_mode", "semantic_nearest"),
+            topk_pairs=config.get("topk_pairs", 3),
+            pair_reduce=config.get("pair_reduce", "mean"),
+            use_contact_feature_aug=config.get("use_contact_feature_aug", True),
+            pair_feature_topk=config.get("pair_feature_topk", 3),
+            use_closing_speed=config.get("use_closing_speed", True),
+            use_part_contact_summary=config.get("use_part_contact_summary", True),
+            tau_contact=config.get("tau_contact", 0.1),
+            tau_near=config.get("tau_near", 0.18),
+            contact_error_margin=config.get("contact_error_margin", 0.05),
+            gate_level=config.get("gate_level", "joint"),
+            gate_init_bias=config.get("gate_init_bias", -2.0),
+            bound_mode=config.get("bound_mode", "tanh"),
+            delta_max=config.get("delta_max", 0.15),
+        )
+    elif version == "v2":
         model = RNetV2(
             njoints=56,
             nfeats=6,

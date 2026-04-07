@@ -210,13 +210,14 @@ def add_refine_training_options(parser):
     group.add_argument("--max_batches", default=-1, type=int,
                        help="Limit the number of batches per epoch (debug).")
     group.add_argument("--top_k", default=5, type=int, help="Active window top-k.")
-    group.add_argument("--window_size", default=5, type=int, help="Active window size.")
+    group.add_argument("--window_size", default=None, type=int, help="Active window size (None uses version default).")
+    group.add_argument("--train_window_size", default=10, type=int, help="Training window size for v3 oracle mask.")
     group.add_argument("--vel_threshold", default=None, type=float,
                        help="Velocity threshold for active selection.")
     group.add_argument("--geom_sigma", default=0.1, type=float,
                        help="Sigma for contact score.")
     group.add_argument("--hidden_dim", default=256, type=int, help="Refine head hidden dim.")
-    group.add_argument("--rnet_version", default="v1", type=str, choices=["v1", "v2"],
+    group.add_argument("--rnet_version", default="v1", type=str, choices=["v1", "v2", "v3"],
                        help="RNet version to train.")
     group.add_argument("--num_temporal_blocks", default=2, type=int,
                        help="Number of temporal blocks for v2 head.")
@@ -248,6 +249,55 @@ def add_refine_training_options(parser):
     group.add_argument("--soft_contact_sigma", default=0.1, type=float,
                        help="Sigma for soft contact prior loss.")
 
+    group.add_argument("--pair_mode", default="semantic_nearest", type=str,
+                       help="Pairwise mode for v3 (semantic_nearest).")
+    group.add_argument("--topk_pairs", default=3, type=int,
+                       help="Top-k nearest semantic pairs for v3.")
+    group.add_argument("--pair_reduce", default="mean", type=str,
+                       help="Pairwise reduction for v3 (mean).")
+    group.add_argument("--tau_contact", default=0.10, type=float,
+                       help="Contact threshold for v3 contact weighting.")
+    group.add_argument("--tau_near", default=0.18, type=float,
+                       help="Near-contact threshold for v3 contact weighting.")
+    group.add_argument("--contact_error_margin", default=0.05, type=float,
+                       help="Margin for coarse-vs-gt contact error mask.")
+    group.add_argument("--contact_weight_contact", default=1.0, type=float,
+                       help="Contact weight for v3 physics losses.")
+    group.add_argument("--contact_weight_near", default=0.5, type=float,
+                       help="Near-contact weight for v3 physics losses.")
+    group.add_argument("--contact_weight_far", default=0.1, type=float,
+                       help="Far weight for v3 physics losses.")
+    group.add_argument("--lambda_dist", default=1.0, type=float,
+                       help="Distance prior loss weight for v3.")
+    group.add_argument("--lambda_soft", default=1.0, type=float,
+                       help="Soft contact loss weight for v3.")
+    group.add_argument("--lambda_local", default=0.5, type=float,
+                       help="Local distance loss weight for v3.")
+    group.add_argument("--lambda_res", default=0.25, type=float,
+                       help="Residual loss weight for v3.")
+    group.add_argument("--lambda_reg", default=0.01, type=float,
+                       help="Residual reg loss weight for v3.")
+    group.add_argument("--lambda_coord", default=0.02, type=float,
+                       help="Coordination loss weight for v3.")
+    group.add_argument("--lambda_smooth", default=0.05, type=float,
+                       help="Smoothness loss weight for v3.")
+    group.add_argument("--gate_level", default="joint", type=str,
+                       help="Gate level for v3 (joint).")
+    group.add_argument("--gate_init_bias", default=-2.0, type=float,
+                       help="Gate init bias for v3.")
+    group.add_argument("--bound_mode", default="tanh", type=str,
+                       help="Bound mode for v3 (tanh/clip/none).")
+    group.add_argument("--delta_max", default=0.15, type=float,
+                       help="Delta max for v3 bounded update.")
+    group.add_argument("--pair_feature_topk", default=3, type=int,
+                       help="Top-k for contact feature augmentation.")
+    group.add_argument("--disable_contact_feature_aug", action='store_false', dest='use_contact_feature_aug',
+                       help="Disable contact feature augmentation.")
+    group.add_argument("--disable_closing_speed", action='store_false', dest='use_closing_speed',
+                       help="Disable closing speed feature.")
+    group.add_argument("--disable_part_contact_summary", action='store_false', dest='use_part_contact_summary',
+                       help="Disable part-level contact summary feature.")
+
 
 
 def add_refine_sampling_options(parser):
@@ -256,7 +306,7 @@ def add_refine_sampling_options(parser):
                        help="Path to Stage1 checkpoint (cnet_v5).")
     group.add_argument("--stage2_model_path", required=True, type=str,
                        help="Path to Stage2 checkpoint (rnet_v1).")
-    group.add_argument("--rnet_version", default="", type=str, choices=["", "v1", "v2"],
+    group.add_argument("--rnet_version", default="", type=str, choices=["", "v1", "v2", "v3"],
                        help="Optional override for Stage2 version.")
     group.add_argument("--output_path", required=True, type=str,
                        help="Path to save refined results (.npz or .h5).")

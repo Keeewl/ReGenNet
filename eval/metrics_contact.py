@@ -1,5 +1,7 @@
 import torch
 
+from model.refine.surface_features import build_semantic_topk_pairs, gather_pairwise_distances
+
 
 def _build_time_mask(lengths, num_frames, active_mask=None, device=None):
     """
@@ -127,6 +129,114 @@ def compute_cd_metrics(
             gt_xyz,
             actor_ids,
             reactor_ids,
+            tau_contact=tau_contact,
+            lengths=lengths,
+            active_mask=active_mask,
+        )
+        metrics.update({
+            "cd_active_coarse": coarse_active["cd"],
+            "cd_active_refined": refined_active["cd"],
+            "cd_active_improve": coarse_active["cd"] - refined_active["cd"],
+            "cd_active_count": coarse_active["count"],
+        })
+
+    return metrics
+
+
+
+def contact_distance_semantic(
+    actor_xyz,
+    pred_xyz,
+    gt_xyz,
+    candidate_pairs,
+    part_joint_ids,
+    topk_pairs,
+    tau_contact=0.1,
+    lengths=None,
+    active_mask=None,
+):
+    stats = build_semantic_topk_pairs(
+        actor_xyz,
+        gt_xyz,
+        candidate_pairs=candidate_pairs,
+        part_joint_ids=part_joint_ids,
+        topk=topk_pairs,
+        lengths=lengths,
+        active_mask=active_mask,
+    )
+    dist_gt = stats["dist_topk"]
+    dist_pred = gather_pairwise_distances(
+        actor_xyz, pred_xyz, stats["actor_ids"], stats["reactor_ids"]
+    )
+    omega = dist_gt < float(tau_contact)
+    if stats["mask"] is not None:
+        omega = omega & stats["mask"][:, :, None, None].bool()
+    count = omega.sum().float()
+    denom = count.clamp(min=1.0)
+    cd = (dist_pred * omega.float()).sum() / denom
+    return {"cd": cd, "count": count}
+
+
+def compute_cd_metrics_semantic(
+    actor_xyz,
+    coarse_xyz,
+    refined_xyz,
+    gt_xyz,
+    candidate_pairs,
+    part_joint_ids,
+    topk_pairs,
+    tau_contact=0.1,
+    lengths=None,
+    active_mask=None,
+):
+    coarse = contact_distance_semantic(
+        actor_xyz,
+        coarse_xyz,
+        gt_xyz,
+        candidate_pairs,
+        part_joint_ids,
+        topk_pairs,
+        tau_contact=tau_contact,
+        lengths=lengths,
+        active_mask=None,
+    )
+    refined = contact_distance_semantic(
+        actor_xyz,
+        refined_xyz,
+        gt_xyz,
+        candidate_pairs,
+        part_joint_ids,
+        topk_pairs,
+        tau_contact=tau_contact,
+        lengths=lengths,
+        active_mask=None,
+    )
+    metrics = {
+        "cd_coarse": coarse["cd"],
+        "cd_refined": refined["cd"],
+        "cd_improve": coarse["cd"] - refined["cd"],
+        "cd_count": coarse["count"],
+    }
+
+    if active_mask is not None:
+        coarse_active = contact_distance_semantic(
+            actor_xyz,
+            coarse_xyz,
+            gt_xyz,
+            candidate_pairs,
+            part_joint_ids,
+            topk_pairs,
+            tau_contact=tau_contact,
+            lengths=lengths,
+            active_mask=active_mask,
+        )
+        refined_active = contact_distance_semantic(
+            actor_xyz,
+            refined_xyz,
+            gt_xyz,
+            candidate_pairs,
+            part_joint_ids,
+            topk_pairs,
             tau_contact=tau_contact,
             lengths=lengths,
             active_mask=active_mask,

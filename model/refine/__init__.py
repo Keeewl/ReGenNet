@@ -1,2 +1,1 @@
-from model.refine.refine_model import RNetV1
-
+from model.refine.refine_model import RNetV1, RNetV2, RNetV3

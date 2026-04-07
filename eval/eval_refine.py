@@ -11,8 +11,8 @@ from data_loaders.tensors import collate, ccollate
 from eval.a2m.stgcn.evaluate import Evaluation as STGCNEvaluation
 from eval.a2m.stgcn_eval import _load_interx_action_names
 from eval.a2m.tools import save_metrics, format_metrics
-from eval.metrics_contact import contact_distance
-from model.refine.refine_model import RNetV1, RNetV2
+from eval.metrics_contact import contact_distance, contact_distance_semantic
+from model.refine.refine_model import RNetV1, RNetV2, RNetV3
 from utils import dist_util
 from utils.fixseed import fixseed
 from utils.model_util import create_model_and_diffusion, load_model_wo_clip
@@ -54,13 +54,45 @@ def evaluate_contact_distance(coarse_loader, refined_loader, rnet, tau_contact=0
     """
     Aggregate CD metrics with count-weighted averaging.
     """
-    pair_ids = rnet.refine_joint_ids
+    pair_mode = getattr(rnet, "pair_mode", "same_index")
+    use_semantic = pair_mode == "semantic_nearest"
+    if use_semantic:
+        candidate_pairs = rnet.candidate_contact_pairs
+        part_joint_ids = rnet.part_joint_ids
+        topk_pairs = rnet.topk_pairs
+    else:
+        pair_ids = rnet.refine_joint_ids
+
     stats = {}
 
     def _init_stats(device):
         for name in ["coarse", "refined", "active_coarse", "active_refined"]:
             stats[f"{name}_sum"] = torch.zeros((), device=device)
             stats[f"{name}_count"] = torch.zeros((), device=device)
+
+    def _cd_metrics(actor_xyz, pred_xyz, gt_xyz, lengths, active_mask=None):
+        if use_semantic:
+            return contact_distance_semantic(
+                actor_xyz,
+                pred_xyz,
+                gt_xyz,
+                candidate_pairs,
+                part_joint_ids,
+                topk_pairs,
+                tau_contact=tau_contact,
+                lengths=lengths,
+                active_mask=active_mask,
+            )
+        return contact_distance(
+            actor_xyz,
+            pred_xyz,
+            gt_xyz,
+            pair_ids,
+            pair_ids,
+            tau_contact=tau_contact,
+            lengths=lengths,
+            active_mask=active_mask,
+        )
 
     for mode, loader in [("coarse", coarse_loader), ("refined", refined_loader)]:
         for batch in loader:
@@ -72,16 +104,7 @@ def evaluate_contact_distance(coarse_loader, refined_loader, rnet, tau_contact=0
             actor_xyz, pred_xyz = split_actor_reactor_xyz(output_xyz)
             _, gt_reactor_xyz = split_actor_reactor_xyz(gt_xyz)
 
-            metrics = contact_distance(
-                actor_xyz,
-                pred_xyz,
-                gt_reactor_xyz,
-                pair_ids,
-                pair_ids,
-                tau_contact=tau_contact,
-                lengths=lengths,
-                active_mask=None,
-            )
+            metrics = _cd_metrics(actor_xyz, pred_xyz, gt_reactor_xyz, lengths, active_mask=None)
 
             if not stats:
                 _init_stats(metrics["cd"].device)
@@ -89,14 +112,11 @@ def evaluate_contact_distance(coarse_loader, refined_loader, rnet, tau_contact=0
             _accumulate_cd(stats, mode, metrics["cd"], metrics["count"])
 
             if active_mask is not None:
-                metrics_active = contact_distance(
+                metrics_active = _cd_metrics(
                     actor_xyz,
                     pred_xyz,
                     gt_reactor_xyz,
-                    pair_ids,
-                    pair_ids,
-                    tau_contact=tau_contact,
-                    lengths=lengths,
+                    lengths,
                     active_mask=active_mask,
                 )
                 _accumulate_cd(stats, f"active_{mode}", metrics_active["cd"], metrics_active["count"])
@@ -222,7 +242,40 @@ def build_rnet(checkpoint_path, device):
     config = checkpoint.get("config", {})
     version = config.get("rnet_version", config.get("version", "v1"))
 
-    if version == "v2":
+    if version == "v3":
+        model = RNetV3(
+            njoints=56,
+            nfeats=6,
+            body_model="smplx",
+            pose_rep="rot6d",
+            top_k=config.get("top_k", 5),
+            window_size=config.get("window_size", 7),
+            train_window_size=config.get("train_window_size", 10),
+            vel_threshold=config.get("vel_threshold", None),
+            geom_sigma=config.get("geom_sigma", 0.1),
+            selector_sigma=config.get("selector_sigma", 0.1),
+            selector_alpha=config.get("selector_alpha", 1.0),
+            selector_beta=config.get("selector_beta", 0.5),
+            selector_gamma=config.get("selector_gamma", 0.5),
+            hidden_dim=config.get("hidden_dim", 256),
+            num_temporal_blocks=config.get("num_temporal_blocks", 2),
+            dropout=config.get("dropout", 0.1),
+            pair_mode=config.get("pair_mode", "semantic_nearest"),
+            topk_pairs=config.get("topk_pairs", 3),
+            pair_reduce=config.get("pair_reduce", "mean"),
+            use_contact_feature_aug=config.get("use_contact_feature_aug", True),
+            pair_feature_topk=config.get("pair_feature_topk", 3),
+            use_closing_speed=config.get("use_closing_speed", True),
+            use_part_contact_summary=config.get("use_part_contact_summary", True),
+            tau_contact=config.get("tau_contact", 0.1),
+            tau_near=config.get("tau_near", 0.18),
+            contact_error_margin=config.get("contact_error_margin", 0.05),
+            gate_level=config.get("gate_level", "joint"),
+            gate_init_bias=config.get("gate_init_bias", -2.0),
+            bound_mode=config.get("bound_mode", "tanh"),
+            delta_max=config.get("delta_max", 0.15),
+        )
+    elif version == "v2":
         model = RNetV2(
             njoints=56,
             nfeats=6,
@@ -370,11 +423,12 @@ def evaluate_refine(args, stage1_model, diffusion, rnet, data, acc_only=False):
 
         cd_metrics[seed] = {}
         for split in data_types:
+            tau_contact = getattr(rnet, "tau_contact", 0.1)
             cd_result = evaluate_contact_distance(
                 coarse_loaders[split],
                 refined_loaders[split],
                 rnet,
-                tau_contact=0.1,
+                tau_contact=tau_contact,
             )
             for key, val in cd_result.items():
                 cd_metrics[seed][f"{key}_{split}"] = val

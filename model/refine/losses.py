@@ -1,5 +1,7 @@
 import torch
 
+from model.refine.surface_features import build_semantic_topk_pairs, gather_pairwise_distances
+
 
 COORD_JOINT_IDS = [12, 15]
 
@@ -147,3 +149,143 @@ def smoothness_loss(delta_pred, mask):
     diff = delta_pred[:, 1:] - delta_pred[:, :-1]
     mask_t = mask[:, 1:] * mask[:, :-1]
     return masked_mse(diff, mask_t)
+
+
+
+def contact_weight_from_dist(
+    dist_gt,
+    tau_contact=0.1,
+    tau_near=0.18,
+    weight_contact=1.0,
+    weight_near=0.5,
+    weight_far=0.1,
+):
+    weight = torch.full_like(dist_gt, float(weight_far))
+    weight = torch.where(dist_gt < float(tau_near), torch.full_like(weight, float(weight_near)), weight)
+    weight = torch.where(dist_gt < float(tau_contact), torch.full_like(weight, float(weight_contact)), weight)
+    return weight
+
+
+def _validate_pair_reduce(pair_reduce):
+    if pair_reduce != "mean":
+        raise ValueError(f"Unsupported pair_reduce: {pair_reduce}")
+
+
+def distance_prior_loss_semantic(
+    actor_xyz,
+    refined_xyz,
+    gt_xyz,
+    candidate_pairs,
+    part_joint_ids,
+    topk_pairs,
+    mask,
+    tau_contact=0.1,
+    tau_near=0.18,
+    weight_contact=1.0,
+    weight_near=0.5,
+    weight_far=0.1,
+    pair_reduce="mean",
+):
+    _validate_pair_reduce(pair_reduce)
+    stats = build_semantic_topk_pairs(
+        actor_xyz,
+        gt_xyz,
+        candidate_pairs=candidate_pairs,
+        part_joint_ids=part_joint_ids,
+        topk=topk_pairs,
+    )
+    dist_gt = stats["dist_topk"]
+    dist_refined = gather_pairwise_distances(
+        actor_xyz, refined_xyz, stats["actor_ids"], stats["reactor_ids"]
+    )
+    weight = contact_weight_from_dist(
+        dist_gt,
+        tau_contact=tau_contact,
+        tau_near=tau_near,
+        weight_contact=weight_contact,
+        weight_near=weight_near,
+        weight_far=weight_far,
+    )
+    diff = dist_refined - dist_gt
+    return masked_weighted_mse(diff, mask, weight)
+
+
+def soft_contact_loss_semantic(
+    actor_xyz,
+    refined_xyz,
+    gt_xyz,
+    candidate_pairs,
+    part_joint_ids,
+    topk_pairs,
+    mask,
+    sigma=0.1,
+    tau_contact=0.1,
+    tau_near=0.18,
+    weight_contact=1.0,
+    weight_near=0.5,
+    weight_far=0.1,
+    pair_reduce="mean",
+):
+    _validate_pair_reduce(pair_reduce)
+    stats = build_semantic_topk_pairs(
+        actor_xyz,
+        gt_xyz,
+        candidate_pairs=candidate_pairs,
+        part_joint_ids=part_joint_ids,
+        topk=topk_pairs,
+    )
+    dist_gt = stats["dist_topk"]
+    dist_refined = gather_pairwise_distances(
+        actor_xyz, refined_xyz, stats["actor_ids"], stats["reactor_ids"]
+    )
+    contact_gt = torch.exp(-dist_gt / max(float(sigma), 1e-6))
+    contact_refined = torch.exp(-dist_refined / max(float(sigma), 1e-6))
+    weight = contact_weight_from_dist(
+        dist_gt,
+        tau_contact=tau_contact,
+        tau_near=tau_near,
+        weight_contact=weight_contact,
+        weight_near=weight_near,
+        weight_far=weight_far,
+    )
+    diff = contact_refined - contact_gt
+    return masked_weighted_mse(diff, mask, weight)
+
+
+def local_distance_loss_semantic(
+    actor_xyz,
+    refined_xyz,
+    gt_xyz,
+    candidate_pairs,
+    part_joint_ids,
+    topk_pairs,
+    mask,
+    tau_contact=0.1,
+    tau_near=0.18,
+    weight_contact=1.0,
+    weight_near=0.5,
+    weight_far=0.1,
+    pair_reduce="mean",
+):
+    _validate_pair_reduce(pair_reduce)
+    stats = build_semantic_topk_pairs(
+        actor_xyz,
+        gt_xyz,
+        candidate_pairs=candidate_pairs,
+        part_joint_ids=part_joint_ids,
+        topk=topk_pairs,
+    )
+    dist_gt = stats["dist_topk"]
+    dist_refined = gather_pairwise_distances(
+        actor_xyz, refined_xyz, stats["actor_ids"], stats["reactor_ids"]
+    )
+    weight = contact_weight_from_dist(
+        dist_gt,
+        tau_contact=tau_contact,
+        tau_near=tau_near,
+        weight_contact=weight_contact,
+        weight_near=weight_near,
+        weight_far=weight_far,
+    )
+    diff = dist_refined - dist_gt
+    return masked_weighted_mse(diff, mask, weight)
