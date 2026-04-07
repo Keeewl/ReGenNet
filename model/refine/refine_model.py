@@ -7,6 +7,7 @@ from model.refine.active_window import (
     _default_refine_joint_ids,
     build_oracle_active_mask,
     compute_overlap_metrics,
+    expand_time_mask,
 )
 from model.refine.surface_features import (
     SurfaceFeatureBuilder,
@@ -369,6 +370,27 @@ class RNetV3(nn.Module):
             overlap_metrics = compute_overlap_metrics(
                 oracle_info["coarse_mask"], oracle_info["gt_contact_mask"]
             )
+            near_metrics = compute_overlap_metrics(
+                oracle_info["coarse_mask"], oracle_info["gt_near_mask"]
+            )
+            overlap_metrics["overlap_iou_near"] = near_metrics["overlap_iou"]
+            overlap_metrics["gt_near_recall_by_coarse_risk"] = near_metrics[
+                "gt_contact_recall_by_coarse_risk"
+            ]
+            overlap_metrics["coarse_risk_precision_wrt_gt_near"] = near_metrics[
+                "coarse_risk_precision_wrt_gt"
+            ]
+            if self.train_window_size is not None and self.train_window_size > 0:
+                expanded = expand_time_mask(
+                    oracle_info["coarse_mask"], self.train_window_size
+                )
+                expanded_metrics = compute_overlap_metrics(
+                    expanded, oracle_info["gt_contact_mask"]
+                )
+                overlap_metrics["overlap_iou_expanded"] = expanded_metrics["overlap_iou"]
+                overlap_metrics[
+                    "gt_contact_recall_by_expanded_coarse_risk"
+                ] = expanded_metrics["gt_contact_recall_by_coarse_risk"]
         else:
             active_mask, joint_mask, scores = self.active_selector.select(
                 actor_xyz, reactor_xyz, lengths=lengths

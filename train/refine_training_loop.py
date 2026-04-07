@@ -72,6 +72,11 @@ class RefineTrainLoop:
             "overlap_iou": 0.0,
             "gt_contact_recall_by_coarse_risk": 0.0,
             "coarse_risk_precision_wrt_gt": 0.0,
+            "overlap_iou_near": 0.0,
+            "gt_near_recall_by_coarse_risk": 0.0,
+            "coarse_risk_precision_wrt_gt_near": 0.0,
+            "overlap_iou_expanded": 0.0,
+            "gt_contact_recall_by_expanded_coarse_risk": 0.0,
             "count": 0,
         }
 
@@ -251,6 +256,18 @@ class RefineTrainLoop:
                     overlap_stats["overlap_iou"] += aux["overlap_iou"].item()
                     overlap_stats["gt_contact_recall_by_coarse_risk"] += aux["gt_contact_recall_by_coarse_risk"].item()
                     overlap_stats["coarse_risk_precision_wrt_gt"] += aux["coarse_risk_precision_wrt_gt"].item()
+                    if "overlap_iou_near" in aux:
+                        overlap_stats["overlap_iou_near"] += aux["overlap_iou_near"].item()
+                    if "gt_near_recall_by_coarse_risk" in aux:
+                        overlap_stats["gt_near_recall_by_coarse_risk"] += aux["gt_near_recall_by_coarse_risk"].item()
+                    if "coarse_risk_precision_wrt_gt_near" in aux:
+                        overlap_stats["coarse_risk_precision_wrt_gt_near"] += aux["coarse_risk_precision_wrt_gt_near"].item()
+                    if "overlap_iou_expanded" in aux:
+                        overlap_stats["overlap_iou_expanded"] += aux["overlap_iou_expanded"].item()
+                    if "gt_contact_recall_by_expanded_coarse_risk" in aux:
+                        overlap_stats["gt_contact_recall_by_expanded_coarse_risk"] += aux[
+                            "gt_contact_recall_by_expanded_coarse_risk"
+                        ].item()
                     overlap_stats["count"] += 1
 
                 if self.step % self.args.log_interval == 0:
@@ -259,6 +276,28 @@ class RefineTrainLoop:
                         overlap_iou = overlap_stats["overlap_iou"] / denom
                         overlap_recall = overlap_stats["gt_contact_recall_by_coarse_risk"] / denom
                         overlap_prec = overlap_stats["coarse_risk_precision_wrt_gt"] / denom
+                        overlap_iou_near = overlap_stats["overlap_iou_near"] / denom
+                        overlap_recall_near = overlap_stats["gt_near_recall_by_coarse_risk"] / denom
+                        overlap_prec_near = overlap_stats["coarse_risk_precision_wrt_gt_near"] / denom
+                        overlap_iou_expanded = overlap_stats["overlap_iou_expanded"] / denom
+                        overlap_recall_expanded = overlap_stats["gt_contact_recall_by_expanded_coarse_risk"] / denom
+
+                        gate = aux.get("gate", None)
+                        delta_raw = aux.get("delta_raw", None)
+                        delta_bounded = aux.get("delta_bounded", None)
+                        delta_final = aux.get("delta", None)
+                        gate_mean = gate.mean().item() if gate is not None else 0.0
+                        gate_std = gate.std().item() if gate is not None else 0.0
+                        delta_raw_abs_mean = delta_raw.abs().mean().item() if delta_raw is not None else 0.0
+                        delta_bounded_abs_mean = (
+                            delta_bounded.abs().mean().item() if delta_bounded is not None else 0.0
+                        )
+                        delta_final_abs_mean = (
+                            delta_final.abs().mean().item() if delta_final is not None else 0.0
+                        )
+                        delta_final_abs_max = (
+                            delta_final.abs().max().item() if delta_final is not None else 0.0
+                        )
                         self._log(
                             f"step={self.step} "
                             f"loss_total={loss.item():.6f} "
@@ -269,14 +308,30 @@ class RefineTrainLoop:
                             f"loss_reg={loss_reg.item():.6f} "
                             f"loss_coord={loss_coord.item():.6f} "
                             f"loss_smooth={loss_smooth.item():.6f} "
+                            f"gate_mean={gate_mean:.4f} "
+                            f"gate_std={gate_std:.4f} "
+                            f"delta_raw_abs_mean={delta_raw_abs_mean:.6f} "
+                            f"delta_bounded_abs_mean={delta_bounded_abs_mean:.6f} "
+                            f"delta_final_abs_mean={delta_final_abs_mean:.6f} "
+                            f"delta_final_abs_max={delta_final_abs_max:.6f} "
                             f"overlap_iou={overlap_iou:.4f} "
                             f"gt_contact_recall_by_coarse_risk={overlap_recall:.4f} "
-                            f"coarse_risk_precision_wrt_gt={overlap_prec:.4f}"
+                            f"coarse_risk_precision_wrt_gt={overlap_prec:.4f} "
+                            f"overlap_iou_near={overlap_iou_near:.4f} "
+                            f"gt_near_recall_by_coarse_risk={overlap_recall_near:.4f} "
+                            f"coarse_risk_precision_wrt_gt_near={overlap_prec_near:.4f} "
+                            f"overlap_iou_expanded={overlap_iou_expanded:.4f} "
+                            f"gt_contact_recall_by_expanded_coarse_risk={overlap_recall_expanded:.4f}"
                         )
                         overlap_stats = {
                             "overlap_iou": 0.0,
                             "gt_contact_recall_by_coarse_risk": 0.0,
                             "coarse_risk_precision_wrt_gt": 0.0,
+                            "overlap_iou_near": 0.0,
+                            "gt_near_recall_by_coarse_risk": 0.0,
+                            "coarse_risk_precision_wrt_gt_near": 0.0,
+                            "overlap_iou_expanded": 0.0,
+                            "gt_contact_recall_by_expanded_coarse_risk": 0.0,
                             "count": 0,
                         }
                     else:

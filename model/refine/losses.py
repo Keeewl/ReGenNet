@@ -198,16 +198,8 @@ def distance_prior_loss_semantic(
     dist_refined = gather_pairwise_distances(
         actor_xyz, refined_xyz, stats["actor_ids"], stats["reactor_ids"]
     )
-    weight = contact_weight_from_dist(
-        dist_gt,
-        tau_contact=tau_contact,
-        tau_near=tau_near,
-        weight_contact=weight_contact,
-        weight_near=weight_near,
-        weight_far=weight_far,
-    )
     diff = dist_refined - dist_gt
-    return masked_weighted_mse(diff, mask, weight)
+    return masked_mse(diff, mask)
 
 
 def soft_contact_loss_semantic(
@@ -279,13 +271,5 @@ def local_distance_loss_semantic(
     dist_refined = gather_pairwise_distances(
         actor_xyz, refined_xyz, stats["actor_ids"], stats["reactor_ids"]
     )
-    weight = contact_weight_from_dist(
-        dist_gt,
-        tau_contact=tau_contact,
-        tau_near=tau_near,
-        weight_contact=weight_contact,
-        weight_near=weight_near,
-        weight_far=weight_far,
-    )
     diff = dist_refined - dist_gt
-    return masked_weighted_mse(diff, mask, weight)
+    return masked_mse(diff, mask)
