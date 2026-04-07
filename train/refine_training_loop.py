@@ -45,8 +45,7 @@ class RefineTrainLoop:
     def _log(self, msg):
         print(msg)
         with open(self.log_path, "a", encoding="utf-8") as f:
-            f.write(msg + "
-")
+            f.write(msg + "\n")
 
     def _load_checkpoint(self, path):
         checkpoint = torch.load(path, map_location="cpu")
