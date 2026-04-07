@@ -7,6 +7,7 @@ import os
 from utils.fixseed import fixseed
 
 from eval.a2m.stgcn.evaluate import Evaluation as STGCNEvaluation
+from eval.metrics_contact import contact_distance
 from torch.utils.data import DataLoader
 from data_loaders.tensors import collate, ccollate
 
@@ -43,6 +44,63 @@ def convert_x_to_rot6d(x, pose_rep):
     else:
         raise NotImplementedError("No geometry for this one.")
     return x
+
+
+
+def split_actor_reactor_xyz(output_xyz):
+    """
+    output_xyz: [B, J, C, T] with C in {3, 6}
+    returns actor_xyz/reactor_xyz: [B, J, 3, T]
+    """
+    if output_xyz.shape[2] == 6:
+        actor_xyz = output_xyz[:, :, :3, :]
+        reactor_xyz = output_xyz[:, :, 3:, :]
+        return actor_xyz, reactor_xyz
+    if output_xyz.shape[2] == 3 and output_xyz.shape[1] % 2 == 0:
+        half = output_xyz.shape[1] // 2
+        actor_xyz = output_xyz[:, :half, :, :]
+        reactor_xyz = output_xyz[:, half:, :, :]
+        return actor_xyz, reactor_xyz
+    raise ValueError(f"Unexpected output_xyz shape: {tuple(output_xyz.shape)}")
+
+
+def evaluate_cd_gen(gen_loader, gt_loader, tau_contact=0.1):
+    """
+    Count-weighted CD for Stage1 generation.
+    """
+    sum_cd = None
+    sum_count = None
+
+    for gen_batch, gt_batch in zip(gen_loader, gt_loader):
+        gen_xyz = gen_batch["output_xyz"]
+        gt_xyz = gt_batch["output_xyz"]
+        lengths = gt_batch["lengths"]
+
+        actor_gt, reactor_gt = split_actor_reactor_xyz(gt_xyz)
+        _, reactor_gen = split_actor_reactor_xyz(gen_xyz)
+
+        metrics = contact_distance(
+            actor_gt,
+            reactor_gen,
+            reactor_gt,
+            list(range(actor_gt.shape[1])),
+            list(range(reactor_gt.shape[1])),
+            tau_contact=tau_contact,
+            lengths=lengths,
+            active_mask=None,
+        )
+
+        if sum_cd is None:
+            sum_cd = torch.zeros((), device=metrics["cd"].device)
+            sum_count = torch.zeros((), device=metrics["cd"].device)
+
+        sum_cd += metrics["cd"] * metrics["count"]
+        sum_count += metrics["count"]
+
+    if sum_cd is None:
+        return 0.0
+    denom = sum_count.clamp(min=1.0)
+    return (sum_cd / denom).item()
 
 
 class NewDataloader:
@@ -217,6 +275,9 @@ def evaluate(args, model, diffusion, data, rec_model_path, setting, acc_only, au
             stgcn_metrics[seed] = stgcnevaluation.evaluate(model, loaders, setting)
         else:
             stgcn_metrics[seed] = stgcnevaluation.evaluate_acc(model, loaders, setting)
+        for split in data_types:
+            cd_value = evaluate_cd_gen(genLoaders[split], gtLoaders[split], tau_contact=0.1)
+            stgcn_metrics[seed][f"cd_gen_{split}"] = cd_value
         del loaders
 
     metrics = {"feats": {key: [format_metrics(stgcn_metrics[seed])[key] for seed in allseeds] for key in stgcn_metrics[allseeds[0]]}}
