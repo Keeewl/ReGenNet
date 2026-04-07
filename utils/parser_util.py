@@ -234,7 +234,7 @@ def add_refine_training_options(parser):
                        help="Residual supervision weight.")
     group.add_argument("--lambda_reg", default=0.01, type=float,
                        help="Residual regularization weight.")
-    group.add_argument("--lambda_coord", default=0.05, type=float,
+    group.add_argument("--lambda_coord", default=0.02, type=float,
                        help="Coordination regularization weight.")
     group.add_argument("--lambda_contact", default=0.0, type=float,
                        help="Local distance/contact loss weight.")
@@ -242,7 +242,7 @@ def add_refine_training_options(parser):
                        help="Distance prior loss weight.")
     group.add_argument("--lambda_soft_contact", default=0.0, type=float,
                        help="Soft contact prior loss weight.")
-    group.add_argument("--lambda_smooth", default=0.0, type=float,
+    group.add_argument("--lambda_smooth", default=0.05, type=float,
                        help="Temporal smoothness loss weight.")
     group.add_argument("--dist_prior_tau", default=0.1, type=float,
                        help="Tau for distance prior weighting.")
@@ -275,12 +275,6 @@ def add_refine_training_options(parser):
                        help="Local distance loss weight for v3.")
     group.add_argument("--lambda_res", default=0.25, type=float,
                        help="Residual loss weight for v3.")
-    group.add_argument("--lambda_reg", default=0.01, type=float,
-                       help="Residual reg loss weight for v3.")
-    group.add_argument("--lambda_coord", default=0.02, type=float,
-                       help="Coordination loss weight for v3.")
-    group.add_argument("--lambda_smooth", default=0.05, type=float,
-                       help="Smoothness loss weight for v3.")
     group.add_argument("--gate_level", default="joint", type=str,
                        help="Gate level for v3 (joint).")
     group.add_argument("--gate_init_bias", default=-2.0, type=float,
