@@ -277,7 +277,7 @@ def add_refine_training_options(parser):
                        help="Residual loss weight for v3.")
     group.add_argument("--gate_level", default="joint", type=str,
                        help="Gate level for v3 (joint).")
-    group.add_argument("--gate_init_bias", default=-2.0, type=float,
+    group.add_argument("--gate_init_bias", default=-1.0, type=float,
                        help="Gate init bias for v3.")
     group.add_argument("--bound_mode", default="tanh", type=str,
                        help="Bound mode for v3 (tanh/clip/none).")

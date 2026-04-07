@@ -33,7 +33,7 @@ class RNetV3Lite(nn.Module):
         refine_joint_ids=None,
         part_names=None,
         part_joint_ids=None,
-        gate_init_bias=-2.0,
+        gate_init_bias=-1.0,
     ):
         super().__init__()
         if refine_joint_ids is None:

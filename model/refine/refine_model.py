@@ -270,7 +270,7 @@ class RNetV3(nn.Module):
         tau_near=0.18,
         contact_error_margin=0.05,
         gate_level="joint",
-        gate_init_bias=-2.0,
+        gate_init_bias=-1.0,
         bound_mode="tanh",
         delta_max=0.15,
     ):
