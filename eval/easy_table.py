@@ -65,11 +65,28 @@ def print_results(folder, evaluation):
     a2m = metrics["feats"]
 
     has_split_keys = any(k.endswith("_train") or k.endswith("_test") for k in a2m)
+    has_cd = any(k.startswith("cd_") for k in a2m)
     if "fid_gen_test" in a2m or has_split_keys:
-        # keys = ["fid_{}_train", "fid_{}_test", "accuracy_{}_train", "accuracy_{}_test", "diversity_{}_train", "multimodality_{}_train", "diversity_{}_test", "multimodality_{}_test"]
-        keys = ["fid_{}_train", "accuracy_{}_train", "multimodality_{}_train",  "diversity_{}_train", "fid_{}_test",  "accuracy_{}_test", "multimodality_{}_test", "diversity_{}_test"]
+        keys = [
+            "fid_{}_train",
+            "accuracy_{}_train",
+            "multimodality_{}_train",
+            "diversity_{}_train",
+        ]
+        if has_cd:
+            keys.append("cd_{}_train")
+        keys += [
+            "fid_{}_test",
+            "accuracy_{}_test",
+            "multimodality_{}_test",
+            "diversity_{}_test",
+        ]
+        if has_cd:
+            keys.append("cd_{}_test")
     else:
         keys = ["fid_{}", "accuracy_{}", "diversity_{}", "multimodality_{}"]
+        if has_cd:
+            keys.append("cd_{}")
 
     model_names = set()
     for key in a2m:
@@ -97,19 +114,20 @@ def print_results(folder, evaluation):
     for model in lines:
         row = ["{:6}".format(model)]
         row_latex = ["{:6}".format(model)]
-        try:
-            for key in keys:
-                ckey = key.format(model)
-                values = np.array([float(x) for x in a2m[ckey]])
-                string_latex = format_values(values, key, latex=True)
-                string = format_values(values, key, latex=False)
-                row.append(string)
-                row_latex.append(string_latex)
-            rows.append(" | ".join(row))
-            rows_latex.append(" & ".join(row_latex) + r"\\")
-            line_to_row_idx[model] = len(rows) - 1
-        except KeyError:
-            continue
+        for key in keys:
+            ckey = key.format(model)
+            if ckey not in a2m:
+                row.append("NA")
+                row_latex.append("--")
+                continue
+            values = np.array([float(x) for x in a2m[ckey]])
+            string_latex = format_values(values, key, latex=True)
+            string = format_values(values, key, latex=False)
+            row.append(string)
+            row_latex.append(string_latex)
+        rows.append(" | ".join(row))
+        rows_latex.append(" & ".join(row_latex) + "\\")
+        line_to_row_idx[model] = len(rows) - 1
 
     if "refined" in model_names and "coarse" in model_names:
         diff_row = ["{:6}".format("ref-c")]
@@ -138,44 +156,6 @@ def print_results(folder, evaluation):
     print()
     print("Latex table")
     print(table_latex)
-
-
-    cd_keys = [
-        "cd_coarse",
-        "cd_refined",
-        "cd_improve",
-        "cd_active_coarse",
-        "cd_active_refined",
-        "cd_active_improve",
-    ]
-    cd_splits = []
-    if any(f"{k}_train" in a2m for k in cd_keys):
-        cd_splits.append("train")
-    if any(f"{k}_test" in a2m for k in cd_keys):
-        cd_splits.append("test")
-    if not cd_splits and all(k in a2m for k in cd_keys):
-        cd_splits.append(None)
-
-    cd_rows = []
-    cd_rows_latex = []
-    for split in cd_splits:
-        label = "cd" if split is None else f"cd_{split}"
-        row = ["{:6}".format(label)]
-        row_latex = ["{:6}".format(label)]
-        for key in cd_keys:
-            ckey = key if split is None else f"{key}_{split}"
-            values = np.array([float(x) for x in a2m[ckey]])
-            row.append(format_values(values, ckey, latex=False))
-            row_latex.append(format_values(values, ckey, latex=True))
-        cd_rows.append(" | ".join(row))
-        cd_rows_latex.append(" & ".join(row_latex) + "\\")
-
-    if cd_rows:
-        print()
-        print("CD Results")
-        print("\n".join(cd_rows))
-        print()
-        print("CD Latex table")
         print("\n".join(cd_rows_latex))
 
 
