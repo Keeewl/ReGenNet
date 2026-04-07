@@ -119,16 +119,17 @@ class RefineTrainLoop:
                     loss_smooth = torch.tensor(0.0, device=self.device)
 
                     need_xyz = (
-                        self.args.lambda_local > 0
+                        self.args.lambda_soft > 0
                         or self.args.lambda_dist > 0
-                        or self.args.lambda_soft > 0
+                        or self.args.lambda_local > 0
+                        or (self.step % self.args.log_interval == 0)
                     )
                     if need_xyz:
                         actor_xyz = self.model.surface_builder.to_xyz(actor)
                         refined_xyz = self.model.surface_builder.to_xyz(refined)
                         gt_xyz = self.model.surface_builder.to_xyz(gt)
 
-                    if self.args.lambda_local > 0:
+                    if need_xyz:
                         loss_local = local_distance_loss_semantic(
                             actor_xyz,
                             refined_xyz,
@@ -145,7 +146,7 @@ class RefineTrainLoop:
                             pair_reduce=self.model.pair_reduce,
                         )
 
-                    if self.args.lambda_dist > 0:
+                    if need_xyz:
                         loss_dist = distance_prior_loss_semantic(
                             actor_xyz,
                             refined_xyz,
@@ -184,14 +185,18 @@ class RefineTrainLoop:
                         loss_smooth = smoothness_loss(delta_pred, mask)
 
                     loss = (
-                        self.args.lambda_dist * loss_dist
-                        + self.args.lambda_soft * loss_soft
-                        + self.args.lambda_local * loss_local
+                        self.args.lambda_soft * loss_soft
                         + self.args.lambda_res * loss_res
-                        + self.args.lambda_reg * loss_reg
-                        + self.args.lambda_coord * loss_coord
                         + self.args.lambda_smooth * loss_smooth
                     )
+                    if self.args.lambda_dist > 0:
+                        loss = loss + self.args.lambda_dist * loss_dist
+                    if self.args.lambda_local > 0:
+                        loss = loss + self.args.lambda_local * loss_local
+                    if self.args.lambda_reg > 0:
+                        loss = loss + self.args.lambda_reg * loss_reg
+                    if self.args.lambda_coord > 0:
+                        loss = loss + self.args.lambda_coord * loss_coord
                 else:
                     loss_contact = torch.tensor(0.0, device=self.device)
                     loss_dist_prior = torch.tensor(0.0, device=self.device)
@@ -308,6 +313,10 @@ class RefineTrainLoop:
                             f"loss_reg={loss_reg.item():.6f} "
                             f"loss_coord={loss_coord.item():.6f} "
                             f"loss_smooth={loss_smooth.item():.6f} "
+                            f"loss_dist_used={1 if self.args.lambda_dist > 0 else 0} "
+                            f"loss_local_used={1 if self.args.lambda_local > 0 else 0} "
+                            f"loss_reg_used={1 if self.args.lambda_reg > 0 else 0} "
+                            f"loss_coord_used={1 if self.args.lambda_coord > 0 else 0} "
                             f"gate_mean={gate_mean:.4f} "
                             f"gate_std={gate_std:.4f} "
                             f"delta_raw_abs_mean={delta_raw_abs_mean:.6f} "

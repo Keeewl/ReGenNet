@@ -1,5 +1,6 @@
 import json
 import os
+import sys
 
 import torch
 from torch.utils.data import DataLoader
@@ -14,6 +15,24 @@ from utils.parser_util import refine_train_args
 
 def _resolve_window_size(args, default):
     return default if args.window_size is None else args.window_size
+
+
+
+def _set_default_if_missing(args, flag, value):
+    if flag not in sys.argv:
+        setattr(args, flag.lstrip("-").replace("-", "_"), value)
+
+
+def _apply_v3_lite_defaults(args):
+    if args.rnet_version != "v3":
+        return
+    _set_default_if_missing(args, "--lambda_dist", 0.0)
+    _set_default_if_missing(args, "--lambda_local", 0.0)
+    _set_default_if_missing(args, "--lambda_reg", 0.0)
+    _set_default_if_missing(args, "--lambda_coord", 0.0)
+    _set_default_if_missing(args, "--lambda_soft", 1.0)
+    _set_default_if_missing(args, "--lambda_res", 0.25)
+    _set_default_if_missing(args, "--lambda_smooth", 0.02)
 
 
 
@@ -149,6 +168,7 @@ def build_model_from_args(args):
 
 def main():
     args = refine_train_args()
+    _apply_v3_lite_defaults(args)
     fixseed(args.seed)
 
     if args.cuda and torch.cuda.is_available():

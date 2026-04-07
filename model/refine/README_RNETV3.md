@@ -101,3 +101,20 @@ Contact-focused weighting (default):
 - No mesh / SDF / dense vertex contact in v3.
 - Default focus remains on upper-body and hands.
 - v1/v2 remain unchanged and compatible.
+
+
+## 9. V3-lite Training Objective (Default)
+
+当前默认训练目标简化为：
+
+- loss_soft (主物理项)
+- loss_res (残差稳定器)
+- loss_smooth (时间平滑)
+
+默认关闭（作为后续消融开关保留）：
+- loss_dist
+- loss_local
+- loss_reg
+- loss_coord
+
+这些项可通过对应 lambda > 0 再打开做 ablation。
