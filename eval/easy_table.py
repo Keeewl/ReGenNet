@@ -147,7 +147,7 @@ def print_results(folder, evaluation):
         if has_all:
             insert_at = line_to_row_idx.get("refined", len(rows) - 1) + 1
             rows.insert(insert_at, " | ".join(diff_row))
-            rows_latex.insert(insert_at, " & ".join(diff_row_latex) + r"\\")
+            rows_latex.insert(insert_at, " & ".join(diff_row_latex) + "\\")
 
     table = "\n".join(rows)
     table_latex = "\n".join(rows_latex)
@@ -156,7 +156,6 @@ def print_results(folder, evaluation):
     print()
     print("Latex table")
     print(table_latex)
-        print("\n".join(cd_rows_latex))
 
 
 if __name__ == "__main__":
