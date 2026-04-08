@@ -271,6 +271,7 @@ def build_oracle_active_mask(
         "joint_mask": joint_mask,
         "scores": scores,
         "gt_contact_mask": gt_contact_strict,
+        "gt_contact_mask_strict": gt_contact_strict,
         "gt_near_mask": gt_contact,
         "contact_error_mask": contact_error,
         "dist_gt_min": dist_gt,

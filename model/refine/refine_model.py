@@ -353,6 +353,10 @@ class RNetV3(nn.Module):
 
         overlap_metrics = None
         train_mask = None
+        gt_contact_mask_strict = None
+        gt_near_mask = None
+        contact_error_mask = None
+        coarse_mask = None
         if gt_motion is not None:
             gt_xyz = self.surface_builder.to_xyz(gt_motion)
             train_mask, oracle_info = build_oracle_active_mask(
@@ -369,9 +373,20 @@ class RNetV3(nn.Module):
             active_mask = train_mask
             joint_mask = oracle_info["joint_mask"]
             scores = oracle_info["scores"]
+            gt_contact_mask_strict = oracle_info.get("gt_contact_mask_strict", oracle_info["gt_contact_mask"])
+            gt_near_mask = oracle_info["gt_near_mask"]
+            contact_error_mask = oracle_info["contact_error_mask"]
+            coarse_mask = oracle_info["coarse_mask"]
             overlap_metrics = compute_overlap_metrics(
                 oracle_info["coarse_mask"], oracle_info["gt_contact_mask"]
             )
+            overlap_metrics["overlap_iou_strict"] = overlap_metrics["overlap_iou"]
+            overlap_metrics["strict_contact_recall_by_coarse_risk"] = overlap_metrics[
+                "gt_contact_recall_by_coarse_risk"
+            ]
+            overlap_metrics["strict_contact_precision_wrt_coarse_risk"] = overlap_metrics[
+                "coarse_risk_precision_wrt_gt"
+            ]
             near_metrics = compute_overlap_metrics(
                 oracle_info["coarse_mask"], oracle_info["gt_near_mask"]
             )
@@ -379,7 +394,13 @@ class RNetV3(nn.Module):
             overlap_metrics["gt_near_recall_by_coarse_risk"] = near_metrics[
                 "gt_contact_recall_by_coarse_risk"
             ]
+            overlap_metrics["near_contact_recall_by_coarse_risk"] = near_metrics[
+                "gt_contact_recall_by_coarse_risk"
+            ]
             overlap_metrics["coarse_risk_precision_wrt_gt_near"] = near_metrics[
+                "coarse_risk_precision_wrt_gt"
+            ]
+            overlap_metrics["near_contact_precision_wrt_coarse_risk"] = near_metrics[
                 "coarse_risk_precision_wrt_gt"
             ]
             if self.train_window_size is not None and self.train_window_size > 0:
@@ -441,9 +462,23 @@ class RNetV3(nn.Module):
             }
             if train_mask is not None:
                 aux["train_mask"] = train_mask
+            if gt_contact_mask_strict is not None:
+                aux["gt_contact_mask_strict"] = gt_contact_mask_strict
+            if gt_near_mask is not None:
+                aux["gt_near_mask"] = gt_near_mask
+            if contact_error_mask is not None:
+                aux["contact_error_mask"] = contact_error_mask
+            if coarse_mask is not None:
+                aux["coarse_mask"] = coarse_mask
             if overlap_metrics is not None:
                 aux.update(overlap_metrics)
             if gt_motion is not None:
                 aux["gt_motion"] = gt_motion
             return refined, aux
         return refined
+
+
+class RNetV3_1(RNetV3):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.version = "v3_1"

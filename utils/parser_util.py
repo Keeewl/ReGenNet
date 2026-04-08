@@ -217,7 +217,7 @@ def add_refine_training_options(parser):
     group.add_argument("--geom_sigma", default=0.1, type=float,
                        help="Sigma for contact score.")
     group.add_argument("--hidden_dim", default=256, type=int, help="Refine head hidden dim.")
-    group.add_argument("--rnet_version", default="v1", type=str, choices=["v1", "v2", "v3"],
+    group.add_argument("--rnet_version", default="v1", type=str, choices=["v1", "v2", "v3", "v3_1"],
                        help="RNet version to train.")
     group.add_argument("--num_temporal_blocks", default=2, type=int,
                        help="Number of temporal blocks for v2 head.")
@@ -302,7 +302,7 @@ def add_refine_sampling_options(parser):
                        help="Path to Stage1 checkpoint (cnet_v5).")
     group.add_argument("--stage2_model_path", required=True, type=str,
                        help="Path to Stage2 checkpoint (rnet_v1).")
-    group.add_argument("--rnet_version", default="", type=str, choices=["", "v1", "v2", "v3"],
+    group.add_argument("--rnet_version", default="", type=str, choices=["", "v1", "v2", "v3", "v3_1"],
                        help="Optional override for Stage2 version.")
     group.add_argument("--output_path", required=True, type=str,
                        help="Path to save refined results (.npz or .h5).")

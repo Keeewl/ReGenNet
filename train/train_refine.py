@@ -6,7 +6,7 @@ import torch
 from torch.utils.data import DataLoader
 
 from data.refine_dataset import RefineCacheDataset, refine_collate
-from model.refine.refine_model import RNetV1, RNetV2, RNetV3
+from model.refine.refine_model import RNetV1, RNetV2, RNetV3, RNetV3_1
 from train.refine_training_loop import RefineTrainLoop
 from utils.fixseed import fixseed
 from utils.parser_util import refine_train_args
@@ -35,8 +35,87 @@ def _apply_v3_lite_defaults(args):
     _set_default_if_missing(args, "--lambda_smooth", 0.02)
 
 
+def _apply_v3_1_defaults(args):
+    if args.rnet_version != "v3_1":
+        return
+    _set_default_if_missing(args, "--lambda_dist", 1.0)
+    _set_default_if_missing(args, "--lambda_local", 1.0)
+    _set_default_if_missing(args, "--lambda_soft", 0.5)
+    _set_default_if_missing(args, "--lambda_res", 0.05)
+    _set_default_if_missing(args, "--lambda_smooth", 0.02)
+    _set_default_if_missing(args, "--lambda_reg", 0.0)
+    _set_default_if_missing(args, "--lambda_coord", 0.0)
+
 
 def build_model_from_args(args):
+    if args.rnet_version == "v3_1":
+        window_size = _resolve_window_size(args, 7)
+        model = RNetV3_1(
+            njoints=56,
+            nfeats=6,
+            body_model="smplx",
+            pose_rep="rot6d",
+            top_k=args.top_k,
+            window_size=window_size,
+            train_window_size=args.train_window_size,
+            vel_threshold=args.vel_threshold,
+            geom_sigma=args.geom_sigma,
+            selector_sigma=args.selector_sigma,
+            selector_alpha=args.selector_alpha,
+            selector_beta=args.selector_beta,
+            selector_gamma=args.selector_gamma,
+            hidden_dim=args.hidden_dim,
+            num_temporal_blocks=args.num_temporal_blocks,
+            dropout=args.dropout,
+            pair_mode=args.pair_mode,
+            topk_pairs=args.topk_pairs,
+            pair_reduce=args.pair_reduce,
+            use_contact_feature_aug=args.use_contact_feature_aug,
+            pair_feature_topk=args.pair_feature_topk,
+            use_closing_speed=args.use_closing_speed,
+            use_part_contact_summary=args.use_part_contact_summary,
+            tau_contact=args.tau_contact,
+            tau_near=args.tau_near,
+            contact_error_margin=args.contact_error_margin,
+            gate_level=args.gate_level,
+            gate_init_bias=args.gate_init_bias,
+            bound_mode=args.bound_mode,
+            delta_max=args.delta_max,
+            use_gate=args.use_gate,
+        )
+        model.config = {
+            "version": "v3_1",
+            "rnet_version": "v3_1",
+            "top_k": args.top_k,
+            "window_size": window_size,
+            "train_window_size": args.train_window_size,
+            "vel_threshold": args.vel_threshold,
+            "geom_sigma": args.geom_sigma,
+            "selector_sigma": args.selector_sigma,
+            "selector_alpha": args.selector_alpha,
+            "selector_beta": args.selector_beta,
+            "selector_gamma": args.selector_gamma,
+            "hidden_dim": args.hidden_dim,
+            "num_temporal_blocks": args.num_temporal_blocks,
+            "dropout": args.dropout,
+            "pair_mode": args.pair_mode,
+            "topk_pairs": args.topk_pairs,
+            "pair_reduce": args.pair_reduce,
+            "use_contact_feature_aug": args.use_contact_feature_aug,
+            "pair_feature_topk": args.pair_feature_topk,
+            "use_closing_speed": args.use_closing_speed,
+            "use_part_contact_summary": args.use_part_contact_summary,
+            "tau_contact": args.tau_contact,
+            "tau_near": args.tau_near,
+            "contact_error_margin": args.contact_error_margin,
+            "gate_level": args.gate_level,
+            "gate_init_bias": args.gate_init_bias,
+            "bound_mode": args.bound_mode,
+            "delta_max": args.delta_max,
+            "use_gate": args.use_gate,
+        }
+        return model
+
     if args.rnet_version == "v3":
         window_size = _resolve_window_size(args, 7)
         model = RNetV3(
@@ -170,6 +249,7 @@ def build_model_from_args(args):
 
 def main():
     args = refine_train_args()
+    _apply_v3_1_defaults(args)
     _apply_v3_lite_defaults(args)
     fixseed(args.seed)
 

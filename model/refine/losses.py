@@ -166,6 +166,42 @@ def contact_weight_from_dist(
     return weight
 
 
+def strict_contact_weight_from_dist(
+    dist_gt,
+    tau_contact=0.1,
+    tau_near=0.18,
+    weight_contact=1.0,
+    weight_near=0.25,
+    weight_far=0.0,
+    use_far=False,
+):
+    weight = torch.zeros_like(dist_gt)
+    if use_far:
+        weight = torch.full_like(dist_gt, float(weight_far))
+    weight = torch.where(dist_gt < float(tau_near), torch.full_like(weight, float(weight_near)), weight)
+    weight = torch.where(dist_gt < float(tau_contact), torch.full_like(weight, float(weight_contact)), weight)
+    return weight
+
+
+def masked_weighted_huber(diff, mask, weight, delta=0.01):
+    if diff.numel() == 0:
+        return diff.sum() * 0.0
+    mask = mask.float()
+    while mask.dim() < diff.dim():
+        mask = mask.unsqueeze(-1)
+    while weight.dim() < diff.dim():
+        weight = weight.unsqueeze(-1)
+    delta_t = diff.new_tensor(float(delta))
+    abs_diff = diff.abs()
+    quad = torch.minimum(abs_diff, delta_t)
+    linear = abs_diff - quad
+    loss = 0.5 * quad * quad + delta_t * linear
+    extra = diff[0, 0].numel() if diff.dim() > 2 else 1
+    denom = (mask * weight).sum() * extra
+    denom = denom.clamp(min=1.0)
+    return (loss * mask * weight).sum() / denom
+
+
 def _validate_pair_reduce(pair_reduce):
     if pair_reduce != "mean":
         raise ValueError(f"Unsupported pair_reduce: {pair_reduce}")
@@ -273,3 +309,160 @@ def local_distance_loss_semantic(
     )
     diff = dist_refined - dist_gt
     return masked_mse(diff, mask)
+
+
+def _apply_frame_weight(weight, frame_weight):
+    if frame_weight is None:
+        return weight
+    frame_weight = frame_weight.float()
+    while frame_weight.dim() < weight.dim():
+        frame_weight = frame_weight.unsqueeze(-1)
+    return weight * frame_weight
+
+
+def distance_prior_loss_semantic_v31(
+    actor_xyz,
+    refined_xyz,
+    gt_xyz,
+    candidate_pairs,
+    part_joint_ids,
+    topk_pairs,
+    mask,
+    tau_contact=0.1,
+    tau_near=0.18,
+    weight_contact=1.0,
+    weight_near=0.25,
+    weight_far=0.0,
+    pair_reduce="mean",
+    frame_weight=None,
+    top1_only=True,
+    huber_delta=0.01,
+    use_far=False,
+):
+    _validate_pair_reduce(pair_reduce)
+    stats = build_semantic_topk_pairs(
+        actor_xyz,
+        gt_xyz,
+        candidate_pairs=candidate_pairs,
+        part_joint_ids=part_joint_ids,
+        topk=topk_pairs,
+    )
+    dist_gt = stats["dist_topk"]
+    actor_ids = stats["actor_ids"]
+    reactor_ids = stats["reactor_ids"]
+    if top1_only:
+        dist_gt = dist_gt[..., 0]
+        actor_ids = actor_ids[..., 0]
+        reactor_ids = reactor_ids[..., 0]
+    dist_refined = gather_pairwise_distances(actor_xyz, refined_xyz, actor_ids, reactor_ids)
+    diff = dist_refined - dist_gt
+    weight = strict_contact_weight_from_dist(
+        dist_gt,
+        tau_contact=tau_contact,
+        tau_near=tau_near,
+        weight_contact=weight_contact,
+        weight_near=weight_near,
+        weight_far=weight_far,
+        use_far=use_far,
+    )
+    weight = _apply_frame_weight(weight, frame_weight)
+    return masked_weighted_huber(diff, mask, weight, delta=huber_delta)
+
+
+def local_distance_loss_semantic_v31(
+    actor_xyz,
+    refined_xyz,
+    gt_xyz,
+    candidate_pairs,
+    part_joint_ids,
+    topk_pairs,
+    mask,
+    tau_contact=0.1,
+    tau_near=0.18,
+    weight_contact=1.0,
+    weight_near=0.25,
+    weight_far=0.0,
+    pair_reduce="mean",
+    frame_weight=None,
+    top1_only=True,
+    use_far=False,
+):
+    _validate_pair_reduce(pair_reduce)
+    stats = build_semantic_topk_pairs(
+        actor_xyz,
+        gt_xyz,
+        candidate_pairs=candidate_pairs,
+        part_joint_ids=part_joint_ids,
+        topk=topk_pairs,
+    )
+    dist_gt = stats["dist_topk"]
+    actor_ids = stats["actor_ids"]
+    reactor_ids = stats["reactor_ids"]
+    if top1_only:
+        dist_gt = dist_gt[..., 0]
+        actor_ids = actor_ids[..., 0]
+        reactor_ids = reactor_ids[..., 0]
+    dist_refined = gather_pairwise_distances(actor_xyz, refined_xyz, actor_ids, reactor_ids)
+    diff = dist_refined - dist_gt
+    weight = strict_contact_weight_from_dist(
+        dist_gt,
+        tau_contact=tau_contact,
+        tau_near=tau_near,
+        weight_contact=weight_contact,
+        weight_near=weight_near,
+        weight_far=weight_far,
+        use_far=use_far,
+    )
+    weight = _apply_frame_weight(weight, frame_weight)
+    return masked_weighted_mse(diff, mask, weight)
+
+
+def soft_contact_loss_semantic_v31(
+    actor_xyz,
+    refined_xyz,
+    gt_xyz,
+    candidate_pairs,
+    part_joint_ids,
+    topk_pairs,
+    mask,
+    sigma=0.1,
+    tau_contact=0.1,
+    tau_near=0.18,
+    weight_contact=1.0,
+    weight_near=0.25,
+    weight_far=0.0,
+    pair_reduce="mean",
+    frame_weight=None,
+    top1_only=True,
+    use_far=False,
+):
+    _validate_pair_reduce(pair_reduce)
+    stats = build_semantic_topk_pairs(
+        actor_xyz,
+        gt_xyz,
+        candidate_pairs=candidate_pairs,
+        part_joint_ids=part_joint_ids,
+        topk=topk_pairs,
+    )
+    dist_gt = stats["dist_topk"]
+    actor_ids = stats["actor_ids"]
+    reactor_ids = stats["reactor_ids"]
+    if top1_only:
+        dist_gt = dist_gt[..., 0]
+        actor_ids = actor_ids[..., 0]
+        reactor_ids = reactor_ids[..., 0]
+    dist_refined = gather_pairwise_distances(actor_xyz, refined_xyz, actor_ids, reactor_ids)
+    contact_gt = torch.exp(-dist_gt / max(float(sigma), 1e-6))
+    contact_refined = torch.exp(-dist_refined / max(float(sigma), 1e-6))
+    weight = strict_contact_weight_from_dist(
+        dist_gt,
+        tau_contact=tau_contact,
+        tau_near=tau_near,
+        weight_contact=weight_contact,
+        weight_near=weight_near,
+        weight_far=weight_far,
+        use_far=use_far,
+    )
+    weight = _apply_frame_weight(weight, frame_weight)
+    diff = contact_refined - contact_gt
+    return masked_weighted_mse(diff, mask, weight)

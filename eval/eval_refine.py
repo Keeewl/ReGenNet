@@ -12,7 +12,9 @@ from eval.a2m.stgcn.evaluate import Evaluation as STGCNEvaluation
 from eval.a2m.stgcn_eval import _load_interx_action_names
 from eval.a2m.tools import save_metrics, format_metrics
 from eval.metrics_contact import contact_distance, contact_distance_semantic
-from model.refine.refine_model import RNetV1, RNetV2, RNetV3
+from model.refine.active_window import _min_pairwise_distance
+from model.refine.surface_features import build_semantic_topk_pairs
+from model.refine.refine_model import RNetV1, RNetV2, RNetV3, RNetV3_1
 from utils import dist_util
 from utils.fixseed import fixseed
 from utils.model_util import create_model_and_diffusion, load_model_wo_clip
@@ -50,7 +52,7 @@ def _finalize_cd(stats, key):
 
 
 
-def evaluate_contact_distance(coarse_loader, refined_loader, rnet, tau_contact=0.1):
+def evaluate_contact_distance(coarse_loader, refined_loader, rnet, tau_contact=0.1, tau_near=0.18):
     """
     Aggregate CD metrics with count-weighted averaging.
     """
@@ -66,7 +68,16 @@ def evaluate_contact_distance(coarse_loader, refined_loader, rnet, tau_contact=0
     stats = {}
 
     def _init_stats(device):
-        for name in ["coarse", "refined", "active_coarse", "active_refined"]:
+        for name in [
+            "coarse",
+            "refined",
+            "active_coarse",
+            "active_refined",
+            "strict_coarse",
+            "strict_refined",
+            "near_coarse",
+            "near_refined",
+        ]:
             stats[f"{name}_sum"] = torch.zeros((), device=device)
             stats[f"{name}_count"] = torch.zeros((), device=device)
 
@@ -94,6 +105,25 @@ def evaluate_contact_distance(coarse_loader, refined_loader, rnet, tau_contact=0
             active_mask=active_mask,
         )
 
+    def _frame_contact_mask(actor_xyz, gt_xyz, lengths, threshold):
+        if use_semantic:
+            stats = build_semantic_topk_pairs(
+                actor_xyz,
+                gt_xyz,
+                candidate_pairs=candidate_pairs,
+                part_joint_ids=part_joint_ids,
+                topk=topk_pairs,
+            )
+            dist_min = stats["dist_topk"].amin(dim=(2, 3))
+        else:
+            dist_min = _min_pairwise_distance(actor_xyz, gt_xyz, pair_ids)
+        mask = dist_min < float(threshold)
+        if lengths is not None:
+            frame_ids = torch.arange(mask.shape[1], device=mask.device).view(1, -1)
+            valid = frame_ids < lengths.view(-1, 1)
+            mask = mask & valid
+        return mask
+
     for mode, loader in [("coarse", coarse_loader), ("refined", refined_loader)]:
         for batch in loader:
             output_xyz = batch["output_xyz"]
@@ -110,6 +140,17 @@ def evaluate_contact_distance(coarse_loader, refined_loader, rnet, tau_contact=0
                 _init_stats(metrics["cd"].device)
 
             _accumulate_cd(stats, mode, metrics["cd"], metrics["count"])
+
+            strict_mask = _frame_contact_mask(actor_xyz, gt_reactor_xyz, lengths, tau_contact)
+            near_mask = _frame_contact_mask(actor_xyz, gt_reactor_xyz, lengths, tau_near)
+
+            metrics_strict = _cd_metrics(
+                actor_xyz, pred_xyz, gt_reactor_xyz, lengths, active_mask=strict_mask
+            )
+            _accumulate_cd(stats, f"strict_{mode}", metrics_strict["cd"], metrics_strict["count"])
+
+            metrics_near = _cd_metrics(actor_xyz, pred_xyz, gt_reactor_xyz, lengths, active_mask=near_mask)
+            _accumulate_cd(stats, f"near_{mode}", metrics_near["cd"], metrics_near["count"])
 
             if active_mask is not None:
                 metrics_active = _cd_metrics(
@@ -129,7 +170,17 @@ def evaluate_contact_distance(coarse_loader, refined_loader, rnet, tau_contact=0
     results["cd_active_coarse"] = _finalize_cd(stats, "active_coarse")
     results["cd_active_refined"] = _finalize_cd(stats, "active_refined")
     results["cd_active_improve"] = results["cd_active_coarse"] - results["cd_active_refined"]
+    results["cd_active"] = results["cd_active_refined"]
+    results["cd_strict_contact"] = _finalize_cd(stats, "strict_refined")
+    results["cd_near_contact"] = _finalize_cd(stats, "near_refined")
+    results["cd_refined_minus_coarse_active"] = (
+        results["cd_active_refined"] - results["cd_active_coarse"]
+    )
+    results["cd_refined_minus_coarse_strict"] = (
+        results["cd_strict_contact"] - _finalize_cd(stats, "strict_coarse")
+    )
     return results
+
 
 
 class RefineDataloader:
@@ -242,7 +293,41 @@ def build_rnet(checkpoint_path, device):
     config = checkpoint.get("config", {})
     version = config.get("rnet_version", config.get("version", "v1"))
 
-    if version == "v3":
+    if version == "v3_1":
+        model = RNetV3_1(
+            njoints=56,
+            nfeats=6,
+            body_model="smplx",
+            pose_rep="rot6d",
+            top_k=config.get("top_k", 5),
+            window_size=config.get("window_size", 7),
+            train_window_size=config.get("train_window_size", 10),
+            vel_threshold=config.get("vel_threshold", None),
+            geom_sigma=config.get("geom_sigma", 0.1),
+            selector_sigma=config.get("selector_sigma", 0.1),
+            selector_alpha=config.get("selector_alpha", 1.0),
+            selector_beta=config.get("selector_beta", 0.5),
+            selector_gamma=config.get("selector_gamma", 0.5),
+            hidden_dim=config.get("hidden_dim", 256),
+            num_temporal_blocks=config.get("num_temporal_blocks", 2),
+            dropout=config.get("dropout", 0.1),
+            pair_mode=config.get("pair_mode", "semantic_nearest"),
+            topk_pairs=config.get("topk_pairs", 3),
+            pair_reduce=config.get("pair_reduce", "mean"),
+            use_contact_feature_aug=config.get("use_contact_feature_aug", True),
+            pair_feature_topk=config.get("pair_feature_topk", 3),
+            use_closing_speed=config.get("use_closing_speed", True),
+            use_part_contact_summary=config.get("use_part_contact_summary", True),
+            tau_contact=config.get("tau_contact", 0.1),
+            tau_near=config.get("tau_near", 0.18),
+            contact_error_margin=config.get("contact_error_margin", 0.05),
+            gate_level=config.get("gate_level", "joint"),
+            gate_init_bias=config.get("gate_init_bias", -1.0),
+            bound_mode=config.get("bound_mode", "tanh"),
+            delta_max=config.get("delta_max", 0.15),
+            use_gate=config.get("use_gate", False),
+        )
+    elif version == "v3":
         model = RNetV3(
             njoints=56,
             nfeats=6,
@@ -425,11 +510,13 @@ def evaluate_refine(args, stage1_model, diffusion, rnet, data, acc_only=False):
         cd_metrics[seed] = {}
         for split in data_types:
             tau_contact = getattr(rnet, "tau_contact", 0.1)
+            tau_near = getattr(rnet, "tau_near", 0.18)
             cd_result = evaluate_contact_distance(
                 coarse_loaders[split],
                 refined_loaders[split],
                 rnet,
                 tau_contact=tau_contact,
+                tau_near=tau_near,
             )
             for key, val in cd_result.items():
                 cd_metrics[seed][f"{key}_{split}"] = val

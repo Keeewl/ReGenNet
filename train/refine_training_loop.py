@@ -8,13 +8,16 @@ from torch.optim import AdamW
 from model.refine.losses import (
     distance_prior_loss,
     distance_prior_loss_semantic,
+    distance_prior_loss_semantic_v31,
     soft_contact_loss,
     soft_contact_loss_semantic,
+    soft_contact_loss_semantic_v31,
     smoothness_loss,
     build_time_mask,
     coordination_reg,
     local_distance_loss,
     local_distance_loss_semantic,
+    local_distance_loss_semantic_v31,
     residual_loss,
     residual_reg,
 )
@@ -72,9 +75,14 @@ class RefineTrainLoop:
             "overlap_iou": 0.0,
             "gt_contact_recall_by_coarse_risk": 0.0,
             "coarse_risk_precision_wrt_gt": 0.0,
+            "overlap_iou_strict": 0.0,
+            "strict_contact_recall_by_coarse_risk": 0.0,
+            "strict_contact_precision_wrt_coarse_risk": 0.0,
             "overlap_iou_near": 0.0,
             "gt_near_recall_by_coarse_risk": 0.0,
+            "near_contact_recall_by_coarse_risk": 0.0,
             "coarse_risk_precision_wrt_gt_near": 0.0,
+            "near_contact_precision_wrt_coarse_risk": 0.0,
             "overlap_iou_expanded": 0.0,
             "gt_contact_recall_by_expanded_coarse_risk": 0.0,
             "count": 0,
@@ -97,7 +105,9 @@ class RefineTrainLoop:
                 delta_pred = aux["delta"]
                 active_mask = aux["active_mask"]
 
-                is_v3 = getattr(self.model, "version", "v1") == "v3"
+                version = getattr(self.model, "version", "v1")
+                is_v3 = version == "v3"
+                is_v3_1 = version == "v3_1"
 
                 joint_ids = self.model.refine_joint_ids
                 joint_ids_t = torch.as_tensor(joint_ids, device=self.device, dtype=torch.long)
@@ -112,11 +122,17 @@ class RefineTrainLoop:
                 loss_reg = residual_reg(delta_pred, mask)
                 loss_coord = coordination_reg(delta_pred, joint_ids, mask)
 
-                if is_v3:
+                if is_v3 or is_v3_1:
                     loss_local = torch.tensor(0.0, device=self.device)
                     loss_dist = torch.tensor(0.0, device=self.device)
                     loss_soft = torch.tensor(0.0, device=self.device)
                     loss_smooth = torch.tensor(0.0, device=self.device)
+                    loss_dist_strict = torch.tensor(0.0, device=self.device)
+                    loss_dist_near = torch.tensor(0.0, device=self.device)
+                    loss_local_strict = torch.tensor(0.0, device=self.device)
+                    loss_local_near = torch.tensor(0.0, device=self.device)
+                    loss_soft_strict = torch.tensor(0.0, device=self.device)
+                    loss_soft_near = torch.tensor(0.0, device=self.device)
 
                     need_xyz = (
                         self.args.lambda_soft > 0
@@ -129,7 +145,87 @@ class RefineTrainLoop:
                         refined_xyz = self.model.surface_builder.to_xyz(refined)
                         gt_xyz = self.model.surface_builder.to_xyz(gt)
 
-                    if need_xyz:
+                    frame_weight = None
+                    if is_v3_1 and need_xyz:
+                        strict_mask = aux.get("gt_contact_mask_strict", None)
+                        near_mask = aux.get("gt_near_mask", None)
+                        contact_error = aux.get("contact_error_mask", None)
+                        coarse_mask = aux.get("coarse_mask", None)
+                        if (
+                            strict_mask is not None
+                            and near_mask is not None
+                            and contact_error is not None
+                            and coarse_mask is not None
+                        ):
+                            strict_mask = strict_mask.bool()
+                            near_mask = near_mask.bool()
+                            contact_error = contact_error.bool()
+                            coarse_mask = coarse_mask.bool()
+                            frame_weight = torch.zeros_like(active_mask, dtype=actor_xyz.dtype)
+                            frame_weight[strict_mask] = 1.0
+                            frame_weight[contact_error] = 1.0
+                            near_only = near_mask & ~(strict_mask | contact_error)
+                            frame_weight[near_only] = 0.25
+                            coarse_only = coarse_mask & ~(strict_mask | contact_error | near_mask)
+                            frame_weight[coarse_only] = 0.1
+
+                    if need_xyz and is_v3_1:
+                        loss_dist = distance_prior_loss_semantic_v31(
+                            actor_xyz,
+                            refined_xyz,
+                            gt_xyz,
+                            self.model.candidate_contact_pairs,
+                            self.model.part_joint_ids,
+                            self.model.topk_pairs,
+                            mask,
+                            tau_contact=self.args.tau_contact,
+                            tau_near=self.args.tau_near,
+                            weight_contact=1.0,
+                            weight_near=0.25,
+                            weight_far=0.0,
+                            pair_reduce=self.model.pair_reduce,
+                            frame_weight=frame_weight,
+                            top1_only=True,
+                        )
+
+                        loss_local = local_distance_loss_semantic_v31(
+                            actor_xyz,
+                            refined_xyz,
+                            gt_xyz,
+                            self.model.candidate_contact_pairs,
+                            self.model.part_joint_ids,
+                            self.model.topk_pairs,
+                            mask,
+                            tau_contact=self.args.tau_contact,
+                            tau_near=self.args.tau_near,
+                            weight_contact=1.0,
+                            weight_near=0.25,
+                            weight_far=0.0,
+                            pair_reduce=self.model.pair_reduce,
+                            frame_weight=frame_weight,
+                            top1_only=True,
+                        )
+
+                        if self.args.lambda_soft > 0:
+                            loss_soft = soft_contact_loss_semantic_v31(
+                                actor_xyz,
+                                refined_xyz,
+                                gt_xyz,
+                                self.model.candidate_contact_pairs,
+                                self.model.part_joint_ids,
+                                self.model.topk_pairs,
+                                mask,
+                                sigma=self.args.soft_contact_sigma,
+                                tau_contact=self.args.tau_contact,
+                                tau_near=self.args.tau_near,
+                                weight_contact=1.0,
+                                weight_near=0.25,
+                                weight_far=0.0,
+                                pair_reduce=self.model.pair_reduce,
+                                frame_weight=frame_weight,
+                                top1_only=True,
+                            )
+                    elif need_xyz:
                         loss_local = local_distance_loss_semantic(
                             actor_xyz,
                             refined_xyz,
@@ -146,7 +242,6 @@ class RefineTrainLoop:
                             pair_reduce=self.model.pair_reduce,
                         )
 
-                    if need_xyz:
                         loss_dist = distance_prior_loss_semantic(
                             actor_xyz,
                             refined_xyz,
@@ -163,40 +258,53 @@ class RefineTrainLoop:
                             pair_reduce=self.model.pair_reduce,
                         )
 
-                    if self.args.lambda_soft > 0:
-                        loss_soft = soft_contact_loss_semantic(
-                            actor_xyz,
-                            refined_xyz,
-                            gt_xyz,
-                            self.model.candidate_contact_pairs,
-                            self.model.part_joint_ids,
-                            self.model.topk_pairs,
-                            mask,
-                            sigma=self.args.soft_contact_sigma,
-                            tau_contact=self.args.tau_contact,
-                            tau_near=self.args.tau_near,
-                            weight_contact=self.args.contact_weight_contact,
-                            weight_near=self.args.contact_weight_near,
-                            weight_far=self.args.contact_weight_far,
-                            pair_reduce=self.model.pair_reduce,
-                        )
+                        if self.args.lambda_soft > 0:
+                            loss_soft = soft_contact_loss_semantic(
+                                actor_xyz,
+                                refined_xyz,
+                                gt_xyz,
+                                self.model.candidate_contact_pairs,
+                                self.model.part_joint_ids,
+                                self.model.topk_pairs,
+                                mask,
+                                sigma=self.args.soft_contact_sigma,
+                                tau_contact=self.args.tau_contact,
+                                tau_near=self.args.tau_near,
+                                weight_contact=self.args.contact_weight_contact,
+                                weight_near=self.args.contact_weight_near,
+                                weight_far=self.args.contact_weight_far,
+                                pair_reduce=self.model.pair_reduce,
+                            )
 
                     if self.args.lambda_smooth > 0:
                         loss_smooth = smoothness_loss(delta_pred, mask)
 
-                    loss = (
-                        self.args.lambda_soft * loss_soft
-                        + self.args.lambda_res * loss_res
-                        + self.args.lambda_smooth * loss_smooth
-                    )
-                    if self.args.lambda_dist > 0:
-                        loss = loss + self.args.lambda_dist * loss_dist
-                    if self.args.lambda_local > 0:
-                        loss = loss + self.args.lambda_local * loss_local
-                    if self.args.lambda_reg > 0:
-                        loss = loss + self.args.lambda_reg * loss_reg
-                    if self.args.lambda_coord > 0:
-                        loss = loss + self.args.lambda_coord * loss_coord
+                    if is_v3_1:
+                        loss = (
+                            self.args.lambda_dist * loss_dist
+                            + self.args.lambda_local * loss_local
+                            + self.args.lambda_soft * loss_soft
+                            + self.args.lambda_res * loss_res
+                            + self.args.lambda_smooth * loss_smooth
+                        )
+                        if self.args.lambda_reg > 0:
+                            loss = loss + self.args.lambda_reg * loss_reg
+                        if self.args.lambda_coord > 0:
+                            loss = loss + self.args.lambda_coord * loss_coord
+                    else:
+                        loss = (
+                            self.args.lambda_soft * loss_soft
+                            + self.args.lambda_res * loss_res
+                            + self.args.lambda_smooth * loss_smooth
+                        )
+                        if self.args.lambda_dist > 0:
+                            loss = loss + self.args.lambda_dist * loss_dist
+                        if self.args.lambda_local > 0:
+                            loss = loss + self.args.lambda_local * loss_local
+                        if self.args.lambda_reg > 0:
+                            loss = loss + self.args.lambda_reg * loss_reg
+                        if self.args.lambda_coord > 0:
+                            loss = loss + self.args.lambda_coord * loss_coord
                 else:
                     loss_contact = torch.tensor(0.0, device=self.device)
                     loss_dist_prior = torch.tensor(0.0, device=self.device)
@@ -257,33 +365,28 @@ class RefineTrainLoop:
                 loss.backward()
                 self.opt.step()
 
-                if is_v3 and "overlap_iou" in aux:
-                    overlap_stats["overlap_iou"] += aux["overlap_iou"].item()
-                    overlap_stats["gt_contact_recall_by_coarse_risk"] += aux["gt_contact_recall_by_coarse_risk"].item()
-                    overlap_stats["coarse_risk_precision_wrt_gt"] += aux["coarse_risk_precision_wrt_gt"].item()
-                    if "overlap_iou_near" in aux:
-                        overlap_stats["overlap_iou_near"] += aux["overlap_iou_near"].item()
-                    if "gt_near_recall_by_coarse_risk" in aux:
-                        overlap_stats["gt_near_recall_by_coarse_risk"] += aux["gt_near_recall_by_coarse_risk"].item()
-                    if "coarse_risk_precision_wrt_gt_near" in aux:
-                        overlap_stats["coarse_risk_precision_wrt_gt_near"] += aux["coarse_risk_precision_wrt_gt_near"].item()
-                    if "overlap_iou_expanded" in aux:
-                        overlap_stats["overlap_iou_expanded"] += aux["overlap_iou_expanded"].item()
-                    if "gt_contact_recall_by_expanded_coarse_risk" in aux:
-                        overlap_stats["gt_contact_recall_by_expanded_coarse_risk"] += aux[
-                            "gt_contact_recall_by_expanded_coarse_risk"
-                        ].item()
+                if (is_v3 or is_v3_1) and "overlap_iou" in aux:
+                    for key in overlap_stats:
+                        if key == "count":
+                            continue
+                        if key in aux:
+                            overlap_stats[key] += aux[key].item()
                     overlap_stats["count"] += 1
 
                 if self.step % self.args.log_interval == 0:
-                    if is_v3:
+                    if is_v3 or is_v3_1:
                         denom = max(1, overlap_stats["count"])
                         overlap_iou = overlap_stats["overlap_iou"] / denom
                         overlap_recall = overlap_stats["gt_contact_recall_by_coarse_risk"] / denom
                         overlap_prec = overlap_stats["coarse_risk_precision_wrt_gt"] / denom
+                        overlap_iou_strict = overlap_stats["overlap_iou_strict"] / denom
+                        strict_recall = overlap_stats["strict_contact_recall_by_coarse_risk"] / denom
+                        strict_prec = overlap_stats["strict_contact_precision_wrt_coarse_risk"] / denom
                         overlap_iou_near = overlap_stats["overlap_iou_near"] / denom
-                        overlap_recall_near = overlap_stats["gt_near_recall_by_coarse_risk"] / denom
-                        overlap_prec_near = overlap_stats["coarse_risk_precision_wrt_gt_near"] / denom
+                        overlap_recall_near = overlap_stats["near_contact_recall_by_coarse_risk"] / denom
+                        overlap_prec_near = overlap_stats["near_contact_precision_wrt_coarse_risk"] / denom
+                        overlap_recall_near_legacy = overlap_stats["gt_near_recall_by_coarse_risk"] / denom
+                        overlap_prec_near_legacy = overlap_stats["coarse_risk_precision_wrt_gt_near"] / denom
                         overlap_iou_expanded = overlap_stats["overlap_iou_expanded"] / denom
                         overlap_recall_expanded = overlap_stats["gt_contact_recall_by_expanded_coarse_risk"] / denom
 
@@ -300,40 +403,203 @@ class RefineTrainLoop:
                         delta_final_abs_max = (
                             delta_final.abs().max().item() if delta_final is not None else 0.0
                         )
-                        self._log(
-                            f"step={self.step} "
-                            f"loss_total={loss.item():.6f} "
-                            f"loss_dist={loss_dist.item():.6f} "
-                            f"loss_soft={loss_soft.item():.6f} "
-                            f"loss_local={loss_local.item():.6f} "
-                            f"loss_res={loss_res.item():.6f} "
-                            f"loss_reg={loss_reg.item():.6f} "
-                            f"loss_coord={loss_coord.item():.6f} "
-                            f"loss_smooth={loss_smooth.item():.6f} "
-                            f"loss_dist_used={1 if self.args.lambda_dist > 0 else 0} "
-                            f"loss_local_used={1 if self.args.lambda_local > 0 else 0} "
-                            f"loss_reg_used={1 if self.args.lambda_reg > 0 else 0} "
-                            f"loss_coord_used={1 if self.args.lambda_coord > 0 else 0} "
-                            f"delta_raw_abs_mean={delta_raw_abs_mean:.6f} "
-                            f"delta_bounded_abs_mean={delta_bounded_abs_mean:.6f} "
-                            f"delta_final_abs_mean={delta_final_abs_mean:.6f} "
-                            f"delta_final_abs_max={delta_final_abs_max:.6f} "
-                            f"overlap_iou={overlap_iou:.4f} "
-                            f"gt_contact_recall_by_coarse_risk={overlap_recall:.4f} "
-                            f"coarse_risk_precision_wrt_gt={overlap_prec:.4f} "
-                            f"overlap_iou_near={overlap_iou_near:.4f} "
-                            f"gt_near_recall_by_coarse_risk={overlap_recall_near:.4f} "
-                            f"coarse_risk_precision_wrt_gt_near={overlap_prec_near:.4f} "
-                            f"overlap_iou_expanded={overlap_iou_expanded:.4f} "
-                            f"gt_contact_recall_by_expanded_coarse_risk={overlap_recall_expanded:.4f}"
-                        )
+                        delta_saturation_ratio = 0.0
+                        if delta_bounded is not None:
+                            threshold = 0.95 * float(self.args.delta_max)
+                            delta_saturation_ratio = (
+                                delta_bounded.abs() >= threshold
+                            ).float().mean().item()
+
+                        active_ratio = active_mask.float().mean().item() if active_mask is not None else 0.0
+                        active_delta_abs_mean = 0.0
+                        if delta_final is not None and active_mask is not None:
+                            active_mask_f = active_mask.float()
+                            while active_mask_f.dim() < delta_final.dim():
+                                active_mask_f = active_mask_f.unsqueeze(-1)
+                            denom = active_mask_f.sum() * (delta_final[0, 0].numel() if delta_final.dim() > 2 else 1)
+                            denom = denom.clamp(min=1.0)
+                            active_delta_abs_mean = (
+                                (delta_final.abs() * active_mask_f).sum() / denom
+                            ).item()
+
+                        if is_v3_1 and need_xyz:
+                            loss_dist_strict = distance_prior_loss_semantic_v31(
+                                actor_xyz,
+                                refined_xyz,
+                                gt_xyz,
+                                self.model.candidate_contact_pairs,
+                                self.model.part_joint_ids,
+                                self.model.topk_pairs,
+                                mask,
+                                tau_contact=self.args.tau_contact,
+                                tau_near=self.args.tau_near,
+                                weight_contact=1.0,
+                                weight_near=0.0,
+                                weight_far=0.0,
+                                pair_reduce=self.model.pair_reduce,
+                                frame_weight=frame_weight,
+                                top1_only=True,
+                            )
+                            loss_dist_near = distance_prior_loss_semantic_v31(
+                                actor_xyz,
+                                refined_xyz,
+                                gt_xyz,
+                                self.model.candidate_contact_pairs,
+                                self.model.part_joint_ids,
+                                self.model.topk_pairs,
+                                mask,
+                                tau_contact=self.args.tau_contact,
+                                tau_near=self.args.tau_near,
+                                weight_contact=0.0,
+                                weight_near=1.0,
+                                weight_far=0.0,
+                                pair_reduce=self.model.pair_reduce,
+                                frame_weight=frame_weight,
+                                top1_only=True,
+                            )
+                            loss_local_strict = local_distance_loss_semantic_v31(
+                                actor_xyz,
+                                refined_xyz,
+                                gt_xyz,
+                                self.model.candidate_contact_pairs,
+                                self.model.part_joint_ids,
+                                self.model.topk_pairs,
+                                mask,
+                                tau_contact=self.args.tau_contact,
+                                tau_near=self.args.tau_near,
+                                weight_contact=1.0,
+                                weight_near=0.0,
+                                weight_far=0.0,
+                                pair_reduce=self.model.pair_reduce,
+                                frame_weight=frame_weight,
+                                top1_only=True,
+                            )
+                            loss_local_near = local_distance_loss_semantic_v31(
+                                actor_xyz,
+                                refined_xyz,
+                                gt_xyz,
+                                self.model.candidate_contact_pairs,
+                                self.model.part_joint_ids,
+                                self.model.topk_pairs,
+                                mask,
+                                tau_contact=self.args.tau_contact,
+                                tau_near=self.args.tau_near,
+                                weight_contact=0.0,
+                                weight_near=1.0,
+                                weight_far=0.0,
+                                pair_reduce=self.model.pair_reduce,
+                                frame_weight=frame_weight,
+                                top1_only=True,
+                            )
+                            if self.args.lambda_soft > 0:
+                                loss_soft_strict = soft_contact_loss_semantic_v31(
+                                    actor_xyz,
+                                    refined_xyz,
+                                    gt_xyz,
+                                    self.model.candidate_contact_pairs,
+                                    self.model.part_joint_ids,
+                                    self.model.topk_pairs,
+                                    mask,
+                                    sigma=self.args.soft_contact_sigma,
+                                    tau_contact=self.args.tau_contact,
+                                    tau_near=self.args.tau_near,
+                                    weight_contact=1.0,
+                                    weight_near=0.0,
+                                    weight_far=0.0,
+                                    pair_reduce=self.model.pair_reduce,
+                                    frame_weight=frame_weight,
+                                    top1_only=True,
+                                )
+                                loss_soft_near = soft_contact_loss_semantic_v31(
+                                    actor_xyz,
+                                    refined_xyz,
+                                    gt_xyz,
+                                    self.model.candidate_contact_pairs,
+                                    self.model.part_joint_ids,
+                                    self.model.topk_pairs,
+                                    mask,
+                                    sigma=self.args.soft_contact_sigma,
+                                    tau_contact=self.args.tau_contact,
+                                    tau_near=self.args.tau_near,
+                                    weight_contact=0.0,
+                                    weight_near=1.0,
+                                    weight_far=0.0,
+                                    pair_reduce=self.model.pair_reduce,
+                                    frame_weight=frame_weight,
+                                    top1_only=True,
+                                )
+
+                        if is_v3_1:
+                            self._log(
+                                f"step={self.step} "
+                                f"loss_total={loss.item():.6f} "
+                                f"loss_dist={loss_dist.item():.6f} "
+                                f"loss_soft={loss_soft.item():.6f} "
+                                f"loss_local={loss_local.item():.6f} "
+                                f"loss_res={loss_res.item():.6f} "
+                                f"loss_smooth={loss_smooth.item():.6f} "
+                                f"loss_dist_strict={loss_dist_strict.item():.6f} "
+                                f"loss_dist_near={loss_dist_near.item():.6f} "
+                                f"loss_local_strict={loss_local_strict.item():.6f} "
+                                f"loss_local_near={loss_local_near.item():.6f} "
+                                f"loss_soft_strict={loss_soft_strict.item():.6f} "
+                                f"loss_soft_near={loss_soft_near.item():.6f} "
+                                f"delta_raw_abs_mean={delta_raw_abs_mean:.6f} "
+                                f"delta_bounded_abs_mean={delta_bounded_abs_mean:.6f} "
+                                f"delta_final_abs_mean={delta_final_abs_mean:.6f} "
+                                f"delta_final_abs_max={delta_final_abs_max:.6f} "
+                                f"delta_saturation_ratio={delta_saturation_ratio:.4f} "
+                                f"active_delta_abs_mean={active_delta_abs_mean:.6f} "
+                                f"active_ratio={active_ratio:.4f} "
+                                f"overlap_iou_strict={overlap_iou_strict:.4f} "
+                                f"strict_contact_recall_by_coarse_risk={strict_recall:.4f} "
+                                f"strict_contact_precision_wrt_coarse_risk={strict_prec:.4f} "
+                                f"overlap_iou_near={overlap_iou_near:.4f} "
+                                f"near_contact_recall_by_coarse_risk={overlap_recall_near:.4f} "
+                                f"near_contact_precision_wrt_coarse_risk={overlap_prec_near:.4f} "
+                                f"overlap_iou_expanded={overlap_iou_expanded:.4f} "
+                                f"gt_contact_recall_by_expanded_coarse_risk={overlap_recall_expanded:.4f}"
+                            )
+                        else:
+                            self._log(
+                                f"step={self.step} "
+                                f"loss_total={loss.item():.6f} "
+                                f"loss_dist={loss_dist.item():.6f} "
+                                f"loss_soft={loss_soft.item():.6f} "
+                                f"loss_local={loss_local.item():.6f} "
+                                f"loss_res={loss_res.item():.6f} "
+                                f"loss_reg={loss_reg.item():.6f} "
+                                f"loss_coord={loss_coord.item():.6f} "
+                                f"loss_smooth={loss_smooth.item():.6f} "
+                                f"loss_dist_used={1 if self.args.lambda_dist > 0 else 0} "
+                                f"loss_local_used={1 if self.args.lambda_local > 0 else 0} "
+                                f"loss_reg_used={1 if self.args.lambda_reg > 0 else 0} "
+                                f"loss_coord_used={1 if self.args.lambda_coord > 0 else 0} "
+                                f"delta_raw_abs_mean={delta_raw_abs_mean:.6f} "
+                                f"delta_bounded_abs_mean={delta_bounded_abs_mean:.6f} "
+                                f"delta_final_abs_mean={delta_final_abs_mean:.6f} "
+                                f"delta_final_abs_max={delta_final_abs_max:.6f} "
+                                f"overlap_iou={overlap_iou:.4f} "
+                                f"gt_contact_recall_by_coarse_risk={overlap_recall:.4f} "
+                                f"coarse_risk_precision_wrt_gt={overlap_prec:.4f} "
+                                f"overlap_iou_near={overlap_iou_near:.4f} "
+                                f"gt_near_recall_by_coarse_risk={overlap_recall_near_legacy:.4f} "
+                                f"coarse_risk_precision_wrt_gt_near={overlap_prec_near_legacy:.4f} "
+                                f"overlap_iou_expanded={overlap_iou_expanded:.4f} "
+                                f"gt_contact_recall_by_expanded_coarse_risk={overlap_recall_expanded:.4f}"
+                            )
                         overlap_stats = {
                             "overlap_iou": 0.0,
                             "gt_contact_recall_by_coarse_risk": 0.0,
                             "coarse_risk_precision_wrt_gt": 0.0,
+                            "overlap_iou_strict": 0.0,
+                            "strict_contact_recall_by_coarse_risk": 0.0,
+                            "strict_contact_precision_wrt_coarse_risk": 0.0,
                             "overlap_iou_near": 0.0,
                             "gt_near_recall_by_coarse_risk": 0.0,
+                            "near_contact_recall_by_coarse_risk": 0.0,
                             "coarse_risk_precision_wrt_gt_near": 0.0,
+                            "near_contact_precision_wrt_coarse_risk": 0.0,
                             "overlap_iou_expanded": 0.0,
                             "gt_contact_recall_by_expanded_coarse_risk": 0.0,
                             "count": 0,
