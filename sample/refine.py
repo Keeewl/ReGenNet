@@ -152,9 +152,10 @@ def load_rnet_checkpoint(path, device, override_version=""):
             tau_near=config.get("tau_near", 0.18),
             contact_error_margin=config.get("contact_error_margin", 0.05),
             gate_level=config.get("gate_level", "joint"),
-            gate_init_bias=config.get("gate_init_bias", -2.0),
+            gate_init_bias=config.get("gate_init_bias", -1.0),
             bound_mode=config.get("bound_mode", "tanh"),
             delta_max=config.get("delta_max", 0.15),
+            use_gate=config.get("use_gate", False),
         )
     elif version == "v2":
         model = RNetV2(

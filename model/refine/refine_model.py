@@ -273,6 +273,7 @@ class RNetV3(nn.Module):
         gate_init_bias=-1.0,
         bound_mode="tanh",
         delta_max=0.15,
+        use_gate=False,
     ):
         super().__init__()
         self.njoints = njoints
@@ -291,6 +292,7 @@ class RNetV3(nn.Module):
         self.gate_level = gate_level
         self.bound_mode = bound_mode
         self.delta_max = float(delta_max)
+        self.use_gate = bool(use_gate)
 
         self.active_selector = ActiveWindowSelectorV2(
             joint_ids=self.refine_joint_ids,
@@ -409,11 +411,14 @@ class RNetV3(nn.Module):
         coarse_local = coarse_local.permute(0, 3, 1, 2)
 
         delta_raw, gate_logits = self.head(coarse_local, geom_feat)
-        gate = torch.sigmoid(gate_logits)
         delta_bounded = self._bounded_delta(delta_raw)
-        delta = delta_bounded * gate
+        gate = None
+        delta_final = delta_bounded
+        if self.use_gate:
+            gate = torch.sigmoid(gate_logits)
+            delta_final = delta_bounded * gate
 
-        delta = delta * active_mask[:, :, None, None].float()
+        delta = delta_final * active_mask[:, :, None, None].float()
         delta_full = torch.zeros_like(coarse_motion)
         delta_full.index_copy_(1, joint_ids, delta.permute(0, 2, 3, 1))
         joint_mask_full = torch.zeros(num_joints, device=device, dtype=torch.bool)
@@ -431,6 +436,7 @@ class RNetV3(nn.Module):
                 "geom_feat": geom_feat,
                 "delta_raw": delta_raw,
                 "delta_bounded": delta_bounded,
+                "delta_final": delta_final,
                 "gate": gate,
             }
             if train_mask is not None:

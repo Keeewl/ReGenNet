@@ -279,6 +279,8 @@ def add_refine_training_options(parser):
                        help="Gate level for v3 (joint).")
     group.add_argument("--gate_init_bias", default=-1.0, type=float,
                        help="Gate init bias for v3.")
+    group.add_argument("--use_gate", action='store_true',
+                       help="Enable gate scaling for v3 (default off).")
     group.add_argument("--bound_mode", default="tanh", type=str,
                        help="Bound mode for v3 (tanh/clip/none).")
     group.add_argument("--delta_max", default=0.15, type=float,

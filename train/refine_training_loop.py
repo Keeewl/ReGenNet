@@ -287,12 +287,9 @@ class RefineTrainLoop:
                         overlap_iou_expanded = overlap_stats["overlap_iou_expanded"] / denom
                         overlap_recall_expanded = overlap_stats["gt_contact_recall_by_expanded_coarse_risk"] / denom
 
-                        gate = aux.get("gate", None)
                         delta_raw = aux.get("delta_raw", None)
                         delta_bounded = aux.get("delta_bounded", None)
-                        delta_final = aux.get("delta", None)
-                        gate_mean = gate.mean().item() if gate is not None else 0.0
-                        gate_std = gate.std().item() if gate is not None else 0.0
+                        delta_final = aux.get("delta_final", aux.get("delta", None))
                         delta_raw_abs_mean = delta_raw.abs().mean().item() if delta_raw is not None else 0.0
                         delta_bounded_abs_mean = (
                             delta_bounded.abs().mean().item() if delta_bounded is not None else 0.0
@@ -317,8 +314,6 @@ class RefineTrainLoop:
                             f"loss_local_used={1 if self.args.lambda_local > 0 else 0} "
                             f"loss_reg_used={1 if self.args.lambda_reg > 0 else 0} "
                             f"loss_coord_used={1 if self.args.lambda_coord > 0 else 0} "
-                            f"gate_mean={gate_mean:.4f} "
-                            f"gate_std={gate_std:.4f} "
                             f"delta_raw_abs_mean={delta_raw_abs_mean:.6f} "
                             f"delta_bounded_abs_mean={delta_bounded_abs_mean:.6f} "
                             f"delta_final_abs_mean={delta_final_abs_mean:.6f} "

@@ -70,6 +70,7 @@ def build_model_from_args(args):
             gate_init_bias=args.gate_init_bias,
             bound_mode=args.bound_mode,
             delta_max=args.delta_max,
+            use_gate=args.use_gate,
         )
         model.config = {
             "version": "v3",
@@ -100,6 +101,7 @@ def build_model_from_args(args):
             "gate_init_bias": args.gate_init_bias,
             "bound_mode": args.bound_mode,
             "delta_max": args.delta_max,
+            "use_gate": args.use_gate,
         }
         return model
 
