@@ -103,6 +103,40 @@ def evaluate_cd_gen(gen_loader, gt_loader, tau_contact=0.1):
     return (sum_cd / denom).item()
 
 
+def evaluate_cd_gt(gt_loader, tau_contact=0.1):
+    sum_cd = None
+    sum_count = None
+
+    for gt_batch in gt_loader:
+        gt_xyz = gt_batch["output_xyz"]
+        lengths = gt_batch["lengths"]
+
+        actor_gt, reactor_gt = split_actor_reactor_xyz(gt_xyz)
+
+        metrics = contact_distance(
+            actor_gt,
+            reactor_gt,
+            reactor_gt,
+            list(range(actor_gt.shape[1])),
+            list(range(reactor_gt.shape[1])),
+            tau_contact=tau_contact,
+            lengths=lengths,
+            active_mask=None,
+        )
+
+        if sum_cd is None:
+            sum_cd = torch.zeros((), device=metrics["cd"].device)
+            sum_count = torch.zeros((), device=metrics["cd"].device)
+
+        sum_cd += metrics["cd"] * metrics["count"]
+        sum_count += metrics["count"]
+
+    if sum_cd is None:
+        return 0.0
+    denom = sum_count.clamp(min=1.0)
+    return (sum_cd / denom).item()
+
+
 class NewDataloader:
     def __init__(self, mode, model, diffusion, dataiterator, device, dataset, num_samples, num_person, body_model, setting, auto_regressive=False):
         assert mode in ["gen", "gt"]
@@ -278,6 +312,8 @@ def evaluate(args, model, diffusion, data, rec_model_path, setting, acc_only, au
         for split in data_types:
             cd_value = evaluate_cd_gen(genLoaders[split], gtLoaders[split], tau_contact=0.1)
             stgcn_metrics[seed][f"cd_gen_{split}"] = cd_value
+            cd_gt_value = evaluate_cd_gt(gtLoaders[split], tau_contact=0.1)
+            stgcn_metrics[seed][f"cd_gt_{split}"] = cd_gt_value
         del loaders
 
     metrics = {"feats": {key: [format_metrics(stgcn_metrics[seed])[key] for seed in allseeds] for key in stgcn_metrics[allseeds[0]]}}
