@@ -70,16 +70,16 @@ def print_results(folder, evaluation):
         keys = [
             "fid_{}_train",
             "accuracy_{}_train",
-            "multimodality_{}_train",
             "diversity_{}_train",
+            "multimodality_{}_train",
         ]
         if has_cd:
             keys.append("cd_{}_train")
         keys += [
             "fid_{}_test",
             "accuracy_{}_test",
-            "multimodality_{}_test",
             "diversity_{}_test",
+            "multimodality_{}_test",
         ]
         if has_cd:
             keys.append("cd_{}_test")
