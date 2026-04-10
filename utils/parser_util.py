@@ -535,13 +535,25 @@ def add_contact_refiner_training_options(parser):
 
     group.add_argument("--window_source", default="teacher", choices=["teacher", "predicted", "mixed"],
                        type=str, help="Window source mode.")
+    group.add_argument("--window_source_debug", default="", choices=["", "teacher", "mix", "predict"],
+                       type=str, help="Debug override for window source.")
     group.add_argument("--proposal_checkpoint", default="", type=str,
                        help="Proposal checkpoint for predicted windows.")
+    group.add_argument("--proposal_ckpt", default="", type=str,
+                       help="Alias for proposal checkpoint.")
     group.add_argument("--active_threshold", default=0.5, type=float,
                        help="Active threshold for predicted windows.")
     group.add_argument("--pred_window_ratio", default=0.5, type=float,
                        help="Ratio of predicted windows in mixed mode.")
 
+
+    group.add_argument("--teacher_stage_ratio", default=0.3, type=float, help="Teacher stage ratio.")
+    group.add_argument("--mix_stage_ratio", default=0.4, type=float, help="Mix stage ratio.")
+    group.add_argument("--predict_stage_ratio", default=0.3, type=float, help="Predict stage ratio.")
+    group.add_argument("--mix_mode", default="per_sample", choices=["per_sample", "per_batch"],
+                       type=str, help="Mix mode for teacher/predict.")
+    group.add_argument("--eval_pure_predict_only", default=True, type=bool,
+                       help="Eval/test uses pure predict windows.")
     group.add_argument("--log_events", action='store_true',
                        help="Log window stats during training.")
     group.add_argument("--log_contact_metrics", action='store_true',

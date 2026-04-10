@@ -18,18 +18,25 @@ from utils.parser_util import contact_refiner_train_args
 
 
 def _build_proposal_model(checkpoint_path, device):
-    hand_dim = 31
-    part_dim = 13
+    ckpt = torch.load(checkpoint_path, map_location="cpu")
+    cfg = ckpt.get("config", {})
+    hand_dim = int(cfg.get("hand_dim", 31))
+    part_dim = int(cfg.get("part_dim", 13))
+    relation_dim = int(cfg.get("relation_dim", 8))
+    hidden_dim = int(cfg.get("hidden_dim", 64))
+    num_temporal_blocks = int(cfg.get("num_temporal_blocks", 2))
+    dropout = float(cfg.get("dropout", 0.1))
     model = HandContactProposal(
         hand_dim=hand_dim,
         part_dim=part_dim,
-        relation_dim=8,
-        hidden_dim=64,
-        num_temporal_blocks=2,
-        dropout=0.1,
+        relation_dim=relation_dim,
+        hidden_dim=hidden_dim,
+        num_temporal_blocks=num_temporal_blocks,
+        dropout=dropout,
     )
-    ckpt = torch.load(checkpoint_path, map_location="cpu")
     model.load_state_dict(ckpt["model"], strict=True)
+    for param in model.parameters():
+        param.requires_grad = False
     model.to(device)
     model.eval()
     return model
@@ -86,9 +93,16 @@ def main():
     }
 
     proposal_model = None
-    if args.window_source in ("predicted", "mixed"):
+    if args.proposal_ckpt and not args.proposal_checkpoint:
+        args.proposal_checkpoint = args.proposal_ckpt
+    requires_pred = False
+    if args.window_source_debug in ("predict", "mix"):
+        requires_pred = True
+    if args.window_source_debug == "":
+        requires_pred = (args.mix_stage_ratio > 0.0) or (args.predict_stage_ratio > 0.0)
+    if requires_pred:
         if not args.proposal_checkpoint:
-            raise ValueError("--proposal_checkpoint is required for predicted/mixed windows")
+            raise ValueError("--proposal_checkpoint/--proposal_ckpt is required for predicted windows")
         proposal_model = _build_proposal_model(args.proposal_checkpoint, args.device_str)
 
     train_platform_type = eval(args.train_platform_type)

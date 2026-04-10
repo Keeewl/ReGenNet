@@ -23,3 +23,4 @@ from model.contact.proposal_windows import ContactWindowBuilder
 from model.contact.refiner_model import HandContactRefiner
 from model.contact.refiner_loss import HandContactRefinerLoss
 from model.contact.refiner_inputs import ContactWindowSampler
+from model.contact.refiner_schedule import RefinerWindowSchedule
