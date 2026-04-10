@@ -17,6 +17,7 @@ model/contact/
   proposal_windows.py
   refiner_model.py
   refiner_loss.py
+  refiner_inputs.py
 ```
 
 ## 模块说明
@@ -31,6 +32,7 @@ model/contact/
 - `proposal_windows.py`: `ContactWindowBuilder`，事件段到窗口。
 - `refiner_model.py`: `HandContactRefiner`，手部精修器。
 - `refiner_loss.py`: `HandContactRefinerLoss`，精修损失。
+- `refiner_inputs.py`: `ContactWindowSampler`，窗口构造与输入打包。
 
 ## 关键张量约定
 
@@ -108,3 +110,9 @@ mask = window_builder.to_mask(windows, lengths=[6])
 
 - Proposal 输出建议用于离线生成 hand-level 接触事件，再交给后续 `HandContactRefiner`。
 - 若需要按事件窗口执行 refiner，可先 `parse_contact_events` -> `ContactWindowBuilder`。
+
+
+## Refiner 简述
+
+- `HandContactRefiner` 使用窗口内的局部手部序列、目标 patch 与关系特征进行精修。
+- 训练时默认使用 teacher windows（由 GT 标签构造），支持 `window_source=predicted/mixed` 切换。

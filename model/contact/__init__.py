@@ -22,3 +22,4 @@ from model.contact.proposal_events import ContactEventParser, parse_contact_even
 from model.contact.proposal_windows import ContactWindowBuilder
 from model.contact.refiner_model import HandContactRefiner
 from model.contact.refiner_loss import HandContactRefinerLoss
+from model.contact.refiner_inputs import ContactWindowSampler

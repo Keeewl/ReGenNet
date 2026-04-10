@@ -1,140 +1,227 @@
+import math
 import torch
 import torch.nn as nn
 
 from model.contact.contact_defs import (
     HAND_JOINT_IDS,
     WRIST_JOINT_IDS,
-    HAND_SIDES,
+    BUFFER_JOINT_IDS,
     default_refiner_joint_ids,
 )
-from model.contact.contact_geometry import build_time_mask
 
 
-class TemporalConvBlock(nn.Module):
+class FeatureEncoder(nn.Module):
+    def __init__(self, input_dim, hidden_dim, dropout=0.1):
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.Linear(input_dim, hidden_dim),
+            nn.GELU(),
+            nn.Dropout(dropout),
+            nn.LayerNorm(hidden_dim),
+        )
+
+    def forward(self, x):
+        return self.net(x)
+
+
+class TemporalSelfAttentionBlock(nn.Module):
     """
-    Lightweight temporal block per joint.
+    Temporal self-attention per token.
 
     Inputs:
-        x: [B, T, J, H]
+        x: [B, T, N, D]
+        time_mask: [B, T] or None
     Outputs:
-        out: [B, T, J, H]
+        out: [B, T, N, D]
     """
 
-    def __init__(self, hidden_dim, dropout=0.1, kernel_size=3):
+    def __init__(self, hidden_dim, num_heads=4, dropout=0.1):
         super().__init__()
-        padding = kernel_size // 2
-        self.dw = nn.Conv1d(
-            hidden_dim, hidden_dim, kernel_size=kernel_size, padding=padding, groups=hidden_dim
+        self.ln1 = nn.LayerNorm(hidden_dim)
+        self.attn = nn.MultiheadAttention(hidden_dim, num_heads, dropout=dropout, batch_first=True)
+        self.ln2 = nn.LayerNorm(hidden_dim)
+        self.mlp = nn.Sequential(
+            nn.Linear(hidden_dim, hidden_dim * 2),
+            nn.GELU(),
+            nn.Dropout(dropout),
+            nn.Linear(hidden_dim * 2, hidden_dim),
+            nn.Dropout(dropout),
         )
-        self.pw = nn.Conv1d(hidden_dim, hidden_dim, kernel_size=1)
-        self.act = nn.GELU()
-        self.dropout = nn.Dropout(dropout)
+
+    def forward(self, x, time_mask=None):
+        bsz, num_frames, num_tokens, hidden = x.shape
+        y = self.ln1(x).permute(0, 2, 1, 3).reshape(bsz * num_tokens, num_frames, hidden)
+        key_padding_mask = None
+        if time_mask is not None:
+            key_padding_mask = (~time_mask).repeat_interleave(num_tokens, dim=0)
+        attn_out, _ = self.attn(y, y, y, key_padding_mask=key_padding_mask, need_weights=False)
+        attn_out = attn_out.reshape(bsz, num_tokens, num_frames, hidden).permute(0, 2, 1, 3)
+        x = x + attn_out
+        z = self.ln2(x).permute(0, 2, 1, 3).reshape(bsz * num_tokens, num_frames, hidden)
+        mlp_out = self.mlp(z)
+        mlp_out = mlp_out.reshape(bsz, num_tokens, num_frames, hidden).permute(0, 2, 1, 3)
+        return x + mlp_out
+
+
+class CrossAttentionBlock(nn.Module):
+    """
+    Cross-attention from reactor tokens to actor patch tokens.
+
+    Inputs:
+        reactor: [B, T, J, D]
+        actor_tokens: [B, T, P, D]
+        actor_mask: [B, T, P] or None
+    Outputs:
+        out: [B, T, J, D]
+    """
+
+    def __init__(self, hidden_dim, num_heads=4, dropout=0.1):
+        super().__init__()
+        self.attn = nn.MultiheadAttention(hidden_dim, num_heads, dropout=dropout, batch_first=True)
+        self.ln = nn.LayerNorm(hidden_dim)
+        self.mlp = nn.Sequential(
+            nn.Linear(hidden_dim, hidden_dim * 2),
+            nn.GELU(),
+            nn.Dropout(dropout),
+            nn.Linear(hidden_dim * 2, hidden_dim),
+            nn.Dropout(dropout),
+        )
+
+    def forward(self, reactor, actor_tokens, actor_mask=None):
+        bsz, num_frames, num_joints, hidden = reactor.shape
+        q = reactor.reshape(bsz * num_frames, num_joints, hidden)
+        kv = actor_tokens.reshape(bsz * num_frames, actor_tokens.shape[2], hidden)
+        key_padding_mask = None
+        if actor_mask is not None:
+            key_padding_mask = (~actor_mask).reshape(bsz * num_frames, actor_mask.shape[2])
+        attn_out, _ = self.attn(q, kv, kv, key_padding_mask=key_padding_mask, need_weights=False)
+        attn_out = attn_out.reshape(bsz, num_frames, num_joints, hidden)
+        out = reactor + attn_out
+        out = out + self.mlp(self.ln(out))
+        return out
+
+
+class SpatialSelfAttentionBlock(nn.Module):
+    """
+    Spatial self-attention across joint tokens per frame.
+
+    Inputs:
+        x: [B, T, J, D]
+    Outputs:
+        out: [B, T, J, D]
+    """
+
+    def __init__(self, hidden_dim, num_heads=4, dropout=0.1):
+        super().__init__()
+        self.attn = nn.MultiheadAttention(hidden_dim, num_heads, dropout=dropout, batch_first=True)
+        self.ln = nn.LayerNorm(hidden_dim)
+        self.mlp = nn.Sequential(
+            nn.Linear(hidden_dim, hidden_dim * 2),
+            nn.GELU(),
+            nn.Dropout(dropout),
+            nn.Linear(hidden_dim * 2, hidden_dim),
+            nn.Dropout(dropout),
+        )
 
     def forward(self, x):
         bsz, num_frames, num_joints, hidden = x.shape
-        y = x.permute(0, 2, 3, 1).reshape(bsz * num_joints, hidden, num_frames)
-        y = self.pw(self.dw(y))
-        y = self.act(y)
-        y = self.dropout(y)
-        y = y.reshape(bsz, num_joints, hidden, num_frames).permute(0, 3, 1, 2)
-        return x + y
-
-
-def _joint_to_hand_index(joint_ids):
-    left = set(HAND_JOINT_IDS["left"] + [WRIST_JOINT_IDS["left"]])
-    right = set(HAND_JOINT_IDS["right"] + [WRIST_JOINT_IDS["right"]])
-    mapping = []
-    for jid in joint_ids:
-        if jid in left:
-            mapping.append(0)
-        elif jid in right:
-            mapping.append(1)
-        else:
-            mapping.append(0)
-    return torch.as_tensor(mapping, dtype=torch.long)
+        q = x.reshape(bsz * num_frames, num_joints, hidden)
+        attn_out, _ = self.attn(q, q, q, need_weights=False)
+        attn_out = attn_out.reshape(bsz, num_frames, num_joints, hidden)
+        out = x + attn_out
+        out = out + self.mlp(self.ln(out))
+        return out
 
 
 class HandContactRefiner(nn.Module):
     """
-    Hand Contact Refinement (HCR) refiner.
+    Proposal-conditioned hand contact refiner.
 
     Inputs:
-        coarse_motion: [B, J, 6, T]
-        proposal_active: [B, T, 2] or None
+        coarse_local: [B, T, J, 6]
+        actor_patch: [B, T, P, Fa]
+        relation_feat: [B, T, 8]
+        cond_feat: [B, T, C]
+        time_mask: [B, T] or None
+        actor_patch_mask: [B, T, P] or None
     Outputs:
-        refined_motion: [B, J, 6, T]
+        delta_local: [B, T, J, 6]
     """
 
     def __init__(
         self,
-        input_dim=6,
+        joint_ids=None,
         hidden_dim=128,
         num_temporal_blocks=2,
+        num_cross_blocks=2,
+        num_spatial_blocks=1,
         dropout=0.1,
-        joint_ids=None,
-        use_gate=False,
-        gate_init_bias=-1.0,
+        delta_max=0.15,
+        use_spatial_attn=True,
     ):
         super().__init__()
-        self.joint_ids = joint_ids or default_refiner_joint_ids()
-        self.use_gate = bool(use_gate)
+        self.joint_ids = joint_ids or default_refiner_joint_ids(include_buffer=True)
+        self.hidden_dim = hidden_dim
+        self.delta_max = float(delta_max)
+        self.use_spatial_attn = bool(use_spatial_attn)
 
-        self.embed = nn.Sequential(
-            nn.Linear(input_dim, hidden_dim),
-            nn.GELU(),
-            nn.Dropout(dropout),
-        )
+        self.reactor_encoder = FeatureEncoder(6, hidden_dim, dropout=dropout)
+        self.actor_encoder = FeatureEncoder(9, hidden_dim, dropout=dropout)
+        self.relation_encoder = FeatureEncoder(8, hidden_dim, dropout=dropout)
+        self.cond_encoder = FeatureEncoder(15, hidden_dim, dropout=dropout)
+
         self.temporal_blocks = nn.ModuleList(
-            [TemporalConvBlock(hidden_dim, dropout=dropout) for _ in range(num_temporal_blocks)]
+            [TemporalSelfAttentionBlock(hidden_dim, num_heads=4, dropout=dropout) for _ in range(num_temporal_blocks)]
         )
-        self.delta_head = nn.Linear(hidden_dim, input_dim)
-        self.gate_head = nn.Linear(hidden_dim, 1) if self.use_gate else None
-        if self.gate_head is not None:
-            nn.init.constant_(self.gate_head.bias, float(gate_init_bias))
+        self.cross_blocks = nn.ModuleList(
+            [CrossAttentionBlock(hidden_dim, num_heads=4, dropout=dropout) for _ in range(num_cross_blocks)]
+        )
+        self.spatial_blocks = nn.ModuleList(
+            [SpatialSelfAttentionBlock(hidden_dim, num_heads=4, dropout=dropout) for _ in range(num_spatial_blocks)]
+        )
 
-        self.register_buffer("joint_to_hand", _joint_to_hand_index(self.joint_ids))
+        self.wrist_head = nn.Linear(hidden_dim, 6)
+        self.finger_head = nn.Linear(hidden_dim, 6)
 
-    def _apply_active_gate(self, delta, proposal_active):
-        if proposal_active is None:
-            return delta
-        hand_idx = self.joint_to_hand.to(proposal_active.device)
-        active_joint = proposal_active.index_select(2, hand_idx)
-        return delta * active_joint.unsqueeze(-1).float()
+        wrist_ids = {WRIST_JOINT_IDS["left"], WRIST_JOINT_IDS["right"]}
+        buffer_ids = set(BUFFER_JOINT_IDS)
+        self.register_buffer(
+            "wrist_mask",
+            torch.as_tensor([jid in wrist_ids or jid in buffer_ids for jid in self.joint_ids], dtype=torch.bool),
+        )
 
-    def forward(self, coarse_motion, proposal_active=None, lengths=None, return_aux=True):
-        if coarse_motion.dim() != 4:
-            raise ValueError("coarse_motion must be [B, J, 6, T]")
-        device = coarse_motion.device
-        batch_size, num_joints, _, num_frames = coarse_motion.shape
-        joint_ids = torch.as_tensor(self.joint_ids, device=device, dtype=torch.long)
+    def _bounded_delta(self, delta):
+        return self.delta_max * torch.tanh(delta / max(self.delta_max, 1e-6))
 
-        coarse_local = coarse_motion.index_select(1, joint_ids).permute(0, 3, 1, 2)
-        x = self.embed(coarse_local)
+    def forward(self, coarse_local, actor_patch, relation_feat, cond_feat, time_mask=None, actor_patch_mask=None):
+        if coarse_local.dim() != 4:
+            raise ValueError("coarse_local must be [B,T,J,6]")
+
+        reactor = self.reactor_encoder(coarse_local)
+        cond = self.cond_encoder(cond_feat)
+        reactor = reactor + cond.unsqueeze(2)
+
+        actor_tokens = self.actor_encoder(actor_patch)
+        rel_token = self.relation_encoder(relation_feat).unsqueeze(2)
+        actor_tokens = torch.cat([actor_tokens, rel_token], dim=2)
+
+        if actor_patch_mask is not None:
+            rel_mask = torch.ones(actor_patch_mask.shape[:2] + (1,), device=actor_patch_mask.device, dtype=torch.bool)
+            actor_mask = torch.cat([actor_patch_mask, rel_mask], dim=2)
+        else:
+            actor_mask = None
+
         for block in self.temporal_blocks:
-            x = block(x)
-        delta = self.delta_head(x)
+            reactor = block(reactor, time_mask=time_mask)
+        for block in self.cross_blocks:
+            reactor = block(reactor, actor_tokens, actor_mask=actor_mask)
+        if self.use_spatial_attn:
+            for block in self.spatial_blocks:
+                reactor = block(reactor)
 
-        gate = None
-        if self.gate_head is not None:
-            gate = torch.sigmoid(self.gate_head(x))
-            delta = delta * gate
-
-        delta = self._apply_active_gate(delta, proposal_active)
-
-        if lengths is not None:
-            mask = build_time_mask(lengths, num_frames, device=device)
-            if mask is not None:
-                delta = delta * mask[:, :, None, None].float()
-
-        delta_full = torch.zeros_like(coarse_motion)
-        delta_full.index_copy_(1, joint_ids, delta.permute(0, 2, 3, 1))
-        refined = coarse_motion + delta_full
-
-        if return_aux:
-            return refined, {
-                "delta": delta,
-                "delta_full": delta_full,
-                "gate": gate,
-                "joint_ids": joint_ids,
-            }
-        return refined
+        wrist_logits = self.wrist_head(reactor)
+        finger_logits = self.finger_head(reactor)
+        wrist_mask = self.wrist_mask.to(reactor.device).view(1, 1, -1, 1)
+        delta = torch.where(wrist_mask, wrist_logits, finger_logits)
+        delta = self._bounded_delta(delta)
+        return delta

@@ -63,6 +63,12 @@ PHASE_IDS = {
     "release": 3,
 }
 
+BUFFER_JOINT_IDS = [18, 19]
 
-def default_refiner_joint_ids():
-    return [WRIST_JOINT_IDS["left"], WRIST_JOINT_IDS["right"]] + PART_JOINT_IDS["left_hand"] + PART_JOINT_IDS["right_hand"]
+
+def default_refiner_joint_ids(include_buffer=False):
+    joint_ids = [WRIST_JOINT_IDS["left"], WRIST_JOINT_IDS["right"]]
+    joint_ids += PART_JOINT_IDS["left_hand"] + PART_JOINT_IDS["right_hand"]
+    if include_buffer:
+        joint_ids += BUFFER_JOINT_IDS
+    return joint_ids
