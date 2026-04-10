@@ -422,3 +422,61 @@ def refine_evaluation_parser():
     parser.add_argument("--stage2_model_path", required=True, type=str,
                        help="Path to Stage2 checkpoint (rnet_v1).")
     return parse_and_load_from_model(parser)
+
+
+
+def add_contact_proposal_training_options(parser):
+    group = parser.add_argument_group('contact_proposal_training')
+    group.add_argument("--cache_path", required=True, type=str,
+                       help="Path to coarse cache (.npz or .h5).")
+    group.add_argument("--save_dir", required=True, type=str,
+                       help="Path to save checkpoints and logs.")
+    group.add_argument("--overwrite", action='store_true',
+                       help="If True, will enable to use an already existing save_dir.")
+    group.add_argument("--num_steps", default=100_000, type=int,
+                       help="Training will stop after the specified number of steps.")
+    group.add_argument("--log_interval", default=100, type=int,
+                       help="Log losses each N steps.")
+    group.add_argument("--save_interval", default=2_000, type=int,
+                       help="Save checkpoints each N steps.")
+    group.add_argument("--lr", default=1e-4, type=float, help="Learning rate.")
+    group.add_argument("--weight_decay", default=0.0, type=float, help="Optimizer weight decay.")
+    group.add_argument("--resume_checkpoint", default="", type=str,
+                       help="If not empty, will start from the specified checkpoint.")
+    group.add_argument("--num_workers", default=4, type=int, help="DataLoader workers.")
+    group.add_argument("--max_batches", default=-1, type=int,
+                       help="Limit the number of batches per epoch (debug).")
+    group.add_argument("--train_platform_type", default='NoPlatform',
+                       choices=['NoPlatform', 'ClearmlPlatform', 'TensorboardPlatform'],
+                       type=str, help="Logging backend.")
+
+    group.add_argument("--body_model", default="smplx", type=str, help="Body model name.")
+    group.add_argument("--pose_rep", default="rot6d", type=str, help="Pose representation.")
+    group.add_argument("--topk", default=3, type=int, help="Top-k distances for relations.")
+    group.add_argument("--sigma", default=0.1, type=float, help="Sigma for soft contact.")
+    group.add_argument("--hidden_dim", default=64, type=int, help="Proposal hidden dim.")
+    group.add_argument("--num_temporal_blocks", default=2, type=int,
+                       help="Number of temporal blocks.")
+    group.add_argument("--dropout", default=0.1, type=float, help="Proposal dropout.")
+
+    group.add_argument("--tau_contact", default=0.10, type=float, help="Contact threshold.")
+    group.add_argument("--tau_near", default=0.18, type=float, help="Near threshold.")
+    group.add_argument("--delta_target", default=0.02, type=float, help="Target hysteresis delta.")
+    group.add_argument("--epsilon_move", default=0.01, type=float, help="Motion delta for phase.")
+    group.add_argument("--epsilon_hold", default=0.005, type=float, help="Hold delta for phase.")
+    group.add_argument("--recent_window", default=3, type=int, help="Recent window for phase.")
+
+    group.add_argument("--lambda_smooth", default=0.1, type=float, help="Smoothness loss weight.")
+    group.add_argument("--lambda_consistency", default=0.1, type=float, help="Consistency loss weight.")
+    group.add_argument("--use_focal", action='store_true', help="Use focal BCE for active.")
+    group.add_argument("--focal_gamma", default=2.0, type=float, help="Focal gamma.")
+    group.add_argument("--focal_alpha", default=0.25, type=float, help="Focal alpha.")
+    group.add_argument("--log_events", action='store_true',
+                       help="Log simple event-level stats.")
+
+
+def contact_proposal_train_args():
+    parser = ArgumentParser()
+    add_base_options(parser)
+    add_contact_proposal_training_options(parser)
+    return parser.parse_args()
