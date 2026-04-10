@@ -101,15 +101,41 @@ def main():
     all_motions = []
     all_lengths = []
     all_text = []
+    all_map = []
 
     time_all = 0.0
     for rep_i in range(args.num_repetitions):
         print(f'### Sampling [repetitions #{rep_i}]')
 
         action = data.dataset.action_name_to_action(action_text)
-        collate_args = [dict(arg, action=one_action, action_text=one_action_text, 
-                        inp=data.dataset._get_item_cmotion_index(one_action, mode='appointed', data_index=rep_i)['inp'].cuda()) for
-                        arg, one_action, one_action_text in zip(collate_args, action, action_text)]
+        collate_args_with_inp = []
+        rep_map = []
+        for action_i, (arg, one_action, one_action_text) in enumerate(zip(collate_args, action, action_text)):
+            cmotion_item = data.dataset._get_item_cmotion_index(
+                one_action, mode='appointed', data_index=rep_i
+            )
+            collate_args_with_inp.append(
+                dict(
+                    arg,
+                    action=one_action,
+                    action_text=one_action_text,
+                    inp=cmotion_item['inp'].cuda(),
+                )
+            )
+            if 'data_index' in cmotion_item and 'data_key' in cmotion_item:
+                rep_map.append(
+                    (
+                        rep_i,
+                        action_i,
+                        one_action_text,
+                        int(one_action),
+                        cmotion_item['data_index'],
+                        cmotion_item['data_key'],
+                    )
+                )
+        collate_args = collate_args_with_inp
+        if rep_map:
+            all_map.extend(rep_map)
         _, model_kwargs = ccollate(collate_args) # 'mask', 'lengths', 'tokens', 'action', 'action_text'
 
         # add CFG scale to batch
@@ -180,6 +206,14 @@ def main():
         fw.write('\n'.join(all_text))
     with open(npy_path.replace('.npy', '_len.txt'), 'w') as fw:
         fw.write('\n'.join([str(l) for l in all_lengths]))
+
+    if all_map:
+        map_path = os.path.join(out_path, 'map.txt')
+        with open(map_path, 'w') as fw:
+            fw.write('output_index\trep_i\taction_i\taction_name\taction_id\tdata_index\tdataset_key\n')
+            for output_index, (rep_i, action_i, action_name, action_id, data_index, data_key) in enumerate(all_map[:total_num_samples]):
+                fw.write(f"{output_index}\t{rep_i}\t{action_i}\t{action_name}\t{action_id}\t{data_index}\t{data_key}\n")
+        print(f"saving map file to [{map_path}]")
 
     abs_path = os.path.abspath(out_path)
     print(f'[Done] Results are at [{abs_path}]')

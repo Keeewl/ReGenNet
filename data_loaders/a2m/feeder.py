@@ -303,7 +303,12 @@ class Feeder(Dataset):
                 raise ValueError("Sampling not recognized.")
 
         inp, action = self.get_pose_data(data_index, frame_ix)
-        output = {'inp': inp, 'action': action}
+        output = {
+            'inp': inp,
+            'action': action,
+            'data_index': int(data_index),
+            'data_key': self.keys[data_index],
+        }
 
         if hasattr(self, '_actions') and hasattr(self, '_action_classes'):
             output['action_text'] = self.action_to_action_name(self.get_action(data_index))
