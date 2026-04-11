@@ -144,6 +144,12 @@ class NewDataloader:
 
         self.batches = []
         sample_fn = diffusion.p_sample_loop
+        model_window_size = None
+        if getattr(model, 'arch', None) == 'mlp':
+            try:
+                model_window_size = int(model.mlp.motion_mlp.mlps[0].fc0.in_channels)
+            except Exception:
+                model_window_size = None
 
         with torch.no_grad():
             for motions, model_kwargs in tqdm(dataiterator, desc=f"Construct dataloader: {mode}.."):
@@ -166,6 +172,7 @@ class NewDataloader:
                             pad_mode=window_pad_mode,
                             overlap_handling=window_overlap_handling,
                             sample_fn=sample_fn,
+                            model_window_size=model_window_size,
                         )
                         if setting == 'cmdm':
                             batch['output'] = torch.cat((model_kwargs['y']['cmotion'], sample), axis=2)

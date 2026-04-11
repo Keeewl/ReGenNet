@@ -51,6 +51,12 @@ class TrainLoop:
         self.window_emit = args.window_emit
         self.window_pad_mode = args.window_pad_mode
         self.online_train_random_offset = args.online_train_random_offset
+        self.model_window_size = None
+        if getattr(self.model, 'arch', None) == 'mlp':
+            try:
+                self.model_window_size = int(self.model.mlp.motion_mlp.mlps[0].fc0.in_channels)
+            except Exception:
+                self.model_window_size = None
         self.lr_anneal_steps = args.lr_anneal_steps
         self.ema_rate = (
             [self.ema_rate]
@@ -181,6 +187,8 @@ class TrainLoop:
                     raise ValueError("Only sliding_window is supported for online training.")
 
                 if self.reaction_mode == "online" and self.online_strategy == "sliding_window":
+                    if self.model_window_size is not None and self.window_size > self.model_window_size:
+                        raise ValueError("window_size must be <= model MLP sequence length")
                     motion, cond = window_batch_for_online_training(
                         motion,
                         cond,
@@ -189,6 +197,7 @@ class TrainLoop:
                         window_emit=self.window_emit,
                         pad_mode=self.window_pad_mode,
                         random_offset=self.online_train_random_offset,
+                        model_window_size=self.model_window_size,
                     )
 
                 self.run_step(motion, cond)

@@ -71,6 +71,13 @@ def main():
     print("Creating model and diffusion...")
     model, diffusion = create_model_and_diffusion(args, data)
 
+    model_window_size = None
+    if getattr(model, 'arch', None) == 'mlp':
+        try:
+            model_window_size = int(model.mlp.motion_mlp.mlps[0].fc0.in_channels)
+        except Exception:
+            model_window_size = None
+
     print(f"Loading checkpoints from [{args.model_path}]...")
     state_dict = torch.load(args.model_path, map_location='cpu')
     load_model_wo_clip(model, state_dict)
@@ -103,6 +110,10 @@ def main():
     all_lengths = []
     all_text = []
     all_map = []
+
+    if args.reaction_mode == 'online' and args.online_strategy == 'sliding_window':
+        if model_window_size is not None and args.window_size > model_window_size:
+            raise ValueError('window_size must be <= model MLP sequence length')
 
     time_all = 0.0
     for rep_i in range(args.num_repetitions):
@@ -156,6 +167,7 @@ def main():
                 pad_mode=args.window_pad_mode,
                 overlap_handling=args.window_overlap_handling,
                 sample_fn=sample_fn,
+                model_window_size=model_window_size,
             )
         elif args.reaction_mode == 'online' and args.online_strategy == 'autoregressive':
             cmotion_bak = model_kwargs['y']['cmotion']

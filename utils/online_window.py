@@ -18,11 +18,19 @@ def _lengths_to_mask(lengths: torch.Tensor, max_len: int) -> torch.Tensor:
     return rng < lengths.unsqueeze(1)
 
 
-def _slice_window(x: torch.Tensor, start: int, end: int, window_size: int, pad_mode: str) -> Tuple[torch.Tensor, int]:
+def _slice_window(
+    x: torch.Tensor,
+    start: int,
+    end: int,
+    window_size: int,
+    pad_mode: str,
+    output_size: int | None = None,
+) -> Tuple[torch.Tensor, int]:
     window = x[..., start:end]
     win_len = end - start
-    if win_len < window_size:
-        pad_len = window_size - win_len
+    target_size = output_size if output_size is not None else window_size
+    if win_len < target_size:
+        pad_len = target_size - win_len
         if pad_mode == "edge" and win_len > 0:
             pad = window[..., -1:].expand(*window.shape[:-1], pad_len)
         else:
@@ -69,8 +77,11 @@ def window_batch_for_online_training(
     window_emit: str = "stride",
     pad_mode: str = "edge",
     random_offset: bool = True,
+    model_window_size: int | None = None,
 ) -> Tuple[torch.Tensor, dict]:
     validate_window_args(window_size, window_stride)
+    if model_window_size is not None and model_window_size < window_size:
+        raise ValueError("model_window_size must be >= window_size")
     y = cond["y"]
     lengths = y["lengths"].to(torch.long)
     device = motion.device
@@ -92,8 +103,12 @@ def window_batch_for_online_training(
                 start = max_start
         end = min(seq_len, start + window_size)
 
-        win_motion, win_len = _slice_window(motion[idx], start, end, window_size, pad_mode)
-        win_cmotion, _ = _slice_window(y["cmotion"][idx], start, end, window_size, pad_mode)
+        win_motion, win_len = _slice_window(
+            motion[idx], start, end, window_size, pad_mode, output_size=model_window_size
+        )
+        win_cmotion, _ = _slice_window(
+            y["cmotion"][idx], start, end, window_size, pad_mode, output_size=model_window_size
+        )
 
         window_motions.append(win_motion)
         window_cmotions.append(win_cmotion)
@@ -103,7 +118,8 @@ def window_batch_for_online_training(
     window_cmotion = torch.stack(window_cmotions, dim=0)
     window_lengths = torch.as_tensor(window_lengths, device=device, dtype=torch.long)
 
-    base_mask = _lengths_to_mask(window_lengths, window_size)
+    mask_len = model_window_size if model_window_size is not None else window_size
+    base_mask = _lengths_to_mask(window_lengths, mask_len)
     emit_mask = torch.zeros_like(base_mask)
     for idx, win_len in enumerate(window_lengths.tolist()):
         emit_start, emit_end = _emit_bounds(win_len, window_stride, window_emit)
@@ -133,8 +149,11 @@ def sliding_window_sample(
     pad_mode: str = "edge",
     overlap_handling: str = "latest",
     sample_fn=None,
+    model_window_size: int | None = None,
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     validate_window_args(window_size, window_stride)
+    if model_window_size is not None and model_window_size < window_size:
+        raise ValueError("model_window_size must be >= window_size")
     if overlap_handling != "latest":
         raise ValueError(f"Unsupported overlap handling: {overlap_handling}")
     if sample_fn is None:
@@ -153,10 +172,16 @@ def sliding_window_sample(
         seq_len = int(lengths[b].item())
         if seq_len <= 0:
             continue
-        for start, end in iter_windows(seq_len, window_size, window_stride):
-            cmotion_win, win_len = _slice_window(cmotion[b], start, end, window_size, pad_mode)
+        end = window_stride
+        while True:
+            end = min(end, seq_len)
+            start = max(0, end - window_size)
+            cmotion_win, win_len = _slice_window(
+                cmotion[b], start, end, window_size, pad_mode, output_size=model_window_size
+            )
             win_len_t = torch.tensor([win_len], device=device, dtype=torch.long)
-            mask = _lengths_to_mask(win_len_t, window_size).unsqueeze(1).unsqueeze(1)
+            mask_len = model_window_size if model_window_size is not None else window_size
+            mask = _lengths_to_mask(win_len_t, mask_len).unsqueeze(1).unsqueeze(1)
 
             window_y = {}
             for key, value in y.items():
@@ -175,12 +200,15 @@ def sliding_window_sample(
             model_kwargs = {"y": window_y}
             sample = sample_fn(
                 model,
-                (1, model.njoints, model.nfeats, window_size),
+                (1, model.njoints, model.nfeats, model_window_size if model_window_size is not None else window_size),
                 clip_denoised=False,
                 model_kwargs=model_kwargs,
             )
 
             emit_start, emit_end = _emit_bounds(win_len, window_stride, window_emit)
+            if start == 0 and not filled[b].any() and window_emit == 'stride':
+                emit_start = 0
+                emit_end = min(win_len, window_stride)
             emit_len = emit_end - emit_start
             if emit_len <= 0:
                 continue
@@ -188,5 +216,9 @@ def sliding_window_sample(
             out_end = start + emit_end
             output[b, :, :, out_start:out_end] = sample[0, :, :, emit_start:emit_end]
             filled[b, out_start:out_end] = True
+
+            if end >= seq_len:
+                break
+            end += window_stride
 
     return output, filled
