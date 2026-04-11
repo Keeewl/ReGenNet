@@ -12,6 +12,7 @@ from torch.nn.parallel.distributed import DistributedDataParallel as DDP
 
 from diffusion import logger
 from utils import dist_util
+from utils.online_window import window_batch_for_online_training
 from diffusion.fp16_util import MixedPrecisionTrainer
 from diffusion.resample import LossAwareSampler, UniformSampler
 from tqdm import tqdm
@@ -43,6 +44,13 @@ class TrainLoop:
         self.use_fp16 = False  # deprecating this option
         self.fp16_scale_growth = 1e-3  # deprecating this option
         self.weight_decay = args.weight_decay
+        self.reaction_mode = args.reaction_mode
+        self.online_strategy = args.online_strategy
+        self.window_size = args.window_size
+        self.window_stride = args.window_stride
+        self.window_emit = args.window_emit
+        self.window_pad_mode = args.window_pad_mode
+        self.online_train_random_offset = args.online_train_random_offset
         self.lr_anneal_steps = args.lr_anneal_steps
         self.ema_rate = (
             [self.ema_rate]
@@ -168,6 +176,20 @@ class TrainLoop:
                     cond['y']['action_text']: [64, 1]
                 """
                 cond['y'] = {key: val.to(self.device) if torch.is_tensor(val) else val for key, val in cond['y'].items()}
+
+                if self.reaction_mode == "online" and self.online_strategy != "sliding_window":
+                    raise ValueError("Only sliding_window is supported for online training.")
+
+                if self.reaction_mode == "online" and self.online_strategy == "sliding_window":
+                    motion, cond = window_batch_for_online_training(
+                        motion,
+                        cond,
+                        window_size=self.window_size,
+                        window_stride=self.window_stride,
+                        window_emit=self.window_emit,
+                        pad_mode=self.window_pad_mode,
+                        random_offset=self.online_train_random_offset,
+                    )
 
                 self.run_step(motion, cond)
                 if self.step % self.log_interval == 0:

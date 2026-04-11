@@ -97,6 +97,28 @@ def add_base_options(parser):
                        help="Use DDIM to accelerate the inference or not.")
     group.add_argument("--timestep_respacing", default="", type=str, help="ddim timestep respacing.")
 
+def add_online_options(parser):
+    group = parser.add_argument_group('online')
+    group.add_argument("--reaction_mode", default='offline', choices=['offline', 'online'], type=str,
+                       help="Run full-sequence offline or strict-online windowed training/eval.")
+    group.add_argument("--online_strategy", default='sliding_window', choices=['sliding_window', 'autoregressive'], type=str,
+                       help="Online strategy for generation/training.")
+    group.add_argument("--window_size", default=30, type=int,
+                       help="Window size for online sliding-window.")
+    group.add_argument("--window_stride", default=10, type=int,
+                       help="Window stride for online sliding-window.")
+    group.add_argument("--window_emit", default='stride', choices=['last', 'stride'], type=str,
+                       help="Which portion of window is emitted/supervised.")
+    group.add_argument("--window_overlap_handling", default='latest', choices=['latest'], type=str,
+                       help="How to resolve overlaps when stitching windows.")
+    group.add_argument("--window_pad_mode", default='edge', choices=['edge', 'zero'], type=str,
+                       help="Padding mode when window shorter than window_size.")
+    group.add_argument("--online_train_random_offset", action='store_true',
+                       help="Randomize window start during online training.")
+    group.add_argument("--online_eval_use_same_noise", action='store_true',
+                       help="Reuse noise seeds across overlapping windows (optional).")
+
+
 def add_diffusion_options(parser):
     group = parser.add_argument_group('diffusion')
     group.add_argument("--noise_schedule", default='cosine', choices=['linear', 'cosine'], type=str,
@@ -368,6 +390,7 @@ def add_evaluation_options(parser):
 def train_args():
     parser = ArgumentParser()
     add_base_options(parser)
+    add_online_options(parser)
     add_data_options(parser)
     add_model_options(parser)
     add_diffusion_options(parser)
@@ -393,6 +416,7 @@ def generate_args():
     parser = ArgumentParser()
     # args specified by the user: (all other will be loaded from the model)
     add_base_options(parser)
+    add_online_options(parser)
     add_sampling_options(parser)
     add_generate_options(parser)
     return parse_and_load_from_model(parser)
@@ -401,6 +425,7 @@ def cgenerate_args():
     parser = ArgumentParser()
     # args specified by the user: (all other will be loaded from the model)
     add_base_options(parser)
+    add_online_options(parser)
     add_data_options(parser)
     add_sampling_options(parser)
     add_generate_options(parser)
@@ -411,6 +436,7 @@ def evaluation_parser():
     parser = ArgumentParser()
     # args specified by the user: (all other will be loaded from the model)
     add_base_options(parser)
+    add_online_options(parser)
     add_evaluation_options(parser)
     return parse_and_load_from_model(parser)
 
@@ -418,6 +444,7 @@ def evaluation_parser():
 def refine_evaluation_parser():
     parser = ArgumentParser()
     add_base_options(parser)
+    add_online_options(parser)
     add_evaluation_options(parser)
     parser.add_argument("--stage2_model_path", required=True, type=str,
                        help="Path to Stage2 checkpoint (rnet_v1).")

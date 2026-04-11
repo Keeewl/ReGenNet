@@ -10,6 +10,7 @@ import torch
 from utils.parser_util import cgenerate_args
 from utils.model_util import create_model_and_diffusion, load_model_wo_clip
 from utils import dist_util
+from utils.online_window import sliding_window_sample
 from model.cfg_sampler import ClassifierFreeSampleModel
 from data_loaders.get_data import get_dataset_loader
 import shutil
@@ -144,18 +145,53 @@ def main():
         sample_fn = diffusion.p_sample_loop if not args.use_ddim else diffusion.ddim_sample_loop
         
         t_start = time.time()
-        sample = sample_fn(
-            model,
-            (args.batch_size, model.njoints, model.nfeats, n_frames),
-            clip_denoised=False,
-            model_kwargs=model_kwargs,
-            skip_timesteps=0,  # 0 is the default value - i.e. don't skip any step
-            init_image=None,
-            progress=True,
-            dump_steps=None,
-            noise=None,
-            const_noise=False,
-        )
+        if args.reaction_mode == 'online' and args.online_strategy == 'sliding_window':
+            sample, _ = sliding_window_sample(
+                model,
+                diffusion,
+                model_kwargs,
+                window_size=args.window_size,
+                window_stride=args.window_stride,
+                window_emit=args.window_emit,
+                pad_mode=args.window_pad_mode,
+                overlap_handling=args.window_overlap_handling,
+                sample_fn=sample_fn,
+            )
+        elif args.reaction_mode == 'online' and args.online_strategy == 'autoregressive':
+            cmotion_bak = model_kwargs['y']['cmotion']
+            B, V, C, T = cmotion_bak.shape
+            cmotion = torch.zeros_like(cmotion_bak)
+            output = torch.zeros((B, V, C, T), device=cmotion_bak.device)
+            for frame_idx in range(T):
+                cmotion[:, :, :, frame_idx] = cmotion_bak[:, :, :, frame_idx]
+                model_kwargs['y']['cmotion'] = cmotion
+                sample = sample_fn(
+                    model,
+                    (args.batch_size, model.njoints, model.nfeats, n_frames),
+                    clip_denoised=False,
+                    model_kwargs=model_kwargs,
+                    skip_timesteps=0,
+                    init_image=None,
+                    progress=True,
+                    dump_steps=None,
+                    noise=None,
+                    const_noise=False,
+                )
+                output[:, :, :, frame_idx] = sample[:, :, :, frame_idx]
+            sample = output
+        else:
+            sample = sample_fn(
+                model,
+                (args.batch_size, model.njoints, model.nfeats, n_frames),
+                clip_denoised=False,
+                model_kwargs=model_kwargs,
+                skip_timesteps=0,  # 0 is the default value - i.e. don't skip any step
+                init_image=None,
+                progress=True,
+                dump_steps=None,
+                noise=None,
+                const_noise=False,
+            )
         t_end = time.time()
         if rep_i >= 1:
             time_all += (t_end - t_start)*1000

@@ -14,6 +14,7 @@ from data_loaders.tensors import collate, ccollate
 from .tools import format_metrics
 import utils.rotation_conversions as geometry
 from utils import dist_util
+from utils.online_window import sliding_window_sample
 
 def _load_interx_action_names(data_path):
     candidates = []
@@ -138,7 +139,7 @@ def evaluate_cd_gt(gt_loader, tau_contact=0.1):
 
 
 class NewDataloader:
-    def __init__(self, mode, model, diffusion, dataiterator, device, dataset, num_samples, num_person, body_model, setting, auto_regressive=False):
+    def __init__(self, mode, model, diffusion, dataiterator, device, dataset, num_samples, num_person, body_model, setting, reaction_mode="offline", online_strategy="sliding_window", window_size=30, window_stride=10, window_emit="stride", window_pad_mode="edge", window_overlap_handling="latest", auto_regressive=False):
         assert mode in ["gen", "gt"]
 
         self.batches = []
@@ -154,7 +155,23 @@ class NewDataloader:
                     for _k in model_kwargs['y'].keys():
                         if type(model_kwargs['y'][_k]) == torch.Tensor:
                             model_kwargs['y'][_k] = model_kwargs['y'][_k].to(device)
-                    if auto_regressive == True:
+                    if reaction_mode == "online" and online_strategy == "sliding_window":
+                        sample, _ = sliding_window_sample(
+                            model,
+                            diffusion,
+                            model_kwargs,
+                            window_size=window_size,
+                            window_stride=window_stride,
+                            window_emit=window_emit,
+                            pad_mode=window_pad_mode,
+                            overlap_handling=window_overlap_handling,
+                            sample_fn=sample_fn,
+                        )
+                        if setting == 'cmdm':
+                            batch['output'] = torch.cat((model_kwargs['y']['cmotion'], sample), axis=2)
+                        else:
+                            batch['output'] = sample
+                    elif auto_regressive or (reaction_mode == "online" and online_strategy == "autoregressive"):
                         cmotion_bak = model_kwargs['y']['cmotion']
                         B, V, C, T = cmotion_bak.shape
                         cmotion = torch.zeros_like(model_kwargs['y']['cmotion']).to(device)
@@ -284,7 +301,10 @@ def evaluate(args, model, diffusion, data, rec_model_path, setting, acc_only, au
                         for key in data_types}
 
         new_data_loader = functools.partial(NewDataloader, model=model, diffusion=diffusion, device=device,
-                                            dataset=args.dataset, num_samples=args.num_samples, num_person=2, body_model=args.body_model, setting=setting, auto_regressive=auto_regressive)
+                                            dataset=args.dataset, num_samples=args.num_samples, num_person=2, body_model=args.body_model, setting=setting,
+                                            reaction_mode=args.reaction_mode, online_strategy=args.online_strategy, window_size=args.window_size, window_stride=args.window_stride,
+                                            window_emit=args.window_emit, window_pad_mode=args.window_pad_mode, window_overlap_handling=args.window_overlap_handling,
+                                            auto_regressive=auto_regressive)
         gtLoaders = {key: new_data_loader(mode="gt", dataiterator=dataiterator[key][0])
                      for key in ["train", "test"]}
 
