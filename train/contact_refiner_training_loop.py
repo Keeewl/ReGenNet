@@ -62,12 +62,12 @@ class ContactRefinerTrainLoop:
             self.model.parameters(), lr=args.lr, weight_decay=args.weight_decay
         )
 
+        self.log_path = os.path.join(args.save_dir, "train_log.txt")
         self.step = 0
         self.resume_step = 0
         if args.resume_checkpoint:
             self._load_checkpoint(args.resume_checkpoint)
 
-        self.log_path = os.path.join(args.save_dir, "train_log.txt")
         self._log(f"start_time={datetime.now().isoformat()}")
         self._log(json.dumps(vars(args), indent=2, sort_keys=True))
 
