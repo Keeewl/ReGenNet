@@ -8,6 +8,7 @@ sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 
 import numpy as np
 import torch
+from tqdm import tqdm
 
 from eval.contact_eval.contact_evaluator import HandContactEvaluator
 
@@ -75,6 +76,101 @@ def _ensure_lengths(lengths, batch_size, num_frames):
     return out
 
 
+def _slice_batch(tensor, start, end):
+    if tensor is None:
+        return None
+    return tensor[start:end]
+
+
+def _init_accumulator():
+    return {
+        "hand_cd_sum": 0.0,
+        "hand_cd_count": 0.0,
+        "hand_cd_topk_sum": 0.0,
+        "contact_ratio_sum": 0.0,
+        "contact_ratio_count": 0,
+        "avg_contact_duration_sum": 0.0,
+        "avg_contact_duration_count": 0,
+        "contact_frequency_sum": 0.0,
+        "contact_frequency_count": 0,
+        "num_valid_sequences": 0,
+        "num_contact_segments": 0,
+        "num_contact_frames": 0,
+    }
+
+
+def _accumulate_metrics(acc, metrics):
+    num_valid = int(metrics.get("num_valid_sequences", 0))
+    num_segments = int(metrics.get("num_contact_segments", 0))
+    num_frames = int(metrics.get("num_contact_frames", 0))
+
+    acc["num_valid_sequences"] += num_valid
+    acc["num_contact_segments"] += num_segments
+    acc["num_contact_frames"] += num_frames
+
+    contact_ratio = metrics.get("contact_ratio", None)
+    if contact_ratio is not None and num_valid > 0:
+        acc["contact_ratio_sum"] += float(contact_ratio) * num_valid
+        acc["contact_ratio_count"] += num_valid
+
+    avg_duration = metrics.get("avg_contact_duration", None)
+    if avg_duration is not None and num_segments > 0:
+        acc["avg_contact_duration_sum"] += float(avg_duration) * num_segments
+        acc["avg_contact_duration_count"] += num_segments
+
+    contact_freq = metrics.get("contact_frequency", None)
+    if contact_freq is not None and num_valid > 0:
+        acc["contact_frequency_sum"] += float(contact_freq) * num_valid
+        acc["contact_frequency_count"] += num_valid
+
+    hand_cd = metrics.get("hand_cd", None)
+    hand_cd_count = metrics.get("hand_cd_count", None)
+    if hand_cd is not None and hand_cd_count:
+        acc["hand_cd_sum"] += float(hand_cd) * float(hand_cd_count)
+        acc["hand_cd_count"] += float(hand_cd_count)
+
+    hand_cd_topk = metrics.get("hand_cd_topk_mean", None)
+    if hand_cd_topk is not None and hand_cd_count:
+        acc["hand_cd_topk_sum"] += float(hand_cd_topk) * float(hand_cd_count)
+
+
+def _finalize_metrics(acc, include_debug=False):
+    hand_cd = None
+    if acc["hand_cd_count"] > 0:
+        hand_cd = acc["hand_cd_sum"] / acc["hand_cd_count"]
+
+    contact_ratio = 0.0
+    if acc["contact_ratio_count"] > 0:
+        contact_ratio = acc["contact_ratio_sum"] / acc["contact_ratio_count"]
+
+    avg_duration = 0.0
+    if acc["avg_contact_duration_count"] > 0:
+        avg_duration = acc["avg_contact_duration_sum"] / acc["avg_contact_duration_count"]
+
+    contact_freq = 0.0
+    if acc["contact_frequency_count"] > 0:
+        contact_freq = acc["contact_frequency_sum"] / acc["contact_frequency_count"]
+
+    results = {
+        "hand_cd": hand_cd,
+        "contact_ratio": contact_ratio,
+        "avg_contact_duration": avg_duration,
+        "contact_frequency": contact_freq,
+        "num_valid_sequences": int(acc["num_valid_sequences"]),
+        "num_contact_segments": int(acc["num_contact_segments"]),
+        "num_contact_frames": int(acc["num_contact_frames"]),
+    }
+
+    if include_debug:
+        results["hand_cd_count"] = float(acc["hand_cd_count"])
+        if acc["hand_cd_count"] > 0:
+            results["hand_cd_topk_mean"] = acc["hand_cd_topk_sum"] / acc["hand_cd_count"]
+        else:
+            results["hand_cd_topk_mean"] = None
+
+    return results
+
+
 def _format_value(val):
     if val is None:
         return "n/a"
@@ -140,6 +236,7 @@ def main():
     parser.add_argument("--tau-contact", type=float, default=0.10)
     parser.add_argument("--tau-near", type=float, default=0.18)
     parser.add_argument("--topk", type=int, default=3)
+    parser.add_argument("--batch-size", type=int, default=8)
     parser.add_argument("--json-out", type=str, default="hand_contact_metrics.json")
     parser.add_argument("--csv-out", type=str, default="")
     parser.add_argument("--debug", action="store_true")
@@ -179,10 +276,6 @@ def main():
     baseline_motion = _ensure_batch(baseline_motion, name="baseline_reactor_motion")
 
     device = torch.device(args.device)
-    actor_motion = actor_motion.to(device)
-    lengths = lengths.to(device)
-    if gt_motion is not None:
-        gt_motion = gt_motion.to(device)
 
     evaluator = HandContactEvaluator(
         body_model=args.body_model,
@@ -202,21 +295,48 @@ def main():
     if all(motion is None for motion in method_inputs.values()):
         raise ValueError("No method motions provided")
 
+    num_samples = actor_motion.shape[0]
+    if args.batch_size <= 0:
+        raise ValueError("--batch-size must be positive")
+    batch_size = min(int(args.batch_size), num_samples)
+
+    for name, motion in method_inputs.items():
+        if motion is None:
+            continue
+        if motion.shape[0] != num_samples:
+            raise ValueError(f"{name} has {motion.shape[0]} samples, expected {num_samples}")
+    if gt_motion is not None and gt_motion.shape[0] != num_samples:
+        raise ValueError(f"gt has {gt_motion.shape[0]} samples, expected {num_samples}")
+
     results = {}
     for name, motion in method_inputs.items():
         if motion is None:
             continue
-        motion = motion.to(device)
-        gt_ref = gt_motion
-        if gt_ref is None and name == "gt":
-            gt_ref = motion
-        results[name] = evaluator.evaluate(
-            actor_motion,
-            motion,
-            lengths=lengths,
-            gt_reactor_motion=gt_ref,
-            return_debug=args.debug,
-        )
+        acc = _init_accumulator()
+        total_batches = (num_samples + batch_size - 1) // batch_size
+        iterator = range(0, num_samples, batch_size)
+        for start in tqdm(iterator, total=total_batches, desc=f"Eval {name}"):
+            end = min(start + batch_size, num_samples)
+            actor_b = _slice_batch(actor_motion, start, end).to(device)
+            motion_b = _slice_batch(motion, start, end).to(device)
+            lengths_b = _slice_batch(lengths, start, end).to(device)
+
+            gt_ref = None
+            if gt_motion is not None:
+                gt_ref = _slice_batch(gt_motion, start, end).to(device)
+            elif name == "gt":
+                gt_ref = motion_b
+
+            with torch.no_grad():
+                metrics = evaluator.evaluate(
+                    actor_b,
+                    motion_b,
+                    lengths=lengths_b,
+                    gt_reactor_motion=gt_ref,
+                    return_debug=True,
+                )
+            _accumulate_metrics(acc, metrics)
+        results[name] = _finalize_metrics(acc, include_debug=args.debug)
 
     _print_summary(results)
 
