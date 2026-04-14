@@ -15,6 +15,7 @@ from model.contact.contact_defs import default_refiner_joint_ids
 from model.contact.refiner_inputs import ContactWindowSampler
 from model.contact.refiner_model import HandContactRefiner
 from model.contact.proposal_model import HandContactProposal
+from model.rotation2xyz import Rotation2xyz, Rotation2xyz_x
 
 
 def _load_refiner_checkpoint(path, device):
@@ -122,6 +123,98 @@ def _save_h5(path, arrays):
             f.create_dataset(key, data=value)
 
 
+def _build_rot2xyz(body_model, device):
+    if body_model == "smplx":
+        return Rotation2xyz_x(device=device)
+    return Rotation2xyz(device=device)
+
+
+def _to_xyz(rot2xyz, motion, lengths, body_model, pose_rep):
+    _, _, _, num_frames = motion.shape
+    mask = torch.arange(num_frames, device=motion.device).view(1, -1) < lengths.view(-1, 1)
+    return rot2xyz(
+        x=motion,
+        mask=mask,
+        pose_rep=pose_rep,
+        glob=True,
+        translation=True,
+        jointstype=body_model,
+        vertstrans=True,
+        betas=None,
+        beta=0,
+        glob_rot=None,
+        num_person=1,
+    )
+
+
+def _load_meta(path):
+    if not path:
+        return None
+    data = np.load(path, allow_pickle=True)
+    return {k: data[k] for k in data.files}
+
+
+def _fill_meta_defaults(arr, size):
+    if arr.dtype == object:
+        return np.array([""] * size, dtype=object)
+    if arr.ndim == 0:
+        return arr
+    fill_shape = (size,) + arr.shape[1:]
+    return np.full(fill_shape, -1, dtype=arr.dtype)
+
+
+def _align_meta(meta, sample_indices, key=None):
+    if not meta or len(sample_indices) == 0:
+        return None
+    if key is None:
+        if "data_index" in meta:
+            key = "data_index"
+        elif "sample_idx" in meta:
+            key = "sample_idx"
+        else:
+            return None
+    meta_index = np.asarray(meta[key]).astype(np.int64)
+    index_map = {}
+    for idx, val in enumerate(meta_index):
+        index_map.setdefault(int(val), []).append(idx)
+
+    select_idx = []
+    for val in sample_indices:
+        bucket = index_map.get(int(val), [])
+        if bucket:
+            select_idx.append(bucket.pop(0))
+        else:
+            select_idx.append(-1)
+
+    aligned = {"meta_version": meta.get("meta_version", np.array("v1"))}
+    size = len(sample_indices)
+    for k, v in meta.items():
+        arr = np.asarray(v)
+        if arr.ndim == 0:
+            aligned[k] = arr
+            continue
+        if arr.shape[0] != len(meta_index):
+            continue
+        out = _fill_meta_defaults(arr, size)
+        for i, src in enumerate(select_idx):
+            if src < 0:
+                continue
+            out[i] = arr[src]
+        aligned[k] = out
+
+    aligned["sample_idx"] = np.arange(size, dtype=np.int64)
+    return aligned
+
+
+def _save_results(path, payload, meta=None):
+    os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
+    np.save(path, payload)
+    if meta is None:
+        return
+    meta_path = os.path.join(os.path.dirname(path), "results_meta.npz")
+    np.savez_compressed(meta_path, **meta)
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--cache_path", required=True, type=str)
@@ -147,6 +240,10 @@ def main():
     parser.add_argument("--max_batches", default=-1, type=int)
     parser.add_argument("--num_samples", default=-1, type=int)
     parser.add_argument("--device", default="cuda", type=str)
+
+    parser.add_argument("--results_path", default="", type=str)
+    parser.add_argument("--meta_path", default="", type=str)
+    parser.add_argument("--meta_key", default="", type=str)
 
     parser.add_argument("--save_gt", action="store_true")
     parser.add_argument("--save_coarse", action="store_true")
@@ -197,11 +294,16 @@ def main():
     coarse_list = []
     lengths_list = []
     indices_list = []
+    motion_xyz_list = []
 
     total = 0
     total_batches = len(loader)
     if args.max_batches > 0:
         total_batches = min(total_batches, args.max_batches)
+
+    rot2xyz = None
+    if args.results_path:
+        rot2xyz = _build_rot2xyz(args.body_model, device=device)
 
     with torch.no_grad():
         pbar = tqdm(enumerate(loader), total=total_batches, desc="Generate refined motion")
@@ -281,6 +383,9 @@ def main():
             indices_list.append(sample_index[:keep].numpy())
 
             actor_list.append(actor[:keep].cpu().numpy())
+            if rot2xyz is not None:
+                motion_xyz = _to_xyz(rot2xyz, refined[:keep], lengths[:keep], args.body_model, args.pose_rep)
+                motion_xyz_list.append(motion_xyz.cpu().numpy())
             if args.save_gt:
                 gt_list.append(gt[:keep].cpu().numpy())
             if args.save_coarse:
@@ -312,6 +417,33 @@ def main():
         _save_npz(args.output_path, output)
 
     print(f"Saved refined motion to {args.output_path} (samples={refined_motion.shape[0]})")
+
+    if args.results_path:
+        results_path = args.results_path
+        if os.path.isdir(results_path):
+            results_path = os.path.join(results_path, "results.npy")
+        if not results_path.endswith(".npy"):
+            results_path = results_path + ".npy"
+
+        motion_xyz = np.concatenate(motion_xyz_list, axis=0).astype(np.float32)
+        results_payload = {
+            "motion": motion_xyz,
+            "output": refined_motion,
+            "cmotion": output["actor_motion"],
+            "text": [""] * int(refined_motion.shape[0]),
+            "lengths": lengths_out,
+            "num_samples": int(refined_motion.shape[0]),
+            "num_repetitions": 1,
+        }
+
+        meta = _load_meta(args.meta_path)
+        meta_key = args.meta_key or None
+        meta_aligned = _align_meta(meta, indices_out, key=meta_key)
+        if meta_aligned is not None and "action_name" in meta_aligned:
+            results_payload["text"] = [str(x) for x in meta_aligned["action_name"]]
+
+        _save_results(results_path, results_payload, meta=meta_aligned)
+        print(f"Saved results to {results_path}")
 
 
 if __name__ == "__main__":
