@@ -65,6 +65,10 @@ class ContactDiffusionRefinerTrainLoop:
             lambda_smooth=args.lambda_smooth,
             penetration_margin=args.penetration_margin,
             nontarget_margin=args.nontarget_margin,
+            strict_contact_target=args.strict_contact_target,
+            near_contact_margin=args.near_contact_margin,
+            blueprint_conf_min=args.blueprint_conf_min,
+            penalize_target_penetration=args.penalize_target_penetration,
         )
 
         self.opt = AdamW(self.model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
@@ -127,6 +131,17 @@ class ContactDiffusionRefinerTrainLoop:
                 gt = batch["gt_motion"]
                 lengths = batch["lengths"]
 
+                if self.step < self.args.alignment_only_steps:
+                    alignment_weight = 1.0
+                    cleanup_weight = 0.0
+                else:
+                    alignment_weight = 1.0
+                    if self.args.cleanup_ramp_steps <= 0:
+                        cleanup_weight = 1.0
+                    else:
+                        progress = (self.step - self.args.alignment_only_steps) / float(self.args.cleanup_ramp_steps)
+                        cleanup_weight = float(min(max(progress, 0.0), 1.0))
+
                 use_teacher = self.args.teacher_warmup_steps > 0 and self.step < self.args.teacher_warmup_steps
                 if use_teacher:
                     strict_windows, near_windows, labels = self.builder.build_teacher_windows(
@@ -175,6 +190,13 @@ class ContactDiffusionRefinerTrainLoop:
                 )
                 x_t = self.diffusion.q_sample(residual, t, noise=noise)
 
+                alpha = torch.from_numpy(self.diffusion.sqrt_alphas_cumprod).to(
+                    device=self.device, dtype=residual.dtype
+                )[t]
+                alpha_bar = alpha * alpha
+                aux_weight = alpha_bar.clamp(min=self.args.aux_alpha_min, max=1.0)
+                aux_weight_mean = aux_weight.mean()
+
                 pred_eps = self.model(
                     x_t,
                     t,
@@ -189,9 +211,12 @@ class ContactDiffusionRefinerTrainLoop:
                     time_mask=window_batch["time_mask"],
                 )
 
+                pred_eps_absmax = pred_eps.abs().max()
                 loss_diff = _masked_mse(pred_eps - noise, window_batch["time_mask"])
                 x0_pred = predict_xstart_from_eps(self.diffusion, x_t, t, pred_eps)
+                x0_pred = x0_pred.clamp(-self.args.delta_clip, self.args.delta_clip)
                 x0_pred = x0_pred.to(window_batch["coarse_full"].dtype)
+                x0_absmax = x0_pred.abs().max()
 
                 joint_ids_t = torch.as_tensor(window_batch["joint_ids"], device=self.device, dtype=torch.long)
                 delta_full = torch.zeros_like(window_batch["coarse_full"])
@@ -204,12 +229,27 @@ class ContactDiffusionRefinerTrainLoop:
                     window_batch["gt_full"],
                     window_batch["actor_full"],
                     window_batch,
+                    aux_weight=aux_weight,
+                    alignment_weight=alignment_weight,
+                    cleanup_weight=cleanup_weight,
+                    blueprint_confidence=window_batch["blueprint_confidence"],
                 )
                 total_loss = loss_diff + loss_other
 
+                nonfinite_loss = 0.0
+                nonfinite_grad = 0.0
+                grad_norm = torch.tensor(0.0, device=total_loss.device)
+
                 self.opt.zero_grad()
-                total_loss.backward()
-                self.opt.step()
+                if not torch.isfinite(total_loss).item():
+                    nonfinite_loss = 1.0
+                else:
+                    total_loss.backward()
+                    grad_norm = torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.args.grad_clip)
+                    if not torch.isfinite(grad_norm).item():
+                        nonfinite_grad = 1.0
+                    else:
+                        self.opt.step()
 
                 if self.step % self.args.log_interval == 0:
                     num_strict, num_near = self._count_window_states(window_batch["window_items"])
@@ -221,6 +261,16 @@ class ContactDiffusionRefinerTrainLoop:
                         "loss_contact_near": loss_dict["loss_contact_near"],
                         "loss_identity": loss_dict["loss_identity"],
                         "loss_smooth": loss_dict["loss_smooth"],
+                        "aux_weight_mean": aux_weight_mean,
+                        "pred_eps_absmax": pred_eps_absmax,
+                        "x0_absmax": x0_absmax,
+                        "grad_norm": grad_norm,
+                        "nonfinite_loss": float(nonfinite_loss),
+                        "nonfinite_grad": float(nonfinite_grad),
+                        "alignment_weight": float(alignment_weight),
+                        "cleanup_weight": float(cleanup_weight),
+                        "use_teacher": float(use_teacher),
+                        "blueprint_conf_mean": window_batch["blueprint_confidence"].mean(),
                         "num_strict_windows": float(num_strict),
                         "num_near_windows": float(num_near),
                     }

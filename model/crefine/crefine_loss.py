@@ -1,3 +1,4 @@
+import math
 import torch
 import torch.nn as nn
 
@@ -40,7 +41,10 @@ def _softmin_distance(a_xyz, b_xyz, beta=30.0):
     dist = torch.linalg.norm(a_xyz[:, :, None, :] - b_xyz[:, None, :, :], dim=-1)
     dist = dist.reshape(dist.shape[0], -1)
     beta = float(beta)
-    return -torch.logsumexp(-beta * dist, dim=-1) / max(beta, 1e-6)
+    softmin = -torch.logsumexp(-beta * dist, dim=-1) / max(beta, 1e-6)
+    count = max(int(dist.shape[-1]), 1)
+    softmin = softmin + (math.log(count) / max(beta, 1e-6))
+    return softmin.clamp(min=0.0)
 
 
 def _build_phase_weight(phase_seq, weights):
@@ -81,6 +85,10 @@ class ContactDiffusionRefinerLoss(nn.Module):
         lambda_self_penetration=0.0,
         penetration_margin=0.005,
         nontarget_margin=0.02,
+        strict_contact_target=0.008,
+        near_contact_margin=0.03,
+        blueprint_conf_min=0.3,
+        penalize_target_penetration=False,
     ):
         super().__init__()
         self.body_model = body_model
@@ -96,6 +104,10 @@ class ContactDiffusionRefinerLoss(nn.Module):
         self.lambda_self_penetration = float(lambda_self_penetration)
         self.penetration_margin = float(penetration_margin)
         self.nontarget_margin = float(nontarget_margin)
+        self.strict_contact_target = float(strict_contact_target)
+        self.near_contact_margin = float(near_contact_margin)
+        self.blueprint_conf_min = float(blueprint_conf_min)
+        self.penalize_target_penetration = bool(penalize_target_penetration)
 
         self.contact_weights = contact_weights or {
             "fingertip": 1.0,
@@ -185,7 +197,18 @@ class ContactDiffusionRefinerLoss(nn.Module):
             results[name] = (target_dist, nontarget_dist)
         return results
 
-    def forward(self, refined_full, coarse_full, gt_full, actor_full, window_batch):
+    def forward(
+        self,
+        refined_full,
+        coarse_full,
+        gt_full,
+        actor_full,
+        window_batch,
+        aux_weight=None,
+        alignment_weight=1.0,
+        cleanup_weight=1.0,
+        blueprint_confidence=None,
+    ):
         device = refined_full.device
         joint_ids = window_batch["joint_ids"]
         joint_ids_t = torch.as_tensor(joint_ids, device=device, dtype=torch.long)
@@ -209,6 +232,16 @@ class ContactDiffusionRefinerLoss(nn.Module):
         refined_vertices = self._to_vertices(refined_full)
         actor_vertices = self._to_vertices(actor_full)
 
+        if aux_weight is None:
+            aux_weight = torch.ones(refined_local.shape[0], device=device, dtype=refined_local.dtype)
+        else:
+            aux_weight = aux_weight.to(device=device, dtype=refined_local.dtype)
+        if blueprint_confidence is None:
+            blueprint_confidence = torch.ones(refined_local.shape[0], device=device, dtype=refined_local.dtype)
+        else:
+            blueprint_confidence = blueprint_confidence.to(device=device, dtype=refined_local.dtype)
+        blueprint_confidence = blueprint_confidence.clamp(min=self.blueprint_conf_min, max=1.0)
+
         for i in range(refined_local.shape[0]):
             side = int(hand_side_idx[i].item())
             target_id = int(target_part_id[i].item())
@@ -219,16 +252,26 @@ class ContactDiffusionRefinerLoss(nn.Module):
 
             frame_mask = time_mask[i].float()
             phase_weight = _build_phase_weight(phase_seq[i], self.phase_weights).to(device)
-            weight = frame_mask * phase_weight
+            conf = blueprint_confidence[i]
+            aux_w = aux_weight[i]
+            frame_weight = frame_mask * phase_weight * conf * aux_w
+
+            align_weight = frame_weight * float(alignment_weight)
+            clean_weight = frame_weight * float(cleanup_weight)
 
             joint_mask = _joint_mask_from_side(joint_ids, side).to(device)
             non_target_mask = ~joint_mask
 
             if non_target_mask.any():
                 idx = torch.nonzero(non_target_mask, as_tuple=False).flatten()
-                identity_loss = identity_loss + _masked_mse(delta_local[i, :, idx, :], frame_mask)
+                identity_loss = identity_loss + _masked_mse(delta_local[i, :, idx, :], clean_weight)
 
-            smooth_loss = smooth_loss + _masked_mse(temporal_diff(delta_local[i]), frame_mask)
+            if joint_mask.any():
+                idx = torch.nonzero(joint_mask, as_tuple=False).flatten()
+                smooth_loss = smooth_loss + _masked_mse(
+                    temporal_diff(delta_local[i, :, idx, :]),
+                    clean_weight,
+                )
 
             distances = self._contact_distance(
                 refined_vertices[i : i + 1], actor_vertices[i : i + 1],
@@ -246,20 +289,26 @@ class ContactDiffusionRefinerLoss(nn.Module):
                 + self.contact_weights["palm"] * palm
                 + self.contact_weights["knuckle"] * knuckle
             )
+            contact_dist = contact_dist.clamp(min=0.0)
 
             if state_id == WINDOW_STATE_IDS["strict"]:
-                contact_strict = contact_strict + _masked_mean(contact_dist, weight)
+                target = contact_dist.new_full(contact_dist.shape, self.strict_contact_target)
+                strict_err = torch.nn.functional.smooth_l1_loss(contact_dist, target, reduction="none")
+                contact_strict = contact_strict + _masked_mean(strict_err, align_weight)
             else:
-                contact_near = contact_near + _masked_mean(contact_dist, weight)
+                near_err = torch.relu(contact_dist - float(self.near_contact_margin))
+                contact_near = contact_near + _masked_mean(near_err, align_weight)
 
             pen_dists = self._penetration_distance(
                 refined_vertices[i : i + 1], actor_vertices[i : i + 1],
                 "left" if side == 0 else "right", target_name
             )
             for _, (target_dist, nontarget_dist) in pen_dists.items():
-                pen = torch.relu(self.penetration_margin - target_dist)
                 repulse = torch.relu(self.nontarget_margin - nontarget_dist)
-                penetration = penetration + _masked_mean(pen + repulse, weight)
+                pen = repulse
+                if self.penalize_target_penetration:
+                    pen = pen + torch.relu(self.penetration_margin - target_dist)
+                penetration = penetration + _masked_mean(pen, clean_weight)
 
         num_windows = max(refined_local.shape[0], 1)
         identity_loss = identity_loss / num_windows

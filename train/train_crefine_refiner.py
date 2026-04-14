@@ -29,7 +29,7 @@ def _parse_args():
     parser.add_argument("--num_steps", default=50_000, type=int)
     parser.add_argument("--log_interval", default=100, type=int)
     parser.add_argument("--save_interval", default=2_000, type=int)
-    parser.add_argument("--lr", default=1e-4, type=float)
+    parser.add_argument("--lr", default=5e-5, type=float)
     parser.add_argument("--weight_decay", default=0.0, type=float)
     parser.add_argument("--resume_checkpoint", default="", type=str)
     parser.add_argument("--num_workers", default=4, type=int)
@@ -60,18 +60,27 @@ def _parse_args():
 
     parser.add_argument("--strict_near_ratio", default=0.7, type=float)
     parser.add_argument("--max_windows_per_batch", default=64, type=int)
-    parser.add_argument("--teacher_warmup_steps", default=0, type=int)
+    parser.add_argument("--teacher_warmup_steps", default=1000, type=int)
+    parser.add_argument("--alignment_only_steps", default=2000, type=int)
+    parser.add_argument("--cleanup_ramp_steps", default=3000, type=int)
 
     parser.add_argument("--softmin_beta", default=30.0, type=float)
+    parser.add_argument("--strict_contact_target", default=0.008, type=float)
+    parser.add_argument("--near_contact_margin", default=0.03, type=float)
+    parser.add_argument("--aux_alpha_min", default=0.05, type=float)
+    parser.add_argument("--delta_clip", default=0.5, type=float)
+    parser.add_argument("--grad_clip", default=1.0, type=float)
+    parser.add_argument("--blueprint_conf_min", default=0.3, type=float)
     parser.add_argument("--max_nontarget_vertices", default=256, type=int)
 
     parser.add_argument("--lambda_contact_strict", default=1.0, type=float)
-    parser.add_argument("--lambda_penetration", default=1.0, type=float)
-    parser.add_argument("--lambda_contact_near", default=0.3, type=float)
-    parser.add_argument("--lambda_identity", default=0.1, type=float)
-    parser.add_argument("--lambda_smooth", default=0.1, type=float)
+    parser.add_argument("--lambda_penetration", default=0.5, type=float)
+    parser.add_argument("--lambda_contact_near", default=0.1, type=float)
+    parser.add_argument("--lambda_identity", default=0.02, type=float)
+    parser.add_argument("--lambda_smooth", default=0.01, type=float)
     parser.add_argument("--penetration_margin", default=0.005, type=float)
     parser.add_argument("--nontarget_margin", default=0.02, type=float)
+    parser.add_argument("--penalize_target_penetration", action="store_true")
     parser.add_argument("--log_events", action="store_true")
 
     parser.add_argument("--cuda", default=True, type=bool)
@@ -139,6 +148,23 @@ def main():
         "window_size": args.window_size,
         "window_pad": args.window_pad,
         "density": args.density,
+        "aux_alpha_min": args.aux_alpha_min,
+        "delta_clip": args.delta_clip,
+        "grad_clip": args.grad_clip,
+        "alignment_only_steps": args.alignment_only_steps,
+        "cleanup_ramp_steps": args.cleanup_ramp_steps,
+        "strict_contact_target": args.strict_contact_target,
+        "near_contact_margin": args.near_contact_margin,
+        "blueprint_conf_min": args.blueprint_conf_min,
+        "penalize_target_penetration": args.penalize_target_penetration,
+        "teacher_warmup_steps": args.teacher_warmup_steps,
+        "strict_near_ratio": args.strict_near_ratio,
+        "lambda_contact_strict": args.lambda_contact_strict,
+        "lambda_penetration": args.lambda_penetration,
+        "lambda_contact_near": args.lambda_contact_near,
+        "lambda_identity": args.lambda_identity,
+        "lambda_smooth": args.lambda_smooth,
+        "lr": args.lr,
     }
 
     train_platform_type = eval(args.train_platform_type)

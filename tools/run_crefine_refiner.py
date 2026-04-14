@@ -14,6 +14,8 @@ from data.refine_dataset import RefineCacheDataset, refine_collate
 from model.contact.contact_defs import default_refiner_joint_ids
 from model.crefine.crefine_inputs import DiffusionRefinerInputBuilder
 from model.crefine.crefine_model import MeshConditionalDiffusionRefiner, create_spaced_diffusion
+from model.crefine.mesh_regions import get_mesh_region_provider
+from model.rotation2xyz import Rotation2xyz_x
 
 
 def _load_refiner_checkpoint(path, device):
@@ -60,6 +62,83 @@ def _accumulate_windows(delta_sum, weight_sum, delta_full, window_items, joint_i
         weight_sum[b, joint_ids_t, start : end + 1] += weights.squeeze(0)
 
 
+
+
+def _softmin_distance(a_xyz, b_xyz, beta=30.0):
+    if a_xyz.numel() == 0 or b_xyz.numel() == 0:
+        return a_xyz.new_full((a_xyz.shape[0],), 1e6)
+    dist = torch.linalg.norm(a_xyz[:, :, None, :] - b_xyz[:, None, :, :], dim=-1)
+    dist = dist.reshape(dist.shape[0], -1)
+    beta = float(beta)
+    return -torch.logsumexp(-beta * dist, dim=-1) / max(beta, 1e-6)
+
+
+def _post_cleanup(delta_avg, refined, actor, joint_ids, strength, margin, body_model, pose_rep, density):
+    if strength <= 0.0:
+        return delta_avg
+    device = refined.device
+    rot2xyz = Rotation2xyz_x(device=device)
+    num_frames = refined.shape[-1]
+    mask = torch.ones(refined.shape[0], num_frames, device=device, dtype=torch.bool)
+    actor_verts = rot2xyz(
+        x=actor,
+        mask=mask,
+        pose_rep=pose_rep,
+        translation=True,
+        glob=True,
+        jointstype="vertices",
+        vertstrans=True,
+        num_person=1,
+        betas=None,
+        beta=0,
+        glob_rot=None,
+    )
+    refined_verts = rot2xyz(
+        x=refined,
+        mask=mask,
+        pose_rep=pose_rep,
+        translation=True,
+        glob=True,
+        jointstype="vertices",
+        vertstrans=True,
+        num_person=1,
+        betas=None,
+        beta=0,
+        glob_rot=None,
+    )
+
+    provider = get_mesh_region_provider(density=density, body_model=body_model, pose_rep=pose_rep)
+    hand_ids = []
+    for side in ("left", "right"):
+        for ids in provider.reactor_hand_patch_ids(side).values():
+            hand_ids.extend(ids)
+    actor_ids = []
+    for part in provider.actor_parts.values():
+        for ids in part.values():
+            actor_ids.extend(ids)
+
+    if not hand_ids or not actor_ids:
+        return delta_avg
+
+    hand_ids_t = torch.as_tensor(sorted(set(hand_ids)), device=device, dtype=torch.long)
+    actor_ids_t = torch.as_tensor(sorted(set(actor_ids)), device=device, dtype=torch.long)
+
+    delta = delta_avg.clone()
+    for b in range(refined.shape[0]):
+        hand_xyz = refined_verts[b].index_select(0, hand_ids_t).permute(2, 0, 1)
+        actor_xyz = actor_verts[b].index_select(0, actor_ids_t).permute(2, 0, 1)
+        dist = _softmin_distance(hand_xyz, actor_xyz, beta=30.0)
+        mask_close = dist < float(margin)
+        if mask_close.any():
+            scale = torch.ones_like(dist)
+            scale = torch.where(mask_close, 1.0 - float(strength), scale)
+            scale = scale.view(1, 1, -1)
+            joint_ids_t = torch.as_tensor(joint_ids, device=device, dtype=torch.long)
+            delta_sel = delta[b].index_select(0, joint_ids_t) * scale
+            delta[b].index_copy_(0, joint_ids_t, delta_sel)
+    return delta
+
+
 def _save_npz(path, arrays):
     os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
     np.savez_compressed(path, **arrays)
@@ -82,6 +161,7 @@ def main():
     parser.add_argument("--output_path", required=True, type=str)
 
     parser.add_argument("--sampling_steps", default=50, type=int)
+    parser.add_argument("--delta_clip", default=0.5, type=float)
     parser.add_argument("--batch_size", default=8, type=int)
     parser.add_argument("--num_workers", default=2, type=int)
     parser.add_argument("--max_batches", default=-1, type=int)
@@ -94,6 +174,8 @@ def main():
     parser.add_argument("--window_pad", default=2, type=int)
     parser.add_argument("--include_buffer", action="store_true")
     parser.add_argument("--density", default="medium", choices=["small", "medium"], type=str)
+    parser.add_argument("--post_cleanup", action="store_true")
+    parser.add_argument("--post_cleanup_strength", default=0.2, type=float)
 
     parser.add_argument("--device", default="cuda", type=str)
     parser.add_argument("--overwrite", action="store_true")
@@ -236,6 +318,7 @@ def main():
                         device=device,
                         progress=False,
                     )
+                    residual = residual.clamp(-args.delta_clip, args.delta_clip)
 
                     joint_ids_t = torch.as_tensor(window_batch["joint_ids"], device=device, dtype=torch.long)
                     delta_full = torch.zeros_like(window_batch["coarse_full"])
@@ -252,6 +335,18 @@ def main():
                 weight = weight_sum.clamp(min=1.0).unsqueeze(2)
                 delta_avg = delta_sum / weight
                 delta_avg = delta_avg * (weight_sum.unsqueeze(2) > 0)
+                if args.post_cleanup:
+                    delta_avg = _post_cleanup(
+                        delta_avg,
+                        coarse + delta_avg,
+                        actor,
+                        joint_ids,
+                        strength=args.post_cleanup_strength,
+                        margin=0.02,
+                        body_model=args.body_model,
+                        pose_rep=args.pose_rep,
+                        density=args.density,
+                    )
                 refined = coarse + delta_avg
 
             keep = refined.shape[0]
