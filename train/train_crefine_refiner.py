@@ -19,6 +19,68 @@ from train.train_platforms import ClearmlPlatform, TensorboardPlatform, NoPlatfo
 from utils.fixseed import fixseed
 
 
+
+def _parse_args():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--cache_path", required=True, type=str)
+    parser.add_argument("--blueprint_cache_path", required=True, type=str)
+    parser.add_argument("--save_dir", required=True, type=str)
+    parser.add_argument("--overwrite", action="store_true")
+    parser.add_argument("--num_steps", default=50_000, type=int)
+    parser.add_argument("--log_interval", default=100, type=int)
+    parser.add_argument("--save_interval", default=2_000, type=int)
+    parser.add_argument("--lr", default=1e-4, type=float)
+    parser.add_argument("--weight_decay", default=0.0, type=float)
+    parser.add_argument("--resume_checkpoint", default="", type=str)
+    parser.add_argument("--num_workers", default=4, type=int)
+    parser.add_argument("--max_batches", default=-1, type=int)
+    parser.add_argument(
+        "--train_platform_type",
+        default="NoPlatform",
+        choices=["NoPlatform", "ClearmlPlatform", "TensorboardPlatform"],
+        type=str,
+    )
+
+    parser.add_argument("--body_model", default="smplx", type=str)
+    parser.add_argument("--pose_rep", default="rot6d", type=str)
+    parser.add_argument("--window_size", default=12, type=int)
+    parser.add_argument("--window_pad", default=2, type=int)
+    parser.add_argument("--include_buffer", action="store_true")
+    parser.add_argument("--density", default="medium", choices=["small", "medium"], type=str)
+
+    parser.add_argument("--hidden_dim", default=128, type=int)
+    parser.add_argument("--num_temporal_blocks", default=2, type=int)
+    parser.add_argument("--num_cross_blocks", default=2, type=int)
+    parser.add_argument("--num_spatial_blocks", default=1, type=int)
+    parser.add_argument("--dropout", default=0.1, type=float)
+
+    parser.add_argument("--diffusion_steps", default=1000, type=int)
+    parser.add_argument("--sampling_steps", default=50, type=int)
+    parser.add_argument("--noise_schedule", default="cosine", choices=["linear", "cosine"], type=str)
+
+    parser.add_argument("--strict_near_ratio", default=0.7, type=float)
+    parser.add_argument("--max_windows_per_batch", default=64, type=int)
+    parser.add_argument("--teacher_warmup_steps", default=0, type=int)
+
+    parser.add_argument("--softmin_beta", default=30.0, type=float)
+    parser.add_argument("--max_nontarget_vertices", default=256, type=int)
+
+    parser.add_argument("--lambda_contact_strict", default=1.0, type=float)
+    parser.add_argument("--lambda_penetration", default=1.0, type=float)
+    parser.add_argument("--lambda_contact_near", default=0.3, type=float)
+    parser.add_argument("--lambda_identity", default=0.1, type=float)
+    parser.add_argument("--lambda_smooth", default=0.1, type=float)
+    parser.add_argument("--penetration_margin", default=0.005, type=float)
+    parser.add_argument("--nontarget_margin", default=0.02, type=float)
+    parser.add_argument("--log_events", action="store_true")
+
+    parser.add_argument("--cuda", default=True, type=bool)
+    parser.add_argument("--device", default=0, type=int)
+    parser.add_argument("--seed", default=10, type=int)
+    parser.add_argument("--batch_size", default=64, type=int)
+    return parser.parse_args()
+
+
 def main():
     args = _parse_args()
     fixseed(args.seed)
