@@ -58,6 +58,7 @@ def _build_meta_payload(meta_list):
     payload["motion_length"] = np.array([m.get("motion_length", -1) for m in meta_list], dtype=np.int64)
     payload["sampling_step"] = np.array([m.get("sampling_step", -1) for m in meta_list], dtype=np.int64)
     payload["actor_is_p1"] = np.array([m.get("actor_is_p1", -1) for m in meta_list], dtype=np.int64)
+    payload["downsample"] = np.array([m.get("downsample", -1) for m in meta_list], dtype=np.int64)
 
     payload["dataset_key"] = _to_obj_array([m.get("dataset_key", "") for m in meta_list])
     payload["action_name"] = _to_obj_array([m.get("action_name", "") for m in meta_list])
@@ -229,6 +230,7 @@ def main():
                 mapping_str = "actor=P2,reactor=P1"
             else:
                 mapping_str = "unknown"
+            downsample = 4 if args.dataset == "interx" else 1
             all_meta.append(
                 {
                     "rep_i": int(rep_i),
@@ -251,6 +253,7 @@ def main():
                     "dataset_name": args.dataset,
                     "data_path": args.data_path,
                     "actor_is_p1": int(actor_is_p1),
+                    "downsample": int(downsample),
                 }
             )
         collate_args = collate_args_with_inp

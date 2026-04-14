@@ -1,1 +1,6 @@
-from model.refine.refine_model import RNetV1, RNetV2, RNetV3, RNetV3_1
+"""Shared refine utilities.
+
+RNet Stage2 is archived under legacy/rnet and no longer exported here.
+"""
+
+__all__ = []

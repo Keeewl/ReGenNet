@@ -172,3 +172,6 @@ recognition_training/
 
 # Save model
 save/
+
+# legacy
+legacy/

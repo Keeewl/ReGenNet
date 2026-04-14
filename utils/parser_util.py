@@ -210,138 +210,19 @@ def add_training_options(parser):
                        help="If not empty, will start from the specified checkpoint (path to model###.pt file).")
 
 
+def _legacy_rnet_error(entrypoint):
+    raise RuntimeError(
+        "RNet Stage2 is archived under legacy/rnet and is not supported in the main CLI. "
+        "Use hand-contact Stage2 (contact refiner) instead."
+    )
+
+
 def add_refine_training_options(parser):
-    group = parser.add_argument_group('refine_training')
-    group.add_argument("--cache_path", required=True, type=str,
-                       help="Path to coarse cache (.npz or .h5).")
-    group.add_argument("--save_dir", required=True, type=str,
-                       help="Path to save checkpoints and logs.")
-    group.add_argument("--overwrite", action='store_true',
-                       help="If True, will enable to use an already existing save_dir.")
-    group.add_argument("--num_steps", default=100_000, type=int,
-                       help="Training will stop after the specified number of steps.")
-    group.add_argument("--log_interval", default=100, type=int,
-                       help="Log losses each N steps.")
-    group.add_argument("--save_interval", default=2_000, type=int,
-                       help="Save checkpoints each N steps.")
-    group.add_argument("--lr", default=1e-4, type=float, help="Learning rate.")
-    group.add_argument("--weight_decay", default=0.0, type=float, help="Optimizer weight decay.")
-    group.add_argument("--resume_checkpoint", default="", type=str,
-                       help="If not empty, will start from the specified checkpoint.")
-    group.add_argument("--num_workers", default=4, type=int, help="DataLoader workers.")
-    group.add_argument("--max_batches", default=-1, type=int,
-                       help="Limit the number of batches per epoch (debug).")
-    group.add_argument("--top_k", default=5, type=int, help="Active window top-k.")
-    group.add_argument("--window_size", default=None, type=int, help="Active window size (None uses version default).")
-    group.add_argument("--train_window_size", default=10, type=int, help="Training window size for v3 oracle mask.")
-    group.add_argument("--vel_threshold", default=None, type=float,
-                       help="Velocity threshold for active selection.")
-    group.add_argument("--geom_sigma", default=0.1, type=float,
-                       help="Sigma for contact score.")
-    group.add_argument("--hidden_dim", default=256, type=int, help="Refine head hidden dim.")
-    group.add_argument("--rnet_version", default="v1", type=str, choices=["v1", "v2", "v3", "v3_1"],
-                       help="RNet version to train.")
-    group.add_argument("--num_temporal_blocks", default=2, type=int,
-                       help="Number of temporal blocks for v2 head.")
-    group.add_argument("--selector_sigma", default=0.1, type=float,
-                       help="Sigma for v2 selector soft contact.")
-    group.add_argument("--selector_alpha", default=1.0, type=float,
-                       help="Weight for v2 selector distance risk.")
-    group.add_argument("--selector_beta", default=0.5, type=float,
-                       help="Weight for v2 selector approach risk.")
-    group.add_argument("--selector_gamma", default=0.5, type=float,
-                       help="Weight for v2 selector contact risk.")
-    group.add_argument("--dropout", default=0.1, type=float, help="Refine head dropout.")
-    group.add_argument("--lambda_residual", default=1.0, type=float,
-                       help="Residual supervision weight.")
-    group.add_argument("--lambda_reg", default=0.01, type=float,
-                       help="Residual regularization weight.")
-    group.add_argument("--lambda_coord", default=0.02, type=float,
-                       help="Coordination regularization weight.")
-    group.add_argument("--lambda_contact", default=0.0, type=float,
-                       help="Local distance/contact loss weight.")
-    group.add_argument("--lambda_dist_prior", default=0.0, type=float,
-                       help="Distance prior loss weight.")
-    group.add_argument("--lambda_soft_contact", default=0.0, type=float,
-                       help="Soft contact prior loss weight.")
-    group.add_argument("--lambda_smooth", default=0.05, type=float,
-                       help="Temporal smoothness loss weight.")
-    group.add_argument("--dist_prior_tau", default=0.1, type=float,
-                       help="Tau for distance prior weighting.")
-    group.add_argument("--soft_contact_sigma", default=0.1, type=float,
-                       help="Sigma for soft contact prior loss.")
-
-    group.add_argument("--pair_mode", default="semantic_nearest", type=str,
-                       help="Pairwise mode for v3 (semantic_nearest).")
-    group.add_argument("--topk_pairs", default=3, type=int,
-                       help="Top-k nearest semantic pairs for v3.")
-    group.add_argument("--pair_reduce", default="mean", type=str,
-                       help="Pairwise reduction for v3 (mean).")
-    group.add_argument("--tau_contact", default=0.10, type=float,
-                       help="Contact threshold for v3 contact weighting.")
-    group.add_argument("--tau_near", default=0.18, type=float,
-                       help="Near-contact threshold for v3 contact weighting.")
-    group.add_argument("--contact_error_margin", default=0.05, type=float,
-                       help="Margin for coarse-vs-gt contact error mask.")
-    group.add_argument("--contact_weight_contact", default=1.0, type=float,
-                       help="Contact weight for v3 physics losses.")
-    group.add_argument("--contact_weight_near", default=0.5, type=float,
-                       help="Near-contact weight for v3 physics losses.")
-    group.add_argument("--contact_weight_far", default=0.1, type=float,
-                       help="Far weight for v3 physics losses.")
-    group.add_argument("--lambda_dist", default=1.0, type=float,
-                       help="Distance prior loss weight for v3.")
-    group.add_argument("--lambda_soft", default=1.0, type=float,
-                       help="Soft contact loss weight for v3.")
-    group.add_argument("--lambda_local", default=0.5, type=float,
-                       help="Local distance loss weight for v3.")
-    group.add_argument("--lambda_res", default=0.25, type=float,
-                       help="Residual loss weight for v3.")
-    group.add_argument("--gate_level", default="joint", type=str,
-                       help="Gate level for v3 (joint).")
-    group.add_argument("--gate_init_bias", default=-1.0, type=float,
-                       help="Gate init bias for v3.")
-    group.add_argument("--use_gate", action='store_true',
-                       help="Enable gate scaling for v3 (default off).")
-    group.add_argument("--bound_mode", default="tanh", type=str,
-                       help="Bound mode for v3 (tanh/clip/none).")
-    group.add_argument("--delta_max", default=0.15, type=float,
-                       help="Delta max for v3 bounded update.")
-    group.add_argument("--pair_feature_topk", default=3, type=int,
-                       help="Top-k for contact feature augmentation.")
-    group.add_argument("--disable_contact_feature_aug", action='store_false', dest='use_contact_feature_aug',
-                       help="Disable contact feature augmentation.")
-    group.add_argument("--disable_closing_speed", action='store_false', dest='use_closing_speed',
-                       help="Disable closing speed feature.")
-    group.add_argument("--disable_part_contact_summary", action='store_false', dest='use_part_contact_summary',
-                       help="Disable part-level contact summary feature.")
-
+    _legacy_rnet_error("add_refine_training_options")
 
 
 def add_refine_sampling_options(parser):
-    group = parser.add_argument_group('refine_sampling')
-    group.add_argument("--stage1_model_path", required=False, type=str,
-                       help="Path to Stage1 checkpoint (cnet_v5).")
-    group.add_argument("--stage2_model_path", required=True, type=str,
-                       help="Path to Stage2 checkpoint (rnet_v1).")
-    group.add_argument("--rnet_version", default="", type=str, choices=["", "v1", "v2", "v3", "v3_1"],
-                       help="Optional override for Stage2 version.")
-    group.add_argument("--output_path", required=True, type=str,
-                       help="Path to save refined results (.npz or .h5).")
-    group.add_argument("--data_path", default="", type=str,
-                       help="Path to dataset h5 (optional override).")
-    group.add_argument("--dataset", default="", type=str,
-                       help="Dataset name (optional override).")
-    group.add_argument("--split", default="test", type=str,
-                       help="Dataset split.")
-    group.add_argument("--max_batches", default=-1, type=int,
-                       help="Limit the number of batches (debug).")
-    group.add_argument("--num_samples", default=-1, type=int,
-                       help="Limit the number of samples (debug).")
-    group.add_argument("--coarse_cache", default="", type=str,
-                       help="Optional coarse cache to skip Stage1 sampling.")
-    group.add_argument("--cgenerate_results", default="", type=str,
-                       help="Path to sample.cgenerate results.npy to refine.")
+    _legacy_rnet_error("add_refine_sampling_options")
 
 
 def add_sampling_options(parser):
@@ -405,17 +286,11 @@ def train_args():
 
 
 def refine_train_args():
-    parser = ArgumentParser()
-    add_base_options(parser)
-    add_refine_training_options(parser)
-    return parser.parse_args()
+    _legacy_rnet_error("refine_train_args")
 
 
 def refine_sample_args():
-    parser = ArgumentParser()
-    add_base_options(parser)
-    add_refine_sampling_options(parser)
-    return parser.parse_args()
+    _legacy_rnet_error("refine_sample_args")
 
 
 def generate_args():
@@ -448,14 +323,7 @@ def evaluation_parser():
 
 
 def refine_evaluation_parser():
-    parser = ArgumentParser()
-    add_base_options(parser)
-    add_online_options(parser)
-    add_evaluation_options(parser)
-    parser.add_argument("--stage2_model_path", required=True, type=str,
-                       help="Path to Stage2 checkpoint (rnet_v1).")
-    return parse_and_load_from_model(parser)
-
+    _legacy_rnet_error("refine_evaluation_parser")
 
 
 def add_contact_proposal_training_options(parser):

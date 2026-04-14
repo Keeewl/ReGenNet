@@ -1,5 +1,7 @@
 # Hand Contact Refinement (HCR)
 
+Note: This is the current Stage2 refinement path. The legacy RNet Stage2 is archived under legacy/rnet.
+
 本目录实现 Stage2 的 Hand Contact Refinement (HCR) 主线，包含手级别接触提案与后续手部精修的基础模块。
 
 ## 目录结构
