@@ -11,6 +11,10 @@ import torch
 from tqdm import tqdm
 
 from eval.contact_eval.contact_evaluator import HandContactEvaluator
+from eval.crefine_eval.crefine_mesh_metrics import (
+    compute_penetration_surrogate,
+    compute_region_hand_distance,
+)
 
 
 METHOD_KEYS = {
@@ -96,6 +100,12 @@ def _init_accumulator():
         "num_valid_sequences": 0,
         "num_contact_segments": 0,
         "num_contact_frames": 0,
+        "region_hand_dist_sum": 0.0,
+        "region_hand_dist_count": 0.0,
+        "penetration_rate_sum": 0.0,
+        "penetration_rate_count": 0,
+        "penetration_depth_sum": 0.0,
+        "penetration_depth_count": 0,
     }
 
 
@@ -133,6 +143,21 @@ def _accumulate_metrics(acc, metrics):
     if hand_cd_topk is not None and hand_cd_count:
         acc["hand_cd_topk_sum"] += float(hand_cd_topk) * float(hand_cd_count)
 
+    region_dist = metrics.get("region_hand_dist", None)
+    region_count = metrics.get("region_hand_count", None)
+    if region_dist is not None and region_count:
+        acc["region_hand_dist_sum"] += float(region_dist) * float(region_count)
+        acc["region_hand_dist_count"] += float(region_count)
+
+    pen_rate = metrics.get("penetration_rate", None)
+    pen_depth = metrics.get("penetration_depth", None)
+    pen_count = metrics.get("penetration_count", None)
+    if pen_rate is not None and pen_count:
+        acc["penetration_rate_sum"] += float(pen_rate) * float(pen_count)
+        acc["penetration_rate_count"] += float(pen_count)
+    if pen_depth is not None and pen_count:
+        acc["penetration_depth_sum"] += float(pen_depth) * float(pen_count)
+        acc["penetration_depth_count"] += float(pen_count)
 
 
 def _finalize_metrics(acc, include_debug=False):
@@ -152,12 +177,26 @@ def _finalize_metrics(acc, include_debug=False):
     if acc["contact_frequency_count"] > 0:
         contact_freq = acc["contact_frequency_sum"] / acc["contact_frequency_count"]
 
+    region_hand_dist = None
+    if acc["region_hand_dist_count"] > 0:
+        region_hand_dist = acc["region_hand_dist_sum"] / acc["region_hand_dist_count"]
+
+    penetration_rate = 0.0
+    if acc["penetration_rate_count"] > 0:
+        penetration_rate = acc["penetration_rate_sum"] / acc["penetration_rate_count"]
+
+    penetration_depth = 0.0
+    if acc["penetration_depth_count"] > 0:
+        penetration_depth = acc["penetration_depth_sum"] / acc["penetration_depth_count"]
 
     results = {
         "hand_cd": hand_cd,
         "contact_ratio": contact_ratio,
         "avg_contact_duration": avg_duration,
         "contact_frequency": contact_freq,
+        "region_hand_dist": region_hand_dist,
+        "penetration_rate": penetration_rate,
+        "penetration_depth": penetration_depth,
         "num_valid_sequences": int(acc["num_valid_sequences"]),
         "num_contact_segments": int(acc["num_contact_segments"]),
         "num_contact_frames": int(acc["num_contact_frames"]),
@@ -191,6 +230,9 @@ def _print_summary(results):
             "contact_ratio",
             "avg_contact_duration",
             "contact_frequency",
+            "region_hand_dist",
+            "penetration_rate",
+            "penetration_depth",
             "num_valid_sequences",
             "num_contact_segments",
         ]:
@@ -238,8 +280,11 @@ def main():
     parser.add_argument("--tau-contact", type=float, default=0.10)
     parser.add_argument("--tau-near", type=float, default=0.18)
     parser.add_argument("--topk", type=int, default=3)
+    parser.add_argument("--mesh-density", default="medium", choices=["small", "medium"], type=str)
+    parser.add_argument("--mesh-softmin-beta", default=30.0, type=float)
+    parser.add_argument("--penetration-margin", default=0.005, type=float)
     parser.add_argument("--batch-size", type=int, default=8)
-    parser.add_argument("--json-out", type=str, default="hand_contact_metrics.json")
+    parser.add_argument("--json-out", type=str, default="crefine_contact_metrics.json")
     parser.add_argument("--csv-out", type=str, default="")
     parser.add_argument("--debug", action="store_true")
     args = parser.parse_args()
@@ -337,6 +382,28 @@ def main():
                     gt_reactor_motion=gt_ref,
                     return_debug=True,
                 )
+                region_stats = compute_region_hand_distance(
+                    actor_b,
+                    motion_b,
+                    gt_ref,
+                    lengths=lengths_b,
+                    softmin_beta=args.mesh_softmin_beta,
+                    density=args.mesh_density,
+                    body_model=args.body_model,
+                    pose_rep=args.pose_rep,
+                )
+                pen_stats = compute_penetration_surrogate(
+                    actor_b,
+                    motion_b,
+                    lengths=lengths_b,
+                    softmin_beta=args.mesh_softmin_beta,
+                    margin=args.penetration_margin,
+                    density=args.mesh_density,
+                    body_model=args.body_model,
+                    pose_rep=args.pose_rep,
+                )
+                metrics.update(region_stats)
+                metrics.update(pen_stats)
             _accumulate_metrics(acc, metrics)
         results[name] = _finalize_metrics(acc, include_debug=args.debug)
 

@@ -466,3 +466,4 @@ def contact_refiner_train_args():
     add_base_options(parser)
     add_contact_refiner_training_options(parser)
     return parser.parse_args()
+
