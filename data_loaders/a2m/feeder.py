@@ -214,8 +214,18 @@ class Feeder(Dataset):
             else:
                 raise ValueError("Sampling not recognized.")
 
+        frame_ix = np.asarray(frame_ix, dtype=np.int64)
         inp, action = self.get_pose_data(data_index, frame_ix)
-        output = {'inp': inp, 'action': action}
+        output = {
+            'inp': inp,
+            'action': action,
+            'frame_ix': frame_ix,
+            'raw_nframes': int(nframes),
+            'sampled_num_frames': int(len(frame_ix)),
+            'sampling': self.sampling,
+            'sampling_step': int(self.sampling_step),
+            'num_frames_param': int(self.num_frames),
+        }
 
         if hasattr(self, '_actions') and hasattr(self, '_action_classes'):
             output['action_text'] = self.action_to_action_name(self.get_action(data_index))
@@ -302,12 +312,19 @@ class Feeder(Dataset):
             else:
                 raise ValueError("Sampling not recognized.")
 
+        frame_ix = np.asarray(frame_ix, dtype=np.int64)
         inp, action = self.get_pose_data(data_index, frame_ix)
         output = {
             'inp': inp,
             'action': action,
             'data_index': int(data_index),
             'data_key': self.keys[data_index],
+            'frame_ix': frame_ix,
+            'raw_nframes': int(nframes),
+            'sampled_num_frames': int(len(frame_ix)),
+            'sampling': self.sampling,
+            'sampling_step': int(self.sampling_step),
+            'num_frames_param': int(self.num_frames),
         }
 
         if hasattr(self, '_actions') and hasattr(self, '_action_classes'):

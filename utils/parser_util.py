@@ -364,6 +364,12 @@ def add_generate_options(parser):
     group = parser.add_argument_group('generate')
     group.add_argument("--motion_length", default=60, type=float,
                        help="The length of the sampled motion [in frames]. ")
+    group.add_argument(
+        "--interaction_order",
+        default="",
+        type=str,
+        help="Optional path to Inter-X interaction_order.pkl for actor/reactor mapping.",
+    )
     group.add_argument("--input_text", default='', type=str,
                        help="Path to a text file lists text prompts to be synthesized. If empty, will take text prompts from dataset.")
     group.add_argument("--action_file", default='', type=str,

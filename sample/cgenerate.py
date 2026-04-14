@@ -5,6 +5,7 @@ numpy array. This can be used to produce samples for FID evaluation.
 """
 from utils.fixseed import fixseed
 import os
+import pickle
 import numpy as np
 import torch
 from utils.parser_util import cgenerate_args
@@ -17,6 +18,75 @@ import shutil
 from scipy.ndimage import gaussian_filter1d
 from data_loaders.tensors import ccollate
 import time
+
+
+def _load_interaction_order(path):
+    if not path or not os.path.exists(path):
+        return {}
+    with open(path, "rb") as f:
+        return pickle.load(f)
+
+
+def _resolve_actor_is_p1(order_dict, dataset_key):
+    if not order_dict or not dataset_key:
+        return -1
+    label = order_dict.get(dataset_key, None)
+    if label is None:
+        return -1
+    return 1 if int(label) == 1 else 0
+
+
+def _to_obj_array(values):
+    return np.array(values, dtype=object)
+
+
+def _build_meta_payload(meta_list):
+    if not meta_list:
+        return {}
+    payload = {}
+    payload["meta_version"] = np.array("v1")
+    payload["sample_idx"] = np.arange(len(meta_list), dtype=np.int64)
+    payload["rep_i"] = np.array([m.get("rep_i", -1) for m in meta_list], dtype=np.int64)
+    payload["action_i"] = np.array([m.get("action_i", -1) for m in meta_list], dtype=np.int64)
+    payload["action_id"] = np.array([m.get("action_id", -1) for m in meta_list], dtype=np.int64)
+    payload["data_index"] = np.array([m.get("data_index", -1) for m in meta_list], dtype=np.int64)
+    payload["length"] = np.array([m.get("length", -1) for m in meta_list], dtype=np.int64)
+    payload["raw_nframes"] = np.array([m.get("raw_nframes", -1) for m in meta_list], dtype=np.int64)
+    payload["start_frame"] = np.array([m.get("start_frame", -1) for m in meta_list], dtype=np.int64)
+    payload["end_frame"] = np.array([m.get("end_frame", -1) for m in meta_list], dtype=np.int64)
+    payload["num_frames"] = np.array([m.get("num_frames", -1) for m in meta_list], dtype=np.int64)
+    payload["motion_length"] = np.array([m.get("motion_length", -1) for m in meta_list], dtype=np.int64)
+    payload["sampling_step"] = np.array([m.get("sampling_step", -1) for m in meta_list], dtype=np.int64)
+    payload["actor_is_p1"] = np.array([m.get("actor_is_p1", -1) for m in meta_list], dtype=np.int64)
+
+    payload["dataset_key"] = _to_obj_array([m.get("dataset_key", "") for m in meta_list])
+    payload["action_name"] = _to_obj_array([m.get("action_name", "") for m in meta_list])
+    payload["actor_reactor_mapping"] = _to_obj_array([m.get("actor_reactor_mapping", "") for m in meta_list])
+    payload["sampling"] = _to_obj_array([m.get("sampling", "") for m in meta_list])
+    payload["split"] = _to_obj_array([m.get("split", "") for m in meta_list])
+    payload["dataset_name"] = _to_obj_array([m.get("dataset_name", "") for m in meta_list])
+    payload["data_path"] = _to_obj_array([m.get("data_path", "") for m in meta_list])
+
+    frame_ix_list = [m.get("frame_ix") for m in meta_list]
+    valid_ix = [ix for ix in frame_ix_list if ix is not None]
+    if valid_ix:
+        max_len = max(len(ix) for ix in valid_ix)
+        frame_ix = np.full((len(meta_list), max_len), -1, dtype=np.int64)
+        frame_ix_len = np.zeros(len(meta_list), dtype=np.int64)
+        for i, ix in enumerate(frame_ix_list):
+            if ix is None:
+                continue
+            arr = np.asarray(ix, dtype=np.int64)
+            frame_ix_len[i] = len(arr)
+            frame_ix[i, : len(arr)] = arr
+        payload["frame_ix"] = frame_ix
+        payload["frame_ix_len"] = frame_ix_len
+    else:
+        payload["frame_ix"] = np.empty((len(meta_list), 0), dtype=np.int64)
+        payload["frame_ix_len"] = np.zeros(len(meta_list), dtype=np.int64)
+
+    return payload
+
 
 def main():
     args = cgenerate_args()
@@ -67,6 +137,7 @@ def main():
     print('Loading dataset...')
     data = load_dataset(args, max_frames, n_frames, args.num_person, args.data_path, args.pose_rep)
     total_num_samples = args.num_samples * args.num_repetitions
+    order_dict = _load_interaction_order(args.interaction_order)
 
     print("Creating model and diffusion...")
     model, diffusion = create_model_and_diffusion(args, data)
@@ -110,6 +181,7 @@ def main():
     all_lengths = []
     all_text = []
     all_map = []
+    all_meta = []
 
     if args.reaction_mode == 'online' and args.online_strategy == 'sliding_window':
         if model_window_size is not None and args.window_size > model_window_size:
@@ -145,6 +217,42 @@ def main():
                         cmotion_item['data_key'],
                     )
                 )
+            frame_ix = cmotion_item.get("frame_ix", None)
+            if frame_ix is not None:
+                frame_ix = np.asarray(frame_ix, dtype=np.int64)
+            start_frame = int(frame_ix[0]) if frame_ix is not None and len(frame_ix) > 0 else -1
+            end_frame = int(frame_ix[-1]) if frame_ix is not None and len(frame_ix) > 0 else -1
+            actor_is_p1 = _resolve_actor_is_p1(order_dict, cmotion_item.get("data_key", ""))
+            if actor_is_p1 == 1:
+                mapping_str = "actor=P1,reactor=P2"
+            elif actor_is_p1 == 0:
+                mapping_str = "actor=P2,reactor=P1"
+            else:
+                mapping_str = "unknown"
+            all_meta.append(
+                {
+                    "rep_i": int(rep_i),
+                    "action_i": int(action_i),
+                    "action_id": int(one_action),
+                    "action_name": one_action_text,
+                    "data_index": int(cmotion_item.get("data_index", -1)),
+                    "dataset_key": cmotion_item.get("data_key", ""),
+                    "actor_reactor_mapping": mapping_str,
+                    "length": int(cmotion_item.get("sampled_num_frames", n_frames)),
+                    "raw_nframes": int(cmotion_item.get("raw_nframes", -1)),
+                    "start_frame": start_frame,
+                    "end_frame": end_frame,
+                    "frame_ix": frame_ix,
+                    "sampling": cmotion_item.get("sampling", ""),
+                    "sampling_step": int(cmotion_item.get("sampling_step", -1)),
+                    "num_frames": int(n_frames),
+                    "motion_length": int(args.motion_length),
+                    "split": getattr(data.dataset, "split", ""),
+                    "dataset_name": args.dataset,
+                    "data_path": args.data_path,
+                    "actor_is_p1": int(actor_is_p1),
+                }
+            )
         collate_args = collate_args_with_inp
         if rep_map:
             all_map.extend(rep_map)
@@ -240,6 +348,7 @@ def main():
     all_cmotions = all_cmotions[:total_num_samples]  # [bs, njoints, 6, seqlen]
     all_text = all_text[:total_num_samples]
     all_lengths = np.concatenate(all_lengths, axis=0)[:total_num_samples]
+    all_meta = all_meta[:total_num_samples]
 
     if os.path.exists(out_path):
         shutil.rmtree(out_path)
@@ -262,6 +371,12 @@ def main():
             for output_index, (rep_i, action_i, action_name, action_id, data_index, data_key) in enumerate(all_map[:total_num_samples]):
                 fw.write(f"{output_index}\t{rep_i}\t{action_i}\t{action_name}\t{action_id}\t{data_index}\t{data_key}\n")
         print(f"saving map file to [{map_path}]")
+
+    meta_path = os.path.join(out_path, 'results_meta.npz')
+    meta_payload = _build_meta_payload(all_meta)
+    if meta_payload:
+        np.savez_compressed(meta_path, **meta_payload)
+        print(f"saving metadata file to [{meta_path}]")
 
     abs_path = os.path.abspath(out_path)
     print(f'[Done] Results are at [{abs_path}]')
