@@ -191,6 +191,7 @@ class ContactDiffusionRefinerTrainLoop:
 
                 loss_diff = _masked_mse(pred_eps - noise, window_batch["time_mask"])
                 x0_pred = predict_xstart_from_eps(self.diffusion, x_t, t, pred_eps)
+                x0_pred = x0_pred.to(window_batch["coarse_full"].dtype)
 
                 joint_ids_t = torch.as_tensor(window_batch["joint_ids"], device=self.device, dtype=torch.long)
                 delta_full = torch.zeros_like(window_batch["coarse_full"])
