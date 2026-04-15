@@ -56,6 +56,7 @@ def main():
     parser.add_argument("--pose_rep", default="rot6d", type=str)
     parser.add_argument("--window_size", default=12, type=int)
     parser.add_argument("--window_pad", default=2, type=int)
+    parser.add_argument("--window_buffer", default=0, type=int)
     parser.add_argument("--active_threshold", default=0.5, type=float)
 
     parser.add_argument("--batch_size", default=8, type=int)
@@ -125,6 +126,17 @@ def main():
             labels = logits_to_frame_labels(logits, active_threshold=args.active_threshold)
 
             strict_windows, near_windows = window_builder.build_from_labels(labels, lengths=lengths)
+            if args.window_buffer > 0:
+                strict_windows = window_builder.expand_windows_batch(
+                    strict_windows,
+                    lengths,
+                    buffer_frames=args.window_buffer,
+                )
+                near_windows = window_builder.expand_windows_batch(
+                    near_windows,
+                    lengths,
+                    buffer_frames=args.window_buffer,
+                )
 
             active_prob = torch.sigmoid(logits["active"]).squeeze(-1)
 

@@ -99,6 +99,41 @@ class DiffusionWindowBuilder:
             )
         return windows
 
+    def expand_windows(self, windows, length, buffer_frames=0, dedup=None):
+        buffer_frames = int(buffer_frames)
+        if buffer_frames <= 0:
+            return list(windows)
+        dedup = self.dedup if dedup is None else bool(dedup)
+        expanded = []
+        seen = set()
+        for win in windows:
+            item = dict(win)
+            item["start_frame"] = max(0, int(item["start_frame"]) - buffer_frames)
+            item["end_frame"] = min(int(length) - 1, int(item["end_frame"]) + buffer_frames)
+            if dedup:
+                key = (
+                    item["hand_side"],
+                    item["start_frame"],
+                    item["end_frame"],
+                    item["target_part_id"],
+                    item["window_state_id"],
+                )
+                if key in seen:
+                    continue
+                seen.add(key)
+            expanded.append(item)
+        return expanded
+
+    def expand_windows_batch(self, windows_per_batch, lengths, buffer_frames=0, dedup=None):
+        if buffer_frames <= 0:
+            return windows_per_batch
+        if torch.is_tensor(lengths):
+            lengths = lengths.detach().cpu().tolist()
+        out = []
+        for items, length in zip(windows_per_batch, lengths):
+            out.append(self.expand_windows(items, int(length), buffer_frames=buffer_frames, dedup=dedup))
+        return out
+
     def build_from_labels(self, labels, lengths=None):
         """
         labels: dict with active/target_part/band/phase [B, T, 2]

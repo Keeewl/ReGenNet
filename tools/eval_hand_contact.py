@@ -11,6 +11,7 @@ import torch
 from tqdm import tqdm
 
 from eval.contact_eval.contact_evaluator import HandContactEvaluator
+from model.crefine.restored_space import RESTORED_PAIR_SPACE, get_space_definition
 
 
 METHOD_KEYS = {
@@ -19,6 +20,21 @@ METHOD_KEYS = {
     "refined": "refined_reactor_motion",
     "baseline": "baseline_reactor_motion",
 }
+
+
+def _check_pack_space_definition(pack, context):
+    value = pack.get("space_definition", None)
+    if value is None:
+        print(
+            f"[warning] {context} is missing space_definition metadata. "
+            f"Expected '{RESTORED_PAIR_SPACE}' for restored-space stage2 evaluation."
+        )
+        return
+    space_definition = get_space_definition(value).lower()
+    if space_definition != RESTORED_PAIR_SPACE:
+        raise ValueError(
+            f"{context} has space_definition='{space_definition}', expected '{RESTORED_PAIR_SPACE}'."
+        )
 
 
 def _load_any(path):
@@ -251,6 +267,7 @@ def main():
         pack = _load_any(args.pack)
         if not isinstance(pack, dict):
             raise ValueError("--pack must be a dict-like file")
+        _check_pack_space_definition(pack, context=f"pack {args.pack}")
         actor_motion = _extract_tensor(pack, args.actor_key, name="actor_motion")
         lengths = _extract_tensor(pack, args.lengths_key, name="lengths")
         gt_motion = _extract_tensor(pack, args.gt_key, name="gt_reactor_motion")

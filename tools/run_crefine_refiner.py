@@ -17,7 +17,11 @@ from model.crefine.crefine_model import MeshConditionalDiffusionRefiner, create_
 from model.crefine.restored_space import (
     OPTIONAL_CACHE_FIELDS,
     REQUIRED_CACHE_FIELDS,
+    RESTORED_PAIR_SPACE,
+    SUPPORTED_BODY_MODEL_TYPE,
     extract_restoration_metadata,
+    get_space_definition,
+    validate_restoration_metadata,
 )
 from model.crefine.mesh_regions import get_mesh_region_provider
 from model.crefine.restored_body_model import RestoredBodyModelForward
@@ -48,6 +52,47 @@ def _load_refiner_checkpoint(path, device):
     model.to(device)
     model.eval()
     return model, cfg
+
+
+def _require_shape_condition_checkpoint(cfg):
+    if not bool(cfg.get("use_shape_condition", False)):
+        raise ValueError(
+            "Refiner checkpoint was loaded without use_shape_condition=True. "
+            "stage2 crefine_v3 inference requires restored-shape conditioning and will not silently fall back."
+        )
+
+
+def _validate_blueprint_alignment(blueprint, dataset, blueprint_path):
+    expected = len(dataset)
+    if len(blueprint["strict_windows"]) != expected or len(blueprint["near_windows"]) != expected:
+        raise ValueError(
+            f"Blueprint cache size mismatch for {blueprint_path}: expected {expected} samples, "
+            f"got strict={len(blueprint['strict_windows'])}, near={len(blueprint['near_windows'])}."
+        )
+
+    dataset_indices = np.asarray(dataset.sample_indices).astype(np.int64)
+    blueprint_indices = blueprint.get("sample_indices", None)
+    if blueprint_indices is None:
+        raise ValueError(
+            f"Blueprint cache {blueprint_path} is missing sample_indices; "
+            "cannot verify alignment with the restored coarse cache."
+        )
+    blueprint_indices = np.asarray(blueprint_indices).astype(np.int64)
+    if blueprint_indices.shape != dataset_indices.shape or not np.array_equal(blueprint_indices, dataset_indices):
+        raise ValueError(
+            f"Blueprint cache {blueprint_path} sample_indices do not match cache_path sample_indices. "
+            "Refusing to run misaligned stage2 inference."
+        )
+
+    dataset_keys = getattr(dataset, "extra_fields", {}).get("dataset_key", None)
+    blueprint_keys = blueprint.get("dataset_key", None)
+    if dataset_keys is not None and blueprint_keys is not None:
+        dataset_keys = np.asarray(dataset_keys, dtype=object)
+        blueprint_keys = np.asarray(blueprint_keys, dtype=object)
+        if dataset_keys.shape == blueprint_keys.shape and not np.array_equal(dataset_keys, blueprint_keys):
+            raise ValueError(
+                f"Blueprint cache {blueprint_path} dataset_key ordering does not match cache_path ordering."
+            )
 
 
 def _accumulate_windows(delta_sum, weight_sum, delta_full, window_items, joint_ids):
@@ -193,6 +238,7 @@ def main():
     parser.add_argument("--max_batches", default=-1, type=int)
     parser.add_argument("--num_samples", default=-1, type=int)
     parser.add_argument("--max_windows_per_batch", default=128, type=int)
+    parser.add_argument("--blueprint_window_buffer", default=0, type=int)
 
     parser.add_argument("--body_model", default="smplx", type=str)
     parser.add_argument("--pose_rep", default="rot6d", type=str)
@@ -211,6 +257,10 @@ def main():
 
     if os.path.exists(args.output_path) and not args.overwrite:
         raise FileExistsError(f"output_path [{args.output_path}] already exists.")
+    if str(args.body_model).lower() != SUPPORTED_BODY_MODEL_TYPE:
+        raise ValueError(
+            f"stage2 crefine inference requires body_model={SUPPORTED_BODY_MODEL_TYPE}, got {args.body_model}."
+        )
 
     device = torch.device(args.device if torch.cuda.is_available() else "cpu")
 
@@ -226,6 +276,7 @@ def main():
     )
 
     blueprint = np.load(args.blueprint_cache_path, allow_pickle=True)
+    _validate_blueprint_alignment(blueprint, dataset, args.blueprint_cache_path)
     strict_windows_all = blueprint["strict_windows"]
     near_windows_all = blueprint["near_windows"]
     blueprint_band = blueprint["band"]
@@ -233,6 +284,7 @@ def main():
     blueprint_conf = blueprint.get("active_prob", None)
 
     refiner, refiner_config = _load_refiner_checkpoint(args.model_path, device=device)
+    _require_shape_condition_checkpoint(refiner_config)
     joint_ids = refiner_config.get("joint_ids")
     if not joint_ids:
         joint_ids = default_refiner_joint_ids(include_buffer=args.include_buffer)
@@ -284,11 +336,23 @@ def main():
             lengths = batch["lengths"].to(device)
             sample_index = batch["sample_index"].to("cpu")
             restoration_meta = extract_restoration_metadata(batch, device=device)
+            validate_restoration_metadata(restoration_meta, context="stage2 inference restoration metadata")
             actor_restored, coarse_restored = builder.restore_pair_batch(actor, coarse, restoration_meta)
             _, gt_restored = builder.restore_pair_batch(actor, gt, restoration_meta)
 
             strict_windows = strict_windows_all[batch_idx * args.batch_size : batch_idx * args.batch_size + actor.shape[0]]
             near_windows = near_windows_all[batch_idx * args.batch_size : batch_idx * args.batch_size + actor.shape[0]]
+            if args.blueprint_window_buffer > 0:
+                strict_windows = builder.window_builder.expand_windows_batch(
+                    strict_windows,
+                    lengths,
+                    buffer_frames=args.blueprint_window_buffer,
+                )
+                near_windows = builder.window_builder.expand_windows_batch(
+                    near_windows,
+                    lengths,
+                    buffer_frames=args.blueprint_window_buffer,
+                )
             band = torch.from_numpy(blueprint_band[batch_idx * args.batch_size : batch_idx * args.batch_size + actor.shape[0]]).to(device)
             phase = torch.from_numpy(blueprint_phase[batch_idx * args.batch_size : batch_idx * args.batch_size + actor.shape[0]]).to(device)
             conf = None
@@ -337,6 +401,8 @@ def main():
                         window_batch["reactor_gender_id"],
                     )
                     window_batch.update(shape_tokens)
+                    if window_batch.get("shape_mask") is None:
+                        raise RuntimeError("Shape-conditioned stage2 inference expected shape_mask, got None.")
                     model_kwargs = {
                         "coarse_local": window_batch["coarse_local"],
                         "actor_tokens": window_batch["actor_local_motion"],
@@ -426,12 +492,14 @@ def main():
     indices_out = np.concatenate(indices_list, axis=0).astype(np.int64)
 
     output = {
+        "space_definition": np.asarray(RESTORED_PAIR_SPACE),
         "refined_reactor_motion": refined_motion,
         "coarse_reactor_motion": np.concatenate(coarse_list, axis=0).astype(np.float32),
         "gt_reactor_motion": np.concatenate(gt_list, axis=0).astype(np.float32),
         "lengths": lengths_out,
         "sample_indices": indices_out,
         "actor_motion": np.concatenate(actor_list, axis=0).astype(np.float32),
+        "shape_condition_enabled": np.asarray(int(refiner_config.get("use_shape_condition", False)), dtype=np.int64),
     }
     for key, chunks in meta_lists.items():
         if not chunks:
@@ -451,7 +519,10 @@ def main():
     else:
         _save_npz(args.output_path, output)
 
-    print(f"Saved refined motion to {args.output_path} (samples={refined_motion.shape[0]})")
+    print(
+        f"Saved refined motion to {args.output_path} (samples={refined_motion.shape[0]}, "
+        f"space_definition={get_space_definition(output['space_definition'])})"
+    )
 
 
 if __name__ == "__main__":

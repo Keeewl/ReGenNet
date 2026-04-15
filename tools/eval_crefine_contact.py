@@ -15,6 +15,11 @@ from eval.crefine_eval.crefine_mesh_metrics import (
     compute_penetration_surrogate,
     compute_region_hand_distance,
 )
+from model.crefine.restored_space import (
+    RESTORED_PAIR_SPACE,
+    SUPPORTED_BODY_MODEL_TYPE,
+    get_space_definition,
+)
 
 
 METHOD_KEYS = {
@@ -31,6 +36,21 @@ META_KEYS = {
     "reactor_gender_id": "reactor_gender_id",
     "body_model_type": "body_model_type",
 }
+
+
+def _check_pack_space_definition(pack, context):
+    value = pack.get("space_definition", None)
+    if value is None:
+        print(
+            f"[warning] {context} is missing space_definition metadata. "
+            f"Expected '{RESTORED_PAIR_SPACE}' for stage2 restored-space evaluation."
+        )
+        return
+    space_definition = get_space_definition(value).lower()
+    if space_definition != RESTORED_PAIR_SPACE:
+        raise ValueError(
+            f"{context} has space_definition='{space_definition}', expected '{RESTORED_PAIR_SPACE}'."
+        )
 
 
 def _load_any(path):
@@ -327,6 +347,7 @@ def main():
         pack = _load_any(args.pack)
         if not isinstance(pack, dict):
             raise ValueError("--pack must be a dict-like file")
+        _check_pack_space_definition(pack, context=f"pack {args.pack}")
         actor_motion = _extract_tensor(pack, args.actor_key, name="actor_motion")
         lengths = _extract_tensor(pack, args.lengths_key, name="lengths")
         gt_motion = _extract_tensor(pack, args.gt_key, name="gt_reactor_motion")
@@ -341,6 +362,10 @@ def main():
             pack.get(args.body_model_type_key, args.body_model) if isinstance(pack, dict) else args.body_model,
             args.body_model,
         )
+        if body_model_type.lower() != SUPPORTED_BODY_MODEL_TYPE:
+            raise ValueError(
+                f"Evaluation pack requires body_model_type={SUPPORTED_BODY_MODEL_TYPE}, got {body_model_type}."
+            )
         missing_meta = [
             name for name, value in {
                 args.actor_betas_key: actor_betas,

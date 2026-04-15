@@ -2,6 +2,9 @@ import numpy as np
 import torch
 
 
+RESTORED_PAIR_SPACE = "restored_pair_space"
+SUPPORTED_BODY_MODEL_TYPE = "smplx"
+
 REQUIRED_CACHE_FIELDS = (
     "dataset_key",
     "actor_is_p1",
@@ -91,6 +94,74 @@ def ensure_restored_batch_fields(batch, context="crefine batch"):
         )
 
 
+def _normalize_string_scalar(value):
+    if torch.is_tensor(value):
+        if value.numel() == 0:
+            return ""
+        value = value.detach().cpu().reshape(-1)[0].item()
+    if isinstance(value, np.ndarray):
+        if value.size == 0:
+            return ""
+        value = value.reshape(-1)[0]
+    if isinstance(value, bytes):
+        value = value.decode("utf-8")
+    return str(value)
+
+
+def validate_body_model_type(value, context="restored metadata"):
+    if torch.is_tensor(value):
+        values = value.detach().cpu().reshape(-1).tolist()
+    elif isinstance(value, np.ndarray):
+        values = value.reshape(-1).tolist()
+    elif isinstance(value, (list, tuple)):
+        values = list(value)
+    else:
+        values = [value]
+    normalized = sorted({_normalize_string_scalar(item).strip().lower() for item in values if item is not None})
+    body_model_type = normalized[0] if normalized else ""
+    if normalized != [SUPPORTED_BODY_MODEL_TYPE]:
+        raise ValueError(
+            f"{context} requires body_model_type={SUPPORTED_BODY_MODEL_TYPE}, got {normalized or ['missing']}."
+        )
+    return body_model_type
+
+
+def validate_restoration_metadata(metadata, context="restoration metadata"):
+    missing = [name for name in REQUIRED_CACHE_FIELDS if name not in metadata]
+    if missing:
+        raise KeyError(
+            f"{context} is missing required restored-space fields: {', '.join(missing)}"
+        )
+    validate_body_model_type(metadata["body_model_type"], context=context)
+    return metadata
+
+
+def validate_restored_shape_runtime(
+    metadata,
+    *,
+    context="stage2 crefine runtime",
+    require_space_definition=False,
+    space_definition=None,
+):
+    validate_restoration_metadata(metadata, context=context)
+    if require_space_definition:
+        if space_definition is None:
+            raise ValueError(
+                f"{context} is missing space_definition; expected '{RESTORED_PAIR_SPACE}'."
+            )
+        actual = _normalize_string_scalar(space_definition).strip().lower()
+        if actual != RESTORED_PAIR_SPACE:
+            raise ValueError(
+                f"{context} expected space_definition='{RESTORED_PAIR_SPACE}', got '{actual or 'missing'}'."
+            )
+    return metadata
+
+
+def get_space_definition(value, default=""):
+    text = _normalize_string_scalar(value).strip()
+    return text or default
+
+
 def _to_device_tensor(value, device=None, dtype=None):
     if torch.is_tensor(value):
         out = value
@@ -134,6 +205,7 @@ def extract_restoration_metadata(batch, device=None):
                 meta[key] = _to_device_tensor(value, device=device)
             continue
         meta[key] = value
+    validate_restoration_metadata(meta, context="restoration metadata extracted from batch")
     return meta
 
 

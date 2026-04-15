@@ -14,6 +14,7 @@ from model.crefine.restored_space import (
     REQUIRED_CACHE_FIELDS,
     restore_motion_batch,
     select_window_metadata,
+    validate_restoration_metadata,
     validate_required_cache_fields,
 )
 from model.contact.proposal_labels import HandContactLabelBuilder
@@ -222,6 +223,7 @@ class DiffusionRefinerInputBuilder:
 
     def build_teacher_windows(self, actor_motion, gt_motion, lengths=None, restoration_meta=None):
         if restoration_meta is not None:
+            validate_restoration_metadata(restoration_meta, context="teacher-window restoration metadata")
             actor_motion, gt_motion = self.restore_pair_batch(actor_motion, gt_motion, restoration_meta)
             labels = self.label_builder.build(
                 actor_motion,
@@ -290,6 +292,7 @@ class DiffusionRefinerInputBuilder:
         restored_coarse_motion = coarse_motion
         restored_gt_motion = gt_motion
         if restoration_meta is not None:
+            validate_restoration_metadata(restoration_meta, context="window-batch restoration metadata")
             restored_actor_motion, restored_coarse_motion = self.restore_pair_batch(
                 actor_motion, coarse_motion, restoration_meta
             )

@@ -15,6 +15,7 @@ from model.crefine.crefine_inputs import (
 )
 from model.crefine.crefine_model import MeshConditionalDiffusionRefiner
 from model.crefine.crefine_training_loop import ContactDiffusionRefinerTrainLoop
+from model.crefine.restored_space import SUPPORTED_BODY_MODEL_TYPE
 from train.train_platforms import ClearmlPlatform, TensorboardPlatform, NoPlatform
 from utils.fixseed import fixseed
 
@@ -100,6 +101,14 @@ def _parse_args():
 def main():
     args = _parse_args()
     fixseed(args.seed)
+    if str(args.body_model).lower() != SUPPORTED_BODY_MODEL_TYPE:
+        raise ValueError(
+            f"stage2 crefine training requires body_model={SUPPORTED_BODY_MODEL_TYPE}, got {args.body_model}."
+        )
+    if args.use_restored_shape and not args.use_shape_condition:
+        raise ValueError(
+            "use_restored_shape=True requires use_shape_condition=True so restored-shape tokens are active in training."
+        )
 
     if args.cuda and torch.cuda.is_available():
         args.device_str = f"cuda:{args.device}"

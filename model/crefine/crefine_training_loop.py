@@ -8,7 +8,11 @@ from torch.optim import AdamW
 from model.crefine.crefine_inputs import DiffusionRefinerInputBuilder
 from model.crefine.crefine_loss import ContactDiffusionRefinerLoss
 from model.crefine.crefine_model import create_spaced_diffusion, predict_xstart_from_eps
-from model.crefine.restored_space import extract_restoration_metadata
+from model.crefine.restored_space import (
+    SUPPORTED_BODY_MODEL_TYPE,
+    extract_restoration_metadata,
+    validate_restoration_metadata,
+)
 
 
 def _masked_mse(diff, mask):
@@ -22,6 +26,18 @@ def _masked_mse(diff, mask):
     return (diff * diff * mask).sum() / denom
 
 
+def _masked_ratio(values, mask, threshold):
+    if values.numel() == 0:
+        return values.sum() * 0.0
+    mask = mask.float()
+    while mask.dim() < values.dim():
+        mask = mask.unsqueeze(-1)
+    extra = values[0, 0].numel() if values.dim() > 2 else 1
+    denom = (mask.sum() * extra).clamp(min=1.0)
+    hit = (values >= threshold).float()
+    return (hit * mask).sum() / denom
+
+
 class ContactDiffusionRefinerTrainLoop:
     def __init__(self, args, model, data, train_platform):
         self.args = args
@@ -31,6 +47,15 @@ class ContactDiffusionRefinerTrainLoop:
         self.device = torch.device(args.device_str)
         self.model.to(self.device)
         self.model.train()
+        if str(args.body_model).lower() != SUPPORTED_BODY_MODEL_TYPE:
+            raise ValueError(
+                f"stage2 crefine training requires body_model={SUPPORTED_BODY_MODEL_TYPE}, got {args.body_model}."
+            )
+        if getattr(args, "use_restored_shape", False) and not getattr(args, "use_shape_condition", False):
+            raise ValueError(
+                "use_restored_shape=True requires use_shape_condition=True. "
+                "Refusing to train a restored-shape stage2 model without shape tokens."
+            )
 
         self.diffusion = create_spaced_diffusion(
             diffusion_steps=args.diffusion_steps,
@@ -118,6 +143,22 @@ class ContactDiffusionRefinerTrainLoop:
                 near += 1
         return strict, near
 
+    def _window_signature_set(self, windows):
+        sig = set()
+        for b, items in enumerate(windows):
+            for item in items:
+                sig.add(
+                    (
+                        int(b),
+                        str(item.get("hand_side", "")),
+                        int(item.get("target_part_id", 0)),
+                        int(item.get("window_state_id", 0)),
+                        int(item.get("start_frame", -1)),
+                        int(item.get("end_frame", -1)),
+                    )
+                )
+        return sig
+
     def run_loop(self):
         while self.step < self.args.num_steps:
             for batch_idx, batch in enumerate(self.data):
@@ -132,19 +173,26 @@ class ContactDiffusionRefinerTrainLoop:
                 gt = batch["gt_motion"]
                 lengths = batch["lengths"]
                 restoration_meta = extract_restoration_metadata(batch, device=self.device)
+                validate_restoration_metadata(restoration_meta, context="stage2 training restoration metadata")
 
                 if self.step < self.args.alignment_only_steps:
                     alignment_weight = 1.0
                     cleanup_weight = 0.0
+                    cleanup_progress = 0.0
                 else:
                     alignment_weight = 1.0
                     if self.args.cleanup_ramp_steps <= 0:
                         cleanup_weight = 1.0
+                        cleanup_progress = 1.0
                     else:
                         progress = (self.step - self.args.alignment_only_steps) / float(self.args.cleanup_ramp_steps)
-                        cleanup_weight = float(min(max(progress, 0.0), 1.0))
+                        cleanup_progress = float(min(max(progress, 0.0), 1.0))
+                        cleanup_weight = cleanup_progress
+                alignment_only_active = float(self.step < self.args.alignment_only_steps)
+                cleanup_active = float(cleanup_weight > 0.0)
 
                 use_teacher = self.args.teacher_warmup_steps > 0 and self.step < self.args.teacher_warmup_steps
+                teacher_window_stats = None
                 if use_teacher:
                     strict_windows, near_windows, labels = self.builder.build_teacher_windows(
                         actor, gt, lengths=lengths, restoration_meta=restoration_meta
@@ -159,6 +207,25 @@ class ContactDiffusionRefinerTrainLoop:
                         "phase": batch["blueprint_phase"],
                     }
                     blueprint_conf = batch.get("blueprint_conf", None)
+                    if self.step % self.args.log_interval == 0:
+                        with torch.no_grad():
+                            teacher_strict, teacher_near, _ = self.builder.build_teacher_windows(
+                                actor,
+                                gt,
+                                lengths=lengths,
+                                restoration_meta=restoration_meta,
+                            )
+                        teacher_sig = self._window_signature_set(teacher_strict) | self._window_signature_set(teacher_near)
+                        blueprint_sig = self._window_signature_set(strict_windows) | self._window_signature_set(near_windows)
+                        teacher_total = float(len(teacher_sig))
+                        blueprint_total = float(len(blueprint_sig))
+                        overlap = float(len(teacher_sig & blueprint_sig))
+                        teacher_window_stats = {
+                            "teacher_window_total": teacher_total,
+                            "blueprint_window_total": blueprint_total,
+                            "window_overlap_ratio": overlap / max(teacher_total, 1.0),
+                            "window_precision": overlap / max(blueprint_total, 1.0),
+                        }
 
                 window_items = self.builder.select_windows(
                     strict_windows,
@@ -190,6 +257,8 @@ class ContactDiffusionRefinerTrainLoop:
                     window_batch["reactor_gender_id"],
                 )
                 window_batch.update(shape_tokens)
+                if self.model.use_shape_condition and window_batch.get("shape_mask") is None:
+                    raise RuntimeError("Shape-conditioned stage2 training expected shape_mask, got None.")
 
                 residual = window_batch["gt_local"] - window_batch["coarse_local"]
                 noise = torch.randn_like(residual)
@@ -228,8 +297,14 @@ class ContactDiffusionRefinerTrainLoop:
 
                 pred_eps_absmax = pred_eps.abs().max()
                 loss_diff = _masked_mse(pred_eps - noise, window_batch["time_mask"])
-                x0_pred = predict_xstart_from_eps(self.diffusion, x_t, t, pred_eps)
-                x0_pred = x0_pred.clamp(-self.args.delta_clip, self.args.delta_clip)
+                x0_pred_preclip = predict_xstart_from_eps(self.diffusion, x_t, t, pred_eps)
+                x0_preclip_absmax = x0_pred_preclip.abs().max()
+                clip_saturation_ratio = _masked_ratio(
+                    x0_pred_preclip.abs(),
+                    window_batch["time_mask"],
+                    threshold=max(float(self.args.delta_clip) - 1e-6, 0.0),
+                )
+                x0_pred = x0_pred_preclip.clamp(-self.args.delta_clip, self.args.delta_clip)
                 x0_pred = x0_pred.to(window_batch["coarse_full"].dtype)
                 x0_absmax = x0_pred.abs().max()
 
@@ -273,22 +348,31 @@ class ContactDiffusionRefinerTrainLoop:
                         "loss_diff": loss_diff,
                         "loss_contact_strict": loss_dict["loss_contact_strict"],
                         "loss_penetration": loss_dict["loss_penetration"],
+                        "loss_clearance": loss_dict["loss_clearance"],
+                        "loss_target_penetration": loss_dict["loss_target_penetration"],
                         "loss_contact_near": loss_dict["loss_contact_near"],
                         "loss_identity": loss_dict["loss_identity"],
                         "loss_smooth": loss_dict["loss_smooth"],
                         "aux_weight_mean": aux_weight_mean,
                         "pred_eps_absmax": pred_eps_absmax,
+                        "x0_preclip_absmax": x0_preclip_absmax,
                         "x0_absmax": x0_absmax,
+                        "clip_saturation_ratio": clip_saturation_ratio,
                         "grad_norm": grad_norm,
                         "nonfinite_loss": float(nonfinite_loss),
                         "nonfinite_grad": float(nonfinite_grad),
                         "alignment_weight": float(alignment_weight),
+                        "alignment_only_active": alignment_only_active,
                         "cleanup_weight": float(cleanup_weight),
+                        "cleanup_progress": float(cleanup_progress),
+                        "cleanup_active": cleanup_active,
                         "use_teacher": float(use_teacher),
                         "blueprint_conf_mean": window_batch["blueprint_confidence"].mean(),
                         "num_strict_windows": float(num_strict),
                         "num_near_windows": float(num_near),
                     }
+                    if teacher_window_stats is not None:
+                        log_items.update(teacher_window_stats)
 
                     if self.args.log_events:
                         patch_sizes = window_batch["actor_target_patch_mask"].sum(dim=-1).float()

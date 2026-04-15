@@ -65,7 +65,12 @@ def _joint_mask_from_side(joint_ids, side):
 
 class ContactDiffusionRefinerLoss(nn.Module):
     """
-    Loss for mesh-aware diffusion refiner (contact + penetration + guards).
+    Loss for mesh-aware diffusion refiner.
+
+    `loss_penetration` keeps the historical interface, but the default term is
+    primarily a non-target clearance / repulsion surrogate. When
+    `penalize_target_penetration=True`, an extra target-side penetration guard is
+    added and exposed separately as `loss_target_penetration`.
     """
 
     def __init__(
@@ -226,7 +231,8 @@ class ContactDiffusionRefinerLoss(nn.Module):
         smooth_loss = 0.0
         contact_strict = 0.0
         contact_near = 0.0
-        penetration = 0.0
+        clearance = 0.0
+        target_penetration = 0.0
         self_pen = 0.0
 
         body_model_type = window_batch.get("body_model_type", None)
@@ -315,18 +321,20 @@ class ContactDiffusionRefinerLoss(nn.Module):
                 "left" if side == 0 else "right", target_name
             )
             for _, (target_dist, nontarget_dist) in pen_dists.items():
-                repulse = torch.relu(self.nontarget_margin - nontarget_dist)
-                pen = repulse
+                clearance_term = torch.relu(self.nontarget_margin - nontarget_dist)
+                clearance = clearance + _masked_mean(clearance_term, clean_weight)
                 if self.penalize_target_penetration:
-                    pen = pen + torch.relu(self.penetration_margin - target_dist)
-                penetration = penetration + _masked_mean(pen, clean_weight)
+                    target_term = torch.relu(self.penetration_margin - target_dist)
+                    target_penetration = target_penetration + _masked_mean(target_term, clean_weight)
 
         num_windows = max(refined_local.shape[0], 1)
         identity_loss = identity_loss / num_windows
         smooth_loss = smooth_loss / num_windows
         contact_strict = contact_strict / num_windows
         contact_near = contact_near / num_windows
-        penetration = penetration / num_windows
+        clearance = clearance / num_windows
+        target_penetration = target_penetration / num_windows
+        penetration = clearance + target_penetration
         self_pen = self_pen / num_windows
 
         total = (
@@ -341,6 +349,8 @@ class ContactDiffusionRefinerLoss(nn.Module):
         return total, {
             "loss_contact_strict": contact_strict,
             "loss_penetration": penetration,
+            "loss_clearance": clearance,
+            "loss_target_penetration": target_penetration,
             "loss_contact_near": contact_near,
             "loss_identity": identity_loss,
             "loss_smooth": smooth_loss,
