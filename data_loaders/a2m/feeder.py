@@ -56,6 +56,31 @@ def _normalize_gender_id(value):
     return 0
 
 
+def _load_restoration_package(path):
+    if not path:
+        return None, {}
+    if not os.path.exists(path):
+        raise FileNotFoundError(f"Restoration metadata package not found: {path}")
+    ext = os.path.splitext(path)[1].lower()
+    if ext == ".npz":
+        data = np.load(path, allow_pickle=True)
+        payload = {k: data[k] for k in data.files}
+    elif ext == ".h5":
+        with h5py.File(path, "r") as f:
+            payload = {k: f[k][()] for k in f.keys()}
+    else:
+        raise ValueError(f"Unsupported restoration metadata package format: {path}")
+
+    if "dataset_key" not in payload:
+        raise KeyError("Restoration metadata package is missing 'dataset_key'")
+    key_to_index = {}
+    for idx, value in enumerate(np.asarray(payload["dataset_key"]).reshape(-1)):
+        if isinstance(value, bytes):
+            value = value.decode("utf-8")
+        key_to_index[str(value)] = idx
+    return payload, key_to_index
+
+
 class Feeder(Dataset):
 
     def __init__(self, datapath, **kwargs):
@@ -67,8 +92,13 @@ class Feeder(Dataset):
         self._num_frames_in_video = {}
         self._actions = {}
         self._restoration_cache = {}
+        self._restoration_package = None
+        self._restoration_package_index = {}
         self._interaction_order = {}
         self._raw_motions_root = ""
+        self._restoration_meta_path = kwargs.get("restoration_meta_path", "")
+        self._interaction_order_path = kwargs.get("interaction_order_path", "")
+        self._raw_motions_root_override = kwargs.get("raw_motions_root", "")
         self._default_downsample = 4 if self.dataname == "interx" else 1
         self._processed_fps = 30 if self.dataname == "interx" else 30
         self._raw_fps = self._processed_fps * self._default_downsample
@@ -76,8 +106,12 @@ class Feeder(Dataset):
         self._action_names = []
         if self.dataname == 'interx':
             self._action_names = _load_interx_action_names(self.data_path)
-            self._interaction_order = _load_interaction_order(self._infer_interaction_order_path())
-            self._raw_motions_root = self._infer_raw_motions_root()
+            interaction_order_path = self._interaction_order_path or self._infer_interaction_order_path()
+            self._interaction_order = _load_interaction_order(interaction_order_path)
+            self._raw_motions_root = self._raw_motions_root_override or self._infer_raw_motions_root()
+            self._restoration_package, self._restoration_package_index = _load_restoration_package(
+                self._restoration_meta_path
+            )
 
         with h5py.File(self.data_path, 'r') as f:
             self.keys = list(f.keys())
@@ -213,9 +247,35 @@ class Feeder(Dataset):
     def _load_restoration_source(self, data_key):
         if data_key in self._restoration_cache:
             return self._restoration_cache[data_key]
+        if self._restoration_package is not None:
+            if data_key not in self._restoration_package_index:
+                raise KeyError(
+                    f"dataset_key '{data_key}' not found in restoration metadata package: {self._restoration_meta_path}"
+                )
+            idx = self._restoration_package_index[data_key]
+            payload = self._restoration_package
+            source = {
+                "p1_betas": np.asarray(payload["p1_betas"][idx], dtype=np.float32).reshape(-1),
+                "p2_betas": np.asarray(payload["p2_betas"][idx], dtype=np.float32).reshape(-1),
+                "p1_gender_id": int(np.asarray(payload["p1_gender_id"][idx]).item()),
+                "p2_gender_id": int(np.asarray(payload["p2_gender_id"][idx]).item()),
+                "p1_trans": np.asarray(payload["p1_trans"][idx], dtype=np.float32),
+                "p2_trans": np.asarray(payload["p2_trans"][idx], dtype=np.float32),
+                "p1_root_orient": np.asarray(payload["p1_root_orient"][idx], dtype=np.float32),
+                "p2_root_orient": np.asarray(payload["p2_root_orient"][idx], dtype=np.float32),
+                "raw_nframes": int(np.asarray(payload["raw_nframes"][idx]).item()),
+                "downsample": int(np.asarray(payload["downsample"][idx]).item()) if "downsample" in payload else self._default_downsample,
+                "raw_fps": int(np.asarray(payload["raw_fps"][idx]).item()) if "raw_fps" in payload else self._raw_fps,
+                "processed_fps": int(np.asarray(payload["processed_fps"][idx]).item()) if "processed_fps" in payload else self._processed_fps,
+            }
+            if "actor_is_p1" in payload and data_key not in self._interaction_order:
+                self._interaction_order[data_key] = int(np.asarray(payload["actor_is_p1"][idx]).item())
+            self._restoration_cache[data_key] = source
+            return source
         if not self._raw_motions_root:
             raise FileNotFoundError(
-                f"Unable to infer raw motions root for restored-space metadata: {self.data_path}"
+                "Unable to resolve restored-space metadata source. "
+                f"Set raw motions root or restoration metadata package for: {self.data_path}"
             )
         p1_path = os.path.join(self._raw_motions_root, data_key, "P1.npz")
         p2_path = os.path.join(self._raw_motions_root, data_key, "P2.npz")
@@ -268,8 +328,11 @@ class Feeder(Dataset):
         source = self._load_restoration_source(data_key)
         actor_is_p1 = self._resolve_actor_is_p1(data_key)
         reactor_is_p2 = 1 if actor_is_p1 == 1 else 0
+        downsample = int(source.get("downsample", self._default_downsample))
+        processed_fps = int(source.get("processed_fps", self._processed_fps))
+        raw_fps = int(source.get("raw_fps", processed_fps * downsample))
 
-        raw_frame_ix = np.asarray(frame_ix, dtype=np.int64) * int(self._default_downsample)
+        raw_frame_ix = np.asarray(frame_ix, dtype=np.int64) * downsample
         raw_frame_ix = np.clip(raw_frame_ix, 0, source["raw_nframes"] - 1)
         processed_frame_ix = np.asarray(frame_ix, dtype=np.int64)
 
@@ -312,9 +375,9 @@ class Feeder(Dataset):
             "raw_frame_ix": raw_frame_ix.astype(np.int64),
             "processed_nframes": np.int64(self._num_frames_in_video[data_key]),
             "raw_nframes": np.int64(source["raw_nframes"]),
-            "processed_fps": np.int64(self._processed_fps),
-            "raw_fps": np.int64(self._raw_fps),
-            "downsample": np.int64(self._default_downsample),
+            "processed_fps": np.int64(processed_fps),
+            "raw_fps": np.int64(raw_fps),
+            "downsample": np.int64(downsample),
             "actor_betas": actor_betas.astype(np.float32),
             "reactor_betas": reactor_betas.astype(np.float32),
             "actor_gender_id": np.int64(actor_gender_id),

@@ -225,6 +225,9 @@ def main():
     parser.add_argument("--split", default="train", type=str)
     parser.add_argument("--max_batches", default=-1, type=int)
     parser.add_argument("--num_samples", default=-1, type=int)
+    parser.add_argument("--restoration_meta_path", default="", type=str)
+    parser.add_argument("--raw_motions_root", default="", type=str)
+    parser.add_argument("--interaction_order_path", default="", type=str)
     parser.add_argument("--use_ddim", action="store_true")
     parser.add_argument("--timestep_respacing", default="", type=str)
     parser.add_argument("--seed", default=10, type=int)
@@ -254,6 +257,9 @@ def main():
     args.split = args_cli.split
     args.max_batches = args_cli.max_batches
     args.num_samples = args_cli.num_samples
+    args.restoration_meta_path = args_cli.restoration_meta_path
+    args.raw_motions_root = args_cli.raw_motions_root
+    args.interaction_order_path = args_cli.interaction_order_path
     args.seed = args_cli.seed
     args.device = args_cli.device
 
@@ -270,6 +276,9 @@ def main():
         body_model=args.body_model,
         setting=args.setting,
         split=args.split,
+        restoration_meta_path=args.restoration_meta_path,
+        raw_motions_root=args.raw_motions_root,
+        interaction_order_path=args.interaction_order_path,
     )
 
     num_actions = getattr(data.dataset, "num_actions", 1)

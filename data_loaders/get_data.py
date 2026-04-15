@@ -17,14 +17,67 @@ def get_collate_fn(name, setting, hml_mode='train'):
         return all_ccollate
 
 
-def get_dataset(name, num_frames, num_person, data_path='', pose_rep='rot6d', body_model='smpl', ar_shuffle=False, split='train', hml_mode='train', shard=0, num_shards=1):
+def get_dataset(
+    name,
+    num_frames,
+    num_person,
+    data_path='',
+    pose_rep='rot6d',
+    body_model='smpl',
+    ar_shuffle=False,
+    split='train',
+    hml_mode='train',
+    shard=0,
+    num_shards=1,
+    **dataset_kwargs,
+):
     DATA = get_dataset_class(name)
-    dataset = DATA(split=split, num_frames=num_frames, num_person=num_person, datapath=data_path, pose_rep=pose_rep, dataname=name, body_model=body_model, ar_shuffle=ar_shuffle, shard=shard, num_shards=num_shards)
+    dataset = DATA(
+        split=split,
+        num_frames=num_frames,
+        num_person=num_person,
+        datapath=data_path,
+        pose_rep=pose_rep,
+        dataname=name,
+        body_model=body_model,
+        ar_shuffle=ar_shuffle,
+        shard=shard,
+        num_shards=num_shards,
+        **dataset_kwargs,
+    )
     return dataset
 
 
-def get_dataset_loader(name, batch_size, num_frames, num_person, data_path='', pose_rep='rot6d', body_model='smpl', ar_shuffle=False, setting='mdm', split='train', hml_mode='train', shard=0, num_shards=1):
-    dataset = get_dataset(name, num_frames, num_person, data_path, pose_rep, body_model, ar_shuffle, split, hml_mode, shard=shard, num_shards=num_shards)
+def get_dataset_loader(
+    name,
+    batch_size,
+    num_frames,
+    num_person,
+    data_path='',
+    pose_rep='rot6d',
+    body_model='smpl',
+    ar_shuffle=False,
+    setting='mdm',
+    split='train',
+    hml_mode='train',
+    shard=0,
+    num_shards=1,
+    **dataset_kwargs,
+):
+    dataset = get_dataset(
+        name,
+        num_frames,
+        num_person,
+        data_path,
+        pose_rep,
+        body_model,
+        ar_shuffle,
+        split,
+        hml_mode,
+        shard=shard,
+        num_shards=num_shards,
+        **dataset_kwargs,
+    )
     collate = get_collate_fn(name, setting, hml_mode)
 
     loader = DataLoader(
