@@ -54,6 +54,11 @@ def compute_hand_cd(
     geometry=None,
     topk=3,
     return_debug=False,
+    actor_betas=None,
+    reactor_betas=None,
+    actor_gender_id=None,
+    reactor_gender_id=None,
+    body_model_type=None,
 ):
     if gt_reactor_motion is None:
         return {"hand_cd": None, "hand_cd_count": 0}
@@ -61,13 +66,35 @@ def compute_hand_cd(
     label_builder = _ensure_label_builder(label_builder)
     geometry = _ensure_geometry(geometry)
 
-    labels = label_builder.build(actor_motion, gt_reactor_motion, lengths=lengths)
+    labels = label_builder.build(
+        actor_motion,
+        gt_reactor_motion,
+        lengths=lengths,
+        actor_betas=actor_betas,
+        reactor_betas=reactor_betas,
+        actor_gender_id=actor_gender_id,
+        reactor_gender_id=reactor_gender_id,
+        body_model_type=body_model_type,
+        preserve_pair_space=True,
+    )
     target_part = labels["target_part"]
     band = labels["band"]
     valid = (band == BAND_IDS["contact"]) & (target_part > 0)
 
-    actor_xyz = geometry.to_xyz(actor_motion)
-    reactor_xyz = geometry.to_xyz(reactor_motion)
+    actor_xyz = geometry.to_xyz(
+        actor_motion,
+        betas=actor_betas,
+        gender_id=actor_gender_id,
+        body_model_type=body_model_type,
+        preserve_pair_space=True,
+    )
+    reactor_xyz = geometry.to_xyz(
+        reactor_motion,
+        betas=reactor_betas,
+        gender_id=reactor_gender_id,
+        body_model_type=body_model_type,
+        preserve_pair_space=True,
+    )
 
     dist_top1, dist_topk_mean = _compute_hand_part_distances(actor_xyz, reactor_xyz, topk=topk)
 
@@ -186,10 +213,25 @@ def build_contact_labels(
     reactor_motion,
     lengths=None,
     label_builder=None,
+    actor_betas=None,
+    reactor_betas=None,
+    actor_gender_id=None,
+    reactor_gender_id=None,
+    body_model_type=None,
     **builder_kwargs,
 ):
     label_builder = _ensure_label_builder(label_builder, **builder_kwargs)
-    return label_builder.build(actor_motion, reactor_motion, lengths=lengths)
+    return label_builder.build(
+        actor_motion,
+        reactor_motion,
+        lengths=lengths,
+        actor_betas=actor_betas,
+        reactor_betas=reactor_betas,
+        actor_gender_id=actor_gender_id,
+        reactor_gender_id=reactor_gender_id,
+        body_model_type=body_model_type,
+        preserve_pair_space=True,
+    )
 
 
 def build_contact_mask(
@@ -197,6 +239,11 @@ def build_contact_mask(
     reactor_motion,
     lengths=None,
     label_builder=None,
+    actor_betas=None,
+    reactor_betas=None,
+    actor_gender_id=None,
+    reactor_gender_id=None,
+    body_model_type=None,
     **builder_kwargs,
 ):
     labels = build_contact_labels(
@@ -204,6 +251,11 @@ def build_contact_mask(
         reactor_motion,
         lengths=lengths,
         label_builder=label_builder,
+        actor_betas=actor_betas,
+        reactor_betas=reactor_betas,
+        actor_gender_id=actor_gender_id,
+        reactor_gender_id=reactor_gender_id,
+        body_model_type=body_model_type,
         **builder_kwargs,
     )
     return build_union_contact_mask(labels["band"], lengths=lengths)

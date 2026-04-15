@@ -58,12 +58,22 @@ class HandContactEvaluator:
         lengths=None,
         gt_reactor_motion=None,
         return_debug=False,
+        actor_betas=None,
+        reactor_betas=None,
+        actor_gender_id=None,
+        reactor_gender_id=None,
+        body_model_type=None,
     ):
         labels = build_contact_labels(
             actor_motion,
             reactor_motion,
             lengths=lengths,
             label_builder=self.label_builder,
+            actor_betas=actor_betas,
+            reactor_betas=reactor_betas,
+            actor_gender_id=actor_gender_id,
+            reactor_gender_id=reactor_gender_id,
+            body_model_type=body_model_type,
         )
         contact_mask = build_union_contact_mask(labels["band"], lengths=lengths)
 
@@ -91,6 +101,11 @@ class HandContactEvaluator:
                 geometry=self.geometry,
                 topk=self.topk,
                 return_debug=return_debug,
+                actor_betas=actor_betas,
+                reactor_betas=reactor_betas,
+                actor_gender_id=actor_gender_id,
+                reactor_gender_id=reactor_gender_id,
+                body_model_type=body_model_type,
             )
             if cd_stats["hand_cd"] is None:
                 results["hand_cd"] = None

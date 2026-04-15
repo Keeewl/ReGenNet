@@ -1,5 +1,6 @@
 import torch
 
+from model.crefine.restored_body_model import RestoredBodyModelForward
 from model.rotation2xyz import Rotation2xyz_x
 
 
@@ -58,13 +59,38 @@ class ContactGeometry:
         self.translation = translation
         self.glob = glob
         self.rot2xyz = Rotation2xyz_x(device=device)
+        self.restored_forward = RestoredBodyModelForward(
+            body_model=body_model,
+            pose_rep=pose_rep,
+            translation=translation,
+            glob=glob,
+            device=device,
+        )
 
     def _ensure_device(self, device):
         if self.rot2xyz.device != device:
             self.rot2xyz = Rotation2xyz_x(device=device)
+        self.restored_forward.to(device)
 
-    def to_xyz(self, motion, mask=None):
+    def to_xyz(
+        self,
+        motion,
+        mask=None,
+        betas=None,
+        gender_id=None,
+        body_model_type=None,
+        preserve_pair_space=False,
+    ):
         self._ensure_device(motion.device)
+        if preserve_pair_space or betas is not None or gender_id is not None:
+            return self.restored_forward.motion_to_xyz(
+                motion,
+                jointstype=self.body_model,
+                betas=betas,
+                gender_id=gender_id,
+                mask=mask,
+                body_model_type=body_model_type,
+            )
         return self.rot2xyz(
             x=motion,
             mask=mask,

@@ -24,11 +24,24 @@ METHOD_KEYS = {
     "baseline": "baseline_reactor_motion",
 }
 
+META_KEYS = {
+    "actor_betas": "actor_betas",
+    "reactor_betas": "reactor_betas",
+    "actor_gender_id": "actor_gender_id",
+    "reactor_gender_id": "reactor_gender_id",
+    "body_model_type": "body_model_type",
+}
+
 
 def _load_any(path):
     ext = os.path.splitext(path)[1].lower()
     if ext in {".pt", ".pth"}:
         return torch.load(path, map_location="cpu")
+    if ext == ".h5":
+        import h5py
+
+        with h5py.File(path, "r") as f:
+            return {k: f[k][()] for k in f.keys()}
     if ext == ".npz":
         data = np.load(path, allow_pickle=True)
         return {k: data[k] for k in data.files}
@@ -64,6 +77,19 @@ def _ensure_batch(tensor, name="tensor"):
     if tensor.dim() < 3:
         raise ValueError(f"{name} has unexpected shape: {tuple(tensor.shape)}")
     return tensor
+
+
+def _normalize_body_model_type(value, default):
+    if value is None:
+        return default
+    if isinstance(value, np.ndarray):
+        if value.shape == ():
+            value = value.item()
+        elif value.size > 0:
+            value = value.reshape(-1)[0]
+    if isinstance(value, bytes):
+        value = value.decode("utf-8")
+    return str(value)
 
 
 def _ensure_lengths(lengths, batch_size, num_frames):
@@ -273,6 +299,11 @@ def main():
     parser.add_argument("--coarse-key", type=str, default=METHOD_KEYS["coarse"])
     parser.add_argument("--refined-key", type=str, default=METHOD_KEYS["refined"])
     parser.add_argument("--baseline-key", type=str, default=METHOD_KEYS["baseline"])
+    parser.add_argument("--actor-betas-key", type=str, default=META_KEYS["actor_betas"])
+    parser.add_argument("--reactor-betas-key", type=str, default=META_KEYS["reactor_betas"])
+    parser.add_argument("--actor-gender-key", type=str, default=META_KEYS["actor_gender_id"])
+    parser.add_argument("--reactor-gender-key", type=str, default=META_KEYS["reactor_gender_id"])
+    parser.add_argument("--body-model-type-key", type=str, default=META_KEYS["body_model_type"])
 
     parser.add_argument("--device", type=str, default="cpu")
     parser.add_argument("--pose-rep", type=str, default="rot6d")
@@ -302,6 +333,27 @@ def main():
         coarse_motion = _extract_tensor(pack, args.coarse_key, name="coarse_reactor_motion")
         refined_motion = _extract_tensor(pack, args.refined_key, name="refined_reactor_motion")
         baseline_motion = _extract_tensor(pack, args.baseline_key, name="baseline_reactor_motion")
+        actor_betas = _extract_tensor(pack, args.actor_betas_key, name="actor_betas")
+        reactor_betas = _extract_tensor(pack, args.reactor_betas_key, name="reactor_betas")
+        actor_gender_id = _extract_tensor(pack, args.actor_gender_key, name="actor_gender_id")
+        reactor_gender_id = _extract_tensor(pack, args.reactor_gender_key, name="reactor_gender_id")
+        body_model_type = _normalize_body_model_type(
+            pack.get(args.body_model_type_key, args.body_model) if isinstance(pack, dict) else args.body_model,
+            args.body_model,
+        )
+        missing_meta = [
+            name for name, value in {
+                args.actor_betas_key: actor_betas,
+                args.reactor_betas_key: reactor_betas,
+                args.actor_gender_key: actor_gender_id,
+                args.reactor_gender_key: reactor_gender_id,
+            }.items()
+            if value is None
+        ]
+        if missing_meta:
+            raise ValueError(
+                "Evaluation pack is missing restored-shape metadata fields: " + ", ".join(missing_meta)
+            )
     else:
         actor_motion = _extract_tensor(_load_any(args.actor), name="actor_motion")
         lengths = _extract_tensor(_load_any(args.lengths), name="lengths") if args.lengths else None
@@ -309,6 +361,11 @@ def main():
         coarse_motion = _extract_tensor(_load_any(args.coarse), name="coarse_reactor_motion") if args.coarse else None
         refined_motion = _extract_tensor(_load_any(args.refined), name="refined_reactor_motion") if args.refined else None
         baseline_motion = _extract_tensor(_load_any(args.baseline), name="baseline_reactor_motion") if args.baseline else None
+        actor_betas = None
+        reactor_betas = None
+        actor_gender_id = None
+        reactor_gender_id = None
+        body_model_type = args.body_model
 
     if actor_motion is None:
         raise ValueError("actor_motion not found")
@@ -321,6 +378,14 @@ def main():
     coarse_motion = _ensure_batch(coarse_motion, name="coarse_reactor_motion")
     refined_motion = _ensure_batch(refined_motion, name="refined_reactor_motion")
     baseline_motion = _ensure_batch(baseline_motion, name="baseline_reactor_motion")
+    if actor_betas is not None and actor_betas.dim() == 1:
+        actor_betas = actor_betas.unsqueeze(0)
+    if reactor_betas is not None and reactor_betas.dim() == 1:
+        reactor_betas = reactor_betas.unsqueeze(0)
+    if actor_gender_id is not None and actor_gender_id.dim() == 0:
+        actor_gender_id = actor_gender_id.view(1)
+    if reactor_gender_id is not None and reactor_gender_id.dim() == 0:
+        reactor_gender_id = reactor_gender_id.view(1)
 
     device = torch.device(args.device)
 
@@ -367,6 +432,10 @@ def main():
             actor_b = _slice_batch(actor_motion, start, end).to(device)
             motion_b = _slice_batch(motion, start, end).to(device)
             lengths_b = _slice_batch(lengths, start, end).to(device)
+            actor_betas_b = _slice_batch(actor_betas, start, end).to(device) if actor_betas is not None else None
+            reactor_betas_b = _slice_batch(reactor_betas, start, end).to(device) if reactor_betas is not None else None
+            actor_gender_b = _slice_batch(actor_gender_id, start, end).to(device) if actor_gender_id is not None else None
+            reactor_gender_b = _slice_batch(reactor_gender_id, start, end).to(device) if reactor_gender_id is not None else None
 
             gt_ref = None
             if gt_motion is not None:
@@ -381,6 +450,11 @@ def main():
                     lengths=lengths_b,
                     gt_reactor_motion=gt_ref,
                     return_debug=True,
+                    actor_betas=actor_betas_b,
+                    reactor_betas=reactor_betas_b,
+                    actor_gender_id=actor_gender_b,
+                    reactor_gender_id=reactor_gender_b,
+                    body_model_type=body_model_type,
                 )
                 region_stats = compute_region_hand_distance(
                     actor_b,
@@ -391,6 +465,11 @@ def main():
                     density=args.mesh_density,
                     body_model=args.body_model,
                     pose_rep=args.pose_rep,
+                    actor_betas=actor_betas_b,
+                    reactor_betas=reactor_betas_b,
+                    actor_gender_id=actor_gender_b,
+                    reactor_gender_id=reactor_gender_b,
+                    body_model_type=body_model_type,
                 )
                 pen_stats = compute_penetration_surrogate(
                     actor_b,
@@ -401,6 +480,11 @@ def main():
                     density=args.mesh_density,
                     body_model=args.body_model,
                     pose_rep=args.pose_rep,
+                    actor_betas=actor_betas_b,
+                    reactor_betas=reactor_betas_b,
+                    actor_gender_id=actor_gender_b,
+                    reactor_gender_id=reactor_gender_b,
+                    body_model_type=body_model_type,
                 )
                 metrics.update(region_stats)
                 metrics.update(pen_stats)

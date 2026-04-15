@@ -47,6 +47,11 @@ def _parse_args():
     parser.add_argument("--window_pad", default=2, type=int)
     parser.add_argument("--include_buffer", action="store_true")
     parser.add_argument("--density", default="medium", choices=["small", "medium"], type=str)
+    parser.add_argument("--crefine_version", default="crefine_v3", type=str)
+    parser.add_argument("--use_shape_condition", action="store_true")
+    parser.add_argument("--shape_dim", default=10, type=int)
+    parser.add_argument("--use_restored_shape", action="store_true")
+    parser.add_argument("--gender_num_embeddings", default=3, type=int)
 
     parser.add_argument("--hidden_dim", default=128, type=int)
     parser.add_argument("--num_temporal_blocks", default=2, type=int)
@@ -82,6 +87,8 @@ def _parse_args():
     parser.add_argument("--nontarget_margin", default=0.02, type=float)
     parser.add_argument("--penalize_target_penetration", action="store_true")
     parser.add_argument("--log_events", action="store_true")
+    parser.add_argument("--lambda_contact_normal", default=0.0, type=float)
+    parser.add_argument("--lambda_clearance", default=0.0, type=float)
 
     parser.add_argument("--cuda", default=True, type=bool)
     parser.add_argument("--device", default=0, type=int)
@@ -133,9 +140,13 @@ def main():
         mesh_type_vocab=16,
         time_embed_dim=args.hidden_dim,
         use_spatial_attn=args.num_spatial_blocks > 0,
+        shape_dim=args.shape_dim,
+        gender_num_embeddings=args.gender_num_embeddings,
+        use_shape_condition=args.use_shape_condition,
     )
     model.config = {
         "stage2": "crefine_residual_diffusion_refiner",
+        "crefine_version": args.crefine_version,
         "joint_ids": joint_ids,
         "hidden_dim": args.hidden_dim,
         "num_temporal_blocks": args.num_temporal_blocks,
@@ -159,11 +170,17 @@ def main():
         "penalize_target_penetration": args.penalize_target_penetration,
         "teacher_warmup_steps": args.teacher_warmup_steps,
         "strict_near_ratio": args.strict_near_ratio,
+        "use_shape_condition": args.use_shape_condition,
+        "shape_dim": args.shape_dim,
+        "use_restored_shape": args.use_restored_shape,
+        "gender_num_embeddings": args.gender_num_embeddings,
         "lambda_contact_strict": args.lambda_contact_strict,
         "lambda_penetration": args.lambda_penetration,
         "lambda_contact_near": args.lambda_contact_near,
         "lambda_identity": args.lambda_identity,
         "lambda_smooth": args.lambda_smooth,
+        "lambda_contact_normal": args.lambda_contact_normal,
+        "lambda_clearance": args.lambda_clearance,
         "lr": args.lr,
     }
 

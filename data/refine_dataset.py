@@ -5,6 +5,12 @@ import numpy as np
 import torch
 from torch.utils.data import Dataset
 
+from model.crefine.restored_space import (
+    OPTIONAL_CACHE_FIELDS,
+    REQUIRED_CACHE_FIELDS,
+    validate_required_cache_fields,
+)
+
 
 class RefineCacheDataset(Dataset):
     """
@@ -27,14 +33,21 @@ class RefineCacheDataset(Dataset):
     def _load_cache(self):
         if self.cache_path.endswith(".npz"):
             data = np.load(self.cache_path, allow_pickle=True)
+            validate_required_cache_fields(set(data.files), context=self.cache_path)
             self.actor_motion = data["actor_motion"]
             self.reactor_gt = data["reactor_gt"]
             self.reactor_coarse = data["reactor_coarse"]
             self.lengths = data["lengths"]
             self.sample_indices = data.get("sample_indices", np.arange(len(self.lengths)))
+            self.extra_fields = {
+                key: data[key]
+                for key in REQUIRED_CACHE_FIELDS + OPTIONAL_CACHE_FIELDS
+                if key in data.files
+            }
             return
         if self.cache_path.endswith(".h5"):
             self._h5 = h5py.File(self.cache_path, "r")
+            validate_required_cache_fields(set(self._h5.keys()), context=self.cache_path)
             self.actor_motion = self._h5["actor_motion"]
             self.reactor_gt = self._h5["reactor_gt"]
             self.reactor_coarse = self._h5["reactor_coarse"]
@@ -44,6 +57,11 @@ class RefineCacheDataset(Dataset):
                 if "sample_indices" in self._h5
                 else np.arange(len(self.lengths))
             )
+            self.extra_fields = {
+                key: self._h5[key]
+                for key in REQUIRED_CACHE_FIELDS + OPTIONAL_CACHE_FIELDS
+                if key in self._h5
+            }
             return
         raise ValueError(f"Unsupported cache format: {self.cache_path}")
 
@@ -64,6 +82,16 @@ class RefineCacheDataset(Dataset):
             "lengths": length,
             "sample_index": sample_index,
         }
+        for key, source in self.extra_fields.items():
+            value = np.asarray(source[idx])
+            if value.dtype.kind == "S":
+                if value.shape == ():
+                    value = value.astype(str).item()
+                else:
+                    value = value.astype(str)
+            if isinstance(value, np.ndarray) and value.shape == ():
+                value = value.item()
+            item[key] = value
 
         if self.active_selector is not None and self.feature_builder is not None:
             actor_xyz = self.feature_builder.to_xyz(actor_motion.unsqueeze(0))
@@ -92,6 +120,18 @@ def refine_collate(batch):
         vals = [b[key] for b in batch]
         if torch.is_tensor(vals[0]):
             collated[key] = torch.stack(vals, dim=0)
+        elif isinstance(vals[0], np.ndarray):
+            if vals[0].dtype.kind in {"U", "S", "O"}:
+                collated[key] = np.asarray(vals, dtype=object)
+            else:
+                shapes = [tuple(v.shape) for v in vals]
+                if len(set(shapes)) != 1:
+                    collated[key] = vals
+                else:
+                    collated[key] = torch.from_numpy(np.stack(vals, axis=0))
         else:
-            collated[key] = torch.as_tensor(vals)
+            if isinstance(vals[0], (str, bytes)):
+                collated[key] = vals
+            else:
+                collated[key] = torch.as_tensor(vals)
     return collated

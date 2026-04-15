@@ -1,9 +1,9 @@
 import torch
 
 from model.contact.contact_defs import BAND_IDS, HAND_SIDES, TARGET_PARTS
+from model.crefine.restored_body_model import RestoredBodyModelForward
 from model.crefine.mesh_regions import get_mesh_region_provider
 from model.contact.proposal_labels import HandContactLabelBuilder
-from model.rotation2xyz import Rotation2xyz_x
 
 
 def _softmin_distance(a_xyz, b_xyz, beta=30.0):
@@ -21,7 +21,7 @@ def _ensure_label_builder(label_builder, **kwargs):
     return HandContactLabelBuilder(**kwargs)
 
 
-def _to_vertices(rot2xyz, motion, pose_rep, body_model, lengths=None, translation=True, glob=True):
+def _to_vertices(body_forward, motion, lengths=None, betas=None, gender_id=None, body_model_type=None):
     batch_size = motion.shape[0]
     num_frames = motion.shape[-1]
     if lengths is None:
@@ -29,18 +29,13 @@ def _to_vertices(rot2xyz, motion, pose_rep, body_model, lengths=None, translatio
     else:
         lengths = torch.as_tensor(lengths, device=motion.device, dtype=torch.long).view(-1)
         mask = torch.arange(num_frames, device=motion.device).view(1, -1) < lengths.unsqueeze(1)
-    return rot2xyz(
-        x=motion,
+    return body_forward.motion_to_xyz(
+        motion,
         mask=mask,
-        pose_rep=pose_rep,
-        translation=translation,
-        glob=glob,
         jointstype="vertices",
-        vertstrans=True,
-        num_person=1,
-        betas=None,
-        beta=0,
-        glob_rot=None,
+        betas=betas,
+        gender_id=gender_id,
+        body_model_type=body_model_type,
     )
 
 
@@ -61,19 +56,54 @@ def compute_region_hand_distance(
     density="medium",
     body_model="smplx",
     pose_rep="rot6d",
+    actor_betas=None,
+    reactor_betas=None,
+    actor_gender_id=None,
+    reactor_gender_id=None,
+    body_model_type=None,
 ):
     if gt_reactor_motion is None:
         return {"region_hand_dist": None, "region_hand_count": 0}
 
     label_builder = _ensure_label_builder(label_builder, body_model=body_model, pose_rep=pose_rep)
-    labels = label_builder.build(actor_motion, gt_reactor_motion, lengths=lengths)
+    labels = label_builder.build(
+        actor_motion,
+        gt_reactor_motion,
+        lengths=lengths,
+        actor_betas=actor_betas,
+        reactor_betas=reactor_betas,
+        actor_gender_id=actor_gender_id,
+        reactor_gender_id=reactor_gender_id,
+        body_model_type=body_model_type,
+        preserve_pair_space=True,
+    )
     target_part = labels["target_part"]
     band = labels["band"]
     valid = (band == BAND_IDS["contact"]) & (target_part > 0)
 
-    rot2xyz = Rotation2xyz_x(device=actor_motion.device)
-    actor_vertices = _to_vertices(rot2xyz, actor_motion, pose_rep, body_model, lengths=lengths)
-    reactor_vertices = _to_vertices(rot2xyz, reactor_motion, pose_rep, body_model, lengths=lengths)
+    body_forward = RestoredBodyModelForward(
+        body_model=body_model,
+        pose_rep=pose_rep,
+        translation=True,
+        glob=True,
+        device=actor_motion.device,
+    )
+    actor_vertices = _to_vertices(
+        body_forward,
+        actor_motion,
+        lengths=lengths,
+        betas=actor_betas,
+        gender_id=actor_gender_id,
+        body_model_type=body_model_type,
+    )
+    reactor_vertices = _to_vertices(
+        body_forward,
+        reactor_motion,
+        lengths=lengths,
+        betas=reactor_betas,
+        gender_id=reactor_gender_id,
+        body_model_type=body_model_type,
+    )
 
     provider = get_mesh_region_provider(density=density, body_model=body_model, pose_rep=pose_rep)
 
@@ -112,16 +142,51 @@ def compute_penetration_surrogate(
     density="medium",
     body_model="smplx",
     pose_rep="rot6d",
+    actor_betas=None,
+    reactor_betas=None,
+    actor_gender_id=None,
+    reactor_gender_id=None,
+    body_model_type=None,
 ):
     label_builder = _ensure_label_builder(label_builder, body_model=body_model, pose_rep=pose_rep)
-    labels = label_builder.build(actor_motion, reactor_motion, lengths=lengths)
+    labels = label_builder.build(
+        actor_motion,
+        reactor_motion,
+        lengths=lengths,
+        actor_betas=actor_betas,
+        reactor_betas=reactor_betas,
+        actor_gender_id=actor_gender_id,
+        reactor_gender_id=reactor_gender_id,
+        body_model_type=body_model_type,
+        preserve_pair_space=True,
+    )
     target_part = labels["target_part"]
     band = labels["band"]
     valid = (band >= BAND_IDS["near"]) & (target_part > 0)
 
-    rot2xyz = Rotation2xyz_x(device=actor_motion.device)
-    actor_vertices = _to_vertices(rot2xyz, actor_motion, pose_rep, body_model, lengths=lengths)
-    reactor_vertices = _to_vertices(rot2xyz, reactor_motion, pose_rep, body_model, lengths=lengths)
+    body_forward = RestoredBodyModelForward(
+        body_model=body_model,
+        pose_rep=pose_rep,
+        translation=True,
+        glob=True,
+        device=actor_motion.device,
+    )
+    actor_vertices = _to_vertices(
+        body_forward,
+        actor_motion,
+        lengths=lengths,
+        betas=actor_betas,
+        gender_id=actor_gender_id,
+        body_model_type=body_model_type,
+    )
+    reactor_vertices = _to_vertices(
+        body_forward,
+        reactor_motion,
+        lengths=lengths,
+        betas=reactor_betas,
+        gender_id=reactor_gender_id,
+        body_model_type=body_model_type,
+    )
 
     provider = get_mesh_region_provider(density=density, body_model=body_model, pose_rep=pose_rep)
 

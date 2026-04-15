@@ -8,6 +8,7 @@ from torch.optim import AdamW
 from model.crefine.crefine_inputs import DiffusionRefinerInputBuilder
 from model.crefine.crefine_loss import ContactDiffusionRefinerLoss
 from model.crefine.crefine_model import create_spaced_diffusion, predict_xstart_from_eps
+from model.crefine.restored_space import extract_restoration_metadata
 
 
 def _masked_mse(diff, mask):
@@ -130,6 +131,7 @@ class ContactDiffusionRefinerTrainLoop:
                 coarse = batch["coarse_motion"]
                 gt = batch["gt_motion"]
                 lengths = batch["lengths"]
+                restoration_meta = extract_restoration_metadata(batch, device=self.device)
 
                 if self.step < self.args.alignment_only_steps:
                     alignment_weight = 1.0
@@ -145,7 +147,7 @@ class ContactDiffusionRefinerTrainLoop:
                 use_teacher = self.args.teacher_warmup_steps > 0 and self.step < self.args.teacher_warmup_steps
                 if use_teacher:
                     strict_windows, near_windows, labels = self.builder.build_teacher_windows(
-                        actor, gt, lengths=lengths
+                        actor, gt, lengths=lengths, restoration_meta=restoration_meta
                     )
                     frame_labels = labels
                     blueprint_conf = None
@@ -173,12 +175,21 @@ class ContactDiffusionRefinerTrainLoop:
                     window_items,
                     frame_labels,
                     blueprint_conf=blueprint_conf,
+                    restoration_meta=restoration_meta,
                 )
                 if window_batch is None:
                     if self.step % self.args.log_interval == 0:
                         self._log(f"step={self.step} no_windows=1")
                     self.step += 1
                     continue
+
+                shape_tokens = self.model.encode_shape_tokens(
+                    window_batch["actor_betas"],
+                    window_batch["reactor_betas"],
+                    window_batch["actor_gender_id"],
+                    window_batch["reactor_gender_id"],
+                )
+                window_batch.update(shape_tokens)
 
                 residual = window_batch["gt_local"] - window_batch["coarse_local"]
                 noise = torch.randn_like(residual)
@@ -209,6 +220,10 @@ class ContactDiffusionRefinerTrainLoop:
                     cond_feat=window_batch["cond_feat"],
                     mesh_relation_feat=window_batch["mesh_relation_features"],
                     time_mask=window_batch["time_mask"],
+                    actor_shape_tokens=window_batch.get("actor_shape_tokens"),
+                    reactor_shape_tokens=window_batch.get("reactor_shape_tokens"),
+                    relative_shape_tokens=window_batch.get("relative_shape_tokens"),
+                    shape_mask=window_batch.get("shape_mask"),
                 )
 
                 pred_eps_absmax = pred_eps.abs().max()

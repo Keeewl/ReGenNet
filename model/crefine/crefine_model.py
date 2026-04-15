@@ -22,6 +22,56 @@ class FeatureEncoder(nn.Module):
         return self.net(x)
 
 
+class ShapeEncoder(nn.Module):
+    def __init__(self, beta_dim, hidden_dim, gender_num_embeddings=3, gender_embed_dim=16, dropout=0.1):
+        super().__init__()
+        self.gender_embed = nn.Embedding(gender_num_embeddings, gender_embed_dim)
+        self.net = nn.Sequential(
+            nn.Linear(beta_dim + gender_embed_dim, hidden_dim),
+            nn.GELU(),
+            nn.Dropout(dropout),
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.LayerNorm(hidden_dim),
+        )
+
+    def forward(self, betas, gender_id):
+        in_dim = self.net[0].in_features - self.gender_embed.embedding_dim
+        if betas.shape[-1] < in_dim:
+            pad = betas.new_zeros(betas.shape[0], in_dim - betas.shape[-1])
+            betas = torch.cat([betas, pad], dim=-1)
+        elif betas.shape[-1] > in_dim:
+            betas = betas[:, :in_dim]
+        gender_feat = self.gender_embed(gender_id.long())
+        feat = torch.cat([betas, gender_feat], dim=-1)
+        return self.net(feat).unsqueeze(1)
+
+
+class RelativeShapeEncoder(nn.Module):
+    def __init__(self, beta_dim, hidden_dim, gender_num_embeddings=3, gender_embed_dim=16, dropout=0.1):
+        super().__init__()
+        self.gender_embed = nn.Embedding(gender_num_embeddings, gender_embed_dim)
+        self.net = nn.Sequential(
+            nn.Linear(beta_dim + gender_embed_dim * 2, hidden_dim),
+            nn.GELU(),
+            nn.Dropout(dropout),
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.LayerNorm(hidden_dim),
+        )
+
+    def forward(self, actor_betas, reactor_betas, actor_gender_id, reactor_gender_id):
+        in_dim = self.net[0].in_features - self.gender_embed.embedding_dim * 2
+        delta = actor_betas - reactor_betas
+        if delta.shape[-1] < in_dim:
+            pad = delta.new_zeros(delta.shape[0], in_dim - delta.shape[-1])
+            delta = torch.cat([delta, pad], dim=-1)
+        elif delta.shape[-1] > in_dim:
+            delta = delta[:, :in_dim]
+        actor_gender = self.gender_embed(actor_gender_id.long())
+        reactor_gender = self.gender_embed(reactor_gender_id.long())
+        feat = torch.cat([delta, actor_gender, reactor_gender], dim=-1)
+        return self.net(feat).unsqueeze(1)
+
+
 class TemporalSelfAttentionBlock(nn.Module):
     """
     Temporal self-attention per token.
@@ -168,12 +218,16 @@ class MeshConditionalDiffusionRefiner(nn.Module):
         mesh_type_vocab=16,
         time_embed_dim=128,
         use_spatial_attn=True,
+        shape_dim=10,
+        gender_num_embeddings=3,
+        use_shape_condition=False,
     ):
         super().__init__()
         self.joint_ids = joint_ids
         self.hidden_dim = hidden_dim
         self.time_embed_dim = time_embed_dim
         self.use_spatial_attn = bool(use_spatial_attn)
+        self.use_shape_condition = bool(use_shape_condition)
 
         self.input_encoder = FeatureEncoder(6, hidden_dim, dropout=dropout)
         self.coarse_encoder = FeatureEncoder(6, hidden_dim, dropout=dropout)
@@ -183,6 +237,25 @@ class MeshConditionalDiffusionRefiner(nn.Module):
         self.actor_encoder = FeatureEncoder(actor_dim, hidden_dim, dropout=dropout)
         self.mesh_encoder = FeatureEncoder(mesh_dim, hidden_dim, dropout=dropout)
         self.mesh_type_embed = nn.Embedding(mesh_type_vocab, hidden_dim)
+        if self.use_shape_condition:
+            self.actor_shape_encoder = ShapeEncoder(
+                beta_dim=shape_dim,
+                hidden_dim=hidden_dim,
+                gender_num_embeddings=gender_num_embeddings,
+                dropout=dropout,
+            )
+            self.reactor_shape_encoder = ShapeEncoder(
+                beta_dim=shape_dim,
+                hidden_dim=hidden_dim,
+                gender_num_embeddings=gender_num_embeddings,
+                dropout=dropout,
+            )
+            self.relative_shape_encoder = RelativeShapeEncoder(
+                beta_dim=shape_dim,
+                hidden_dim=hidden_dim,
+                gender_num_embeddings=gender_num_embeddings,
+                dropout=dropout,
+            )
 
         self.time_mlp = nn.Sequential(
             nn.Linear(time_embed_dim, hidden_dim),
@@ -215,6 +288,10 @@ class MeshConditionalDiffusionRefiner(nn.Module):
         cond_feat=None,
         mesh_relation_feat=None,
         time_mask=None,
+        actor_shape_tokens=None,
+        reactor_shape_tokens=None,
+        relative_shape_tokens=None,
+        shape_mask=None,
     ):
         if x_t.dim() != 4:
             raise ValueError("x_t must be [B,T,J,6]")
@@ -243,6 +320,19 @@ class MeshConditionalDiffusionRefiner(nn.Module):
                     mesh_token_type = mesh_token_type[:, None, :].expand(mesh_ctx.shape[0], mesh_ctx.shape[1], -1)
                 mesh_ctx = mesh_ctx + self.mesh_type_embed(mesh_token_type)
 
+        shape_ctx = None
+        if self.use_shape_condition:
+            shape_tokens = [tok for tok in (actor_shape_tokens, reactor_shape_tokens, relative_shape_tokens) if tok is not None]
+            if shape_tokens:
+                base = []
+                for tok in shape_tokens:
+                    if tok.dim() == 3:
+                        tok = tok[:, None, :, :].expand(x_t.shape[0], x_t.shape[1], -1, -1)
+                    base.append(tok)
+                shape_ctx = torch.cat(base, dim=2)
+                if shape_mask is None:
+                    shape_mask = torch.ones(shape_ctx.shape[0], shape_ctx.shape[2], device=x_t.device, dtype=torch.bool)
+
         for block in self.temporal_blocks:
             h = block(h, time_mask=time_mask)
 
@@ -251,12 +341,26 @@ class MeshConditionalDiffusionRefiner(nn.Module):
                 h = block(h, actor_ctx, ctx_mask=actor_mask)
             if mesh_ctx is not None:
                 h = block(h, mesh_ctx, ctx_mask=mesh_mask)
+            if shape_ctx is not None:
+                h = block(h, shape_ctx, ctx_mask=shape_mask)
 
         if self.use_spatial_attn:
             for block in self.spatial_blocks:
                 h = block(h)
 
         return self.out_head(h)
+
+    def encode_shape_tokens(self, actor_betas, reactor_betas, actor_gender_id, reactor_gender_id):
+        if not self.use_shape_condition:
+            return {}
+        return {
+            "actor_shape_tokens": self.actor_shape_encoder(actor_betas, actor_gender_id),
+            "reactor_shape_tokens": self.reactor_shape_encoder(reactor_betas, reactor_gender_id),
+            "relative_shape_tokens": self.relative_shape_encoder(
+                actor_betas, reactor_betas, actor_gender_id, reactor_gender_id
+            ),
+            "shape_mask": torch.ones(actor_betas.shape[0], 3, device=actor_betas.device, dtype=torch.bool),
+        }
 
 
 def create_spaced_diffusion(

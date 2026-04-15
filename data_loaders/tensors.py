@@ -91,6 +91,25 @@ def ccollate(batch):
     
     cond['y'].update({'cmotion': cdatabatchTensor})
 
+    base_keys = {
+        "inp",
+        "action",
+        "action_text",
+        "text",
+        "tokens",
+        "lengths",
+    }
+    extra_keys = [k for k in notnone_batches[0].keys() if k not in base_keys]
+    for key in extra_keys:
+        values = [b[key] for b in notnone_batches]
+        first = values[0]
+        if torch.is_tensor(first):
+            cond["y"][key] = torch.stack(values, dim=0)
+        elif isinstance(first, (int, float, bool)):
+            cond["y"][key] = torch.as_tensor(values)
+        else:
+            cond["y"][key] = values
+
     return motion, cond
 
 # an adapter to our collate func
@@ -103,5 +122,4 @@ def t2m_collate(batch):
         'lengths': b[5],
     } for b in batch]
     return collate(adapted_batch)
-
 

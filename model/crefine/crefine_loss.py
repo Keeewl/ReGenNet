@@ -10,8 +10,8 @@ from model.contact.contact_defs import (
     WRIST_JOINT_IDS,
 )
 from model.contact.contact_geometry import temporal_diff
+from model.crefine.restored_body_model import RestoredBodyModelForward
 from model.crefine.mesh_regions import get_mesh_region_provider, WINDOW_STATE_IDS
-from model.rotation2xyz import Rotation2xyz_x
 
 
 def _masked_mse(diff, mask):
@@ -122,28 +122,28 @@ class ContactDiffusionRefinerLoss(nn.Module):
         }
 
         self.mesh_provider = get_mesh_region_provider(density=density, body_model=body_model, pose_rep=pose_rep)
-        self.rot2xyz = Rotation2xyz_x(device="cpu")
+        self.body_forward = RestoredBodyModelForward(
+            body_model=body_model,
+            pose_rep=pose_rep,
+            translation=translation,
+            glob=glob,
+            device="cpu",
+        )
 
     def _ensure_device(self, device):
-        if self.rot2xyz.device != device:
-            self.rot2xyz = Rotation2xyz_x(device=device)
+        self.body_forward.to(device)
 
-    def _to_vertices(self, motion):
+    def _to_vertices(self, motion, betas=None, gender_id=None, body_model_type=None):
         self._ensure_device(motion.device)
         num_frames = motion.shape[-1]
         mask = torch.ones(motion.shape[0], num_frames, device=motion.device, dtype=torch.bool)
-        return self.rot2xyz(
-            x=motion,
-            mask=mask,
-            pose_rep=self.pose_rep,
-            translation=self.translation,
-            glob=self.glob,
+        return self.body_forward.motion_to_xyz(
+            motion,
             jointstype="vertices",
-            vertstrans=True,
-            num_person=1,
-            betas=None,
-            beta=0,
-            glob_rot=None,
+            betas=betas,
+            gender_id=gender_id,
+            mask=mask,
+            body_model_type=body_model_type,
         )
 
     def _patch_vertices(self, vertices, ids):
@@ -229,8 +229,19 @@ class ContactDiffusionRefinerLoss(nn.Module):
         penetration = 0.0
         self_pen = 0.0
 
-        refined_vertices = self._to_vertices(refined_full)
-        actor_vertices = self._to_vertices(actor_full)
+        body_model_type = window_batch.get("body_model_type", None)
+        refined_vertices = self._to_vertices(
+            refined_full,
+            betas=window_batch["reactor_betas"],
+            gender_id=window_batch["reactor_gender_id"],
+            body_model_type=body_model_type,
+        )
+        actor_vertices = self._to_vertices(
+            actor_full,
+            betas=window_batch["actor_betas"],
+            gender_id=window_batch["actor_gender_id"],
+            body_model_type=body_model_type,
+        )
 
         if aux_weight is None:
             aux_weight = torch.ones(refined_local.shape[0], device=device, dtype=refined_local.dtype)

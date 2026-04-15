@@ -14,6 +14,34 @@ from model.cnet.cnet_v5 import CNetV5
 from utils.fixseed import fixseed
 
 
+RESTORED_CACHE_FIELDS = (
+    "dataset_key",
+    "actor_is_p1",
+    "reactor_is_p2",
+    "processed_frame_ix",
+    "raw_frame_ix",
+    "processed_nframes",
+    "raw_nframes",
+    "processed_fps",
+    "raw_fps",
+    "downsample",
+    "actor_betas",
+    "reactor_betas",
+    "actor_gender_id",
+    "reactor_gender_id",
+    "body_model_type",
+    "num_betas",
+    "ground_offset_y_actor",
+    "ground_offset_y_reactor",
+    "pair_base_trans",
+    "loader_base_trans",
+    "actor_raw_trans_clip",
+    "reactor_raw_trans_clip",
+    "actor_raw_root_orient_clip",
+    "reactor_raw_root_orient_clip",
+)
+
+
 def create_gaussian_diffusion(args):
     predict_xstart = True
     steps = args.diffusion_steps
@@ -124,25 +152,63 @@ def to_device(cond, device):
     return cond
 
 
-def save_cache(output_path, actor_motion, reactor_gt, reactor_coarse, lengths, sample_indices):
+def _stack_cache_field(chunks, key):
+    values = chunks.get(key, [])
+    if not values:
+        return None
+    first = values[0]
+    if isinstance(first, np.ndarray):
+        return np.concatenate(values, axis=0)
+    if isinstance(first, list):
+        return np.array(sum(values, []), dtype=object)
+    return np.asarray(values)
+
+
+def _pad_array_list(values, pad_value):
+    arrays = [np.asarray(v) for v in values]
+    max_shape = []
+    ndim = max(arr.ndim for arr in arrays)
+    for dim in range(ndim):
+        max_shape.append(max(arr.shape[dim] if dim < arr.ndim else 1 for arr in arrays))
+    out = np.full((len(arrays),) + tuple(max_shape), pad_value, dtype=arrays[0].dtype)
+    for i, arr in enumerate(arrays):
+        slices = (i,) + tuple(slice(0, s) for s in arr.shape)
+        out[slices] = arr
+    return out
+
+
+def _write_h5_dataset(h5_file, key, value):
+    if value is None:
+        return
+    arr = np.asarray(value)
+    if arr.dtype.kind in {"U", "O"}:
+        flat = arr.reshape(-1).tolist()
+        flat = [x.decode("utf-8") if isinstance(x, bytes) else str(x) for x in flat]
+        dt = h5py.string_dtype(encoding="utf-8")
+        arr = np.asarray(flat, dtype=dt).reshape(arr.shape)
+        h5_file.create_dataset(key, data=arr, dtype=dt)
+    else:
+        h5_file.create_dataset(key, data=arr)
+
+
+def save_cache(output_path, actor_motion, reactor_gt, reactor_coarse, lengths, sample_indices, extra_fields=None):
     output_path = os.path.abspath(output_path)
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    payload = {
+        "actor_motion": actor_motion,
+        "reactor_gt": reactor_gt,
+        "reactor_coarse": reactor_coarse,
+        "lengths": lengths,
+        "sample_indices": sample_indices,
+    }
+    if extra_fields:
+        payload.update({k: v for k, v in extra_fields.items() if v is not None})
     if output_path.endswith(".h5"):
         with h5py.File(output_path, "w") as f:
-            f.create_dataset("actor_motion", data=actor_motion)
-            f.create_dataset("reactor_gt", data=reactor_gt)
-            f.create_dataset("reactor_coarse", data=reactor_coarse)
-            f.create_dataset("lengths", data=lengths)
-            f.create_dataset("sample_indices", data=sample_indices)
+            for key, value in payload.items():
+                _write_h5_dataset(f, key, value)
         return
-    np.savez_compressed(
-        output_path,
-        actor_motion=actor_motion,
-        reactor_gt=reactor_gt,
-        reactor_coarse=reactor_coarse,
-        lengths=lengths,
-        sample_indices=sample_indices,
-    )
+    np.savez_compressed(output_path, **payload)
 
 
 def main():
@@ -221,6 +287,7 @@ def main():
     coarse_list = []
     lengths_list = []
     indices_list = []
+    extra_chunks = {key: [] for key in RESTORED_CACHE_FIELDS}
 
     total = 0
     total_batches = len(data)
@@ -262,6 +329,21 @@ def main():
             coarse_list.append(sample[:keep].cpu().numpy())
             lengths_list.append(lengths[:keep].cpu().numpy())
             indices_list.append(np.arange(total, total + keep, dtype=np.int64))
+            for key in RESTORED_CACHE_FIELDS:
+                if key not in cond["y"]:
+                    continue
+                value = cond["y"][key]
+                if torch.is_tensor(value):
+                    value = value[:keep].detach().cpu().numpy()
+                elif isinstance(value, list):
+                    value = value[:keep]
+                    if value and isinstance(value[0], np.ndarray):
+                        shapes = [tuple(np.asarray(v).shape) for v in value]
+                        if len(set(shapes)) == 1:
+                            value = np.stack(value, axis=0)
+                else:
+                    value = np.asarray(value)[:keep]
+                extra_chunks[key].append(value)
             total += keep
             pbar.set_postfix(samples=total)
 
@@ -270,6 +352,23 @@ def main():
     reactor_coarse = np.concatenate(coarse_list, axis=0).astype(np.float32)
     lengths = np.concatenate(lengths_list, axis=0).astype(np.int64)
     sample_indices = np.concatenate(indices_list, axis=0).astype(np.int64)
+    extra_fields = {}
+    for key in RESTORED_CACHE_FIELDS:
+        chunks = extra_chunks[key]
+        if not chunks:
+            continue
+        first = chunks[0]
+        if isinstance(first, list):
+            flat = sum([list(x) for x in chunks], [])
+            if flat and isinstance(flat[0], np.ndarray):
+                pad_value = -1 if "frame_ix" in key else 0.0
+                value = _pad_array_list(flat, pad_value=pad_value)
+            else:
+                value = np.array(flat, dtype=object)
+        else:
+            value = _stack_cache_field(extra_chunks, key)
+        if value is not None:
+            extra_fields[key] = value
 
     print(f"Saving cache to {args.output_path} (samples={len(sample_indices)})")
     save_cache(
@@ -279,6 +378,7 @@ def main():
         reactor_coarse=reactor_coarse,
         lengths=lengths,
         sample_indices=sample_indices,
+        extra_fields=extra_fields,
     )
 
 

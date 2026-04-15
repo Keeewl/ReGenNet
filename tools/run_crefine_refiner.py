@@ -14,8 +14,13 @@ from data.refine_dataset import RefineCacheDataset, refine_collate
 from model.contact.contact_defs import default_refiner_joint_ids
 from model.crefine.crefine_inputs import DiffusionRefinerInputBuilder
 from model.crefine.crefine_model import MeshConditionalDiffusionRefiner, create_spaced_diffusion
+from model.crefine.restored_space import (
+    OPTIONAL_CACHE_FIELDS,
+    REQUIRED_CACHE_FIELDS,
+    extract_restoration_metadata,
+)
 from model.crefine.mesh_regions import get_mesh_region_provider
-from model.rotation2xyz import Rotation2xyz_x
+from model.crefine.restored_body_model import RestoredBodyModelForward
 
 
 def _load_refiner_checkpoint(path, device):
@@ -35,6 +40,9 @@ def _load_refiner_checkpoint(path, device):
         mesh_type_vocab=16,
         time_embed_dim=int(cfg.get("hidden_dim", 128)),
         use_spatial_attn=int(cfg.get("num_spatial_blocks", 1)) > 0,
+        shape_dim=int(cfg.get("shape_dim", 10)),
+        gender_num_embeddings=int(cfg.get("gender_num_embeddings", 3)),
+        use_shape_condition=bool(cfg.get("use_shape_condition", False)),
     )
     model.load_state_dict(ckpt["model"], strict=True)
     model.to(device)
@@ -73,38 +81,49 @@ def _softmin_distance(a_xyz, b_xyz, beta=30.0):
     return -torch.logsumexp(-beta * dist, dim=-1) / max(beta, 1e-6)
 
 
-def _post_cleanup(delta_avg, refined, actor, joint_ids, strength, margin, body_model, pose_rep, density):
+def _post_cleanup(
+    delta_avg,
+    refined,
+    actor,
+    joint_ids,
+    strength,
+    margin,
+    body_model,
+    pose_rep,
+    density,
+    actor_betas=None,
+    reactor_betas=None,
+    actor_gender_id=None,
+    reactor_gender_id=None,
+    body_model_type=None,
+):
     if strength <= 0.0:
         return delta_avg
     device = refined.device
-    rot2xyz = Rotation2xyz_x(device=device)
+    body_forward = RestoredBodyModelForward(
+        body_model=body_model,
+        pose_rep=pose_rep,
+        translation=True,
+        glob=True,
+        device=device,
+    )
     num_frames = refined.shape[-1]
     mask = torch.ones(refined.shape[0], num_frames, device=device, dtype=torch.bool)
-    actor_verts = rot2xyz(
-        x=actor,
+    actor_verts = body_forward.motion_to_xyz(
+        actor,
         mask=mask,
-        pose_rep=pose_rep,
-        translation=True,
-        glob=True,
         jointstype="vertices",
-        vertstrans=True,
-        num_person=1,
-        betas=None,
-        beta=0,
-        glob_rot=None,
+        betas=actor_betas,
+        gender_id=actor_gender_id,
+        body_model_type=body_model_type,
     )
-    refined_verts = rot2xyz(
-        x=refined,
+    refined_verts = body_forward.motion_to_xyz(
+        refined,
         mask=mask,
-        pose_rep=pose_rep,
-        translation=True,
-        glob=True,
         jointstype="vertices",
-        vertstrans=True,
-        num_person=1,
-        betas=None,
-        beta=0,
-        glob_rot=None,
+        betas=reactor_betas,
+        gender_id=reactor_gender_id,
+        body_model_type=body_model_type,
     )
 
     provider = get_mesh_region_provider(density=density, body_model=body_model, pose_rep=pose_rep)
@@ -150,7 +169,14 @@ def _save_h5(path, arrays):
     os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
     with h5py.File(path, "w") as f:
         for key, value in arrays.items():
-            f.create_dataset(key, data=value)
+            arr = np.asarray(value)
+            if arr.dtype.kind in {"U", "S", "O"}:
+                flat = [x.decode("utf-8") if isinstance(x, bytes) else str(x) for x in arr.reshape(-1).tolist()]
+                dt = h5py.string_dtype(encoding="utf-8")
+                arr = np.asarray(flat, dtype=dt).reshape(arr.shape)
+                f.create_dataset(key, data=arr, dtype=dt)
+            else:
+                f.create_dataset(key, data=arr)
 
 
 def main():
@@ -237,6 +263,7 @@ def main():
     indices_list = []
     coarse_list = []
     gt_list = []
+    meta_lists = {key: [] for key in REQUIRED_CACHE_FIELDS + OPTIONAL_CACHE_FIELDS}
 
     total = 0
     total_batches = len(loader)
@@ -256,6 +283,9 @@ def main():
             gt = batch["gt_motion"].to(device)
             lengths = batch["lengths"].to(device)
             sample_index = batch["sample_index"].to("cpu")
+            restoration_meta = extract_restoration_metadata(batch, device=device)
+            actor_restored, coarse_restored = builder.restore_pair_batch(actor, coarse, restoration_meta)
+            _, gt_restored = builder.restore_pair_batch(actor, gt, restoration_meta)
 
             strict_windows = strict_windows_all[batch_idx * args.batch_size : batch_idx * args.batch_size + actor.shape[0]]
             near_windows = near_windows_all[batch_idx * args.batch_size : batch_idx * args.batch_size + actor.shape[0]]
@@ -278,7 +308,7 @@ def main():
                     window_items.append(item)
 
             if not window_items:
-                refined = coarse
+                refined = coarse_restored
             else:
                 max_len = int(lengths.max().item())
                 delta_sum = torch.zeros(actor.shape[0], coarse.shape[1], coarse.shape[2], max_len, device=device)
@@ -294,11 +324,19 @@ def main():
                         chunk_items,
                         {"band": band, "phase": phase},
                         blueprint_conf=conf,
+                        restoration_meta=restoration_meta,
                     )
                     if window_batch is None:
                         continue
 
                     noise = torch.randn_like(window_batch["coarse_local"])
+                    shape_tokens = refiner.encode_shape_tokens(
+                        window_batch["actor_betas"],
+                        window_batch["reactor_betas"],
+                        window_batch["actor_gender_id"],
+                        window_batch["reactor_gender_id"],
+                    )
+                    window_batch.update(shape_tokens)
                     model_kwargs = {
                         "coarse_local": window_batch["coarse_local"],
                         "actor_tokens": window_batch["actor_local_motion"],
@@ -309,6 +347,10 @@ def main():
                         "cond_feat": window_batch["cond_feat"],
                         "mesh_relation_feat": window_batch["mesh_relation_features"],
                         "time_mask": window_batch["time_mask"],
+                        "actor_shape_tokens": window_batch.get("actor_shape_tokens"),
+                        "reactor_shape_tokens": window_batch.get("reactor_shape_tokens"),
+                        "relative_shape_tokens": window_batch.get("relative_shape_tokens"),
+                        "shape_mask": window_batch.get("shape_mask"),
                     }
 
                     residual = sampling_diffusion.p_sample_loop(
@@ -340,16 +382,21 @@ def main():
                 if args.post_cleanup:
                     delta_avg = _post_cleanup(
                         delta_avg,
-                        coarse + delta_avg,
-                        actor,
+                        coarse_restored + delta_avg,
+                        actor_restored,
                         joint_ids,
                         strength=args.post_cleanup_strength,
                         margin=0.02,
                         body_model=args.body_model,
                         pose_rep=args.pose_rep,
                         density=args.density,
+                        actor_betas=restoration_meta["actor_betas"],
+                        reactor_betas=restoration_meta["reactor_betas"],
+                        actor_gender_id=restoration_meta["actor_gender_id"],
+                        reactor_gender_id=restoration_meta["reactor_gender_id"],
+                        body_model_type="smplx",
                     )
-                refined = coarse + delta_avg
+                refined = coarse_restored + delta_avg
 
             keep = refined.shape[0]
             if args.num_samples > 0 and total + keep > args.num_samples:
@@ -358,9 +405,18 @@ def main():
             refined_list.append(refined[:keep].cpu().numpy())
             lengths_list.append(lengths[:keep].cpu().numpy())
             indices_list.append(sample_index[:keep].numpy())
-            actor_list.append(actor[:keep].cpu().numpy())
-            coarse_list.append(coarse[:keep].cpu().numpy())
-            gt_list.append(gt[:keep].cpu().numpy())
+            actor_list.append(actor_restored[:keep].cpu().numpy())
+            coarse_list.append(coarse_restored[:keep].cpu().numpy())
+            gt_list.append(gt_restored[:keep].cpu().numpy())
+            for key in meta_lists.keys():
+                value = batch[key]
+                if torch.is_tensor(value):
+                    value = value[:keep].cpu().numpy()
+                elif isinstance(value, np.ndarray):
+                    value = value[:keep]
+                else:
+                    value = value[:keep]
+                meta_lists[key].append(value)
 
             total += keep
             pbar.set_postfix(samples=total)
@@ -377,6 +433,16 @@ def main():
         "sample_indices": indices_out,
         "actor_motion": np.concatenate(actor_list, axis=0).astype(np.float32),
     }
+    for key, chunks in meta_lists.items():
+        if not chunks:
+            continue
+        first = chunks[0]
+        if isinstance(first, np.ndarray) and first.dtype.kind in {"U", "S", "O"}:
+            output[key] = np.concatenate([np.asarray(x, dtype=object) for x in chunks], axis=0)
+        elif isinstance(first, np.ndarray):
+            output[key] = np.concatenate(chunks, axis=0)
+        else:
+            output[key] = np.asarray(sum([list(x) for x in chunks], []), dtype=object)
     if args.save_config:
         output["refiner_config_json"] = json.dumps(refiner_config).encode("utf-8")
 

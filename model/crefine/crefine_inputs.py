@@ -9,6 +9,13 @@ from model.contact.contact_defs import (
 from model.contact.contact_geometry import ContactGeometry
 from model.crefine.crefine_windows import DiffusionWindowBuilder
 from model.crefine.mesh_contact_features import MeshContactFeatureBuilder
+from model.crefine.restored_space import (
+    OPTIONAL_CACHE_FIELDS,
+    REQUIRED_CACHE_FIELDS,
+    restore_motion_batch,
+    select_window_metadata,
+    validate_required_cache_fields,
+)
 from model.contact.proposal_labels import HandContactLabelBuilder
 
 
@@ -19,7 +26,25 @@ def _one_hot(ids, num_classes):
 def _stack_or_tensor(vals):
     if torch.is_tensor(vals[0]):
         return torch.stack(vals, dim=0)
+    if isinstance(vals[0], np.ndarray):
+        if vals[0].dtype.kind in {"U", "S", "O"}:
+            return np.asarray(vals, dtype=object)
+        shapes = [tuple(v.shape) for v in vals]
+        if len(set(shapes)) != 1:
+            return vals
+        return torch.from_numpy(np.stack(vals, axis=0))
+    if isinstance(vals[0], (str, bytes)):
+        return vals
     return torch.as_tensor(vals)
+
+
+def _read_cache_value(source, idx):
+    value = np.asarray(source[idx])
+    if value.dtype.kind == "S":
+        return value.astype(str).item() if value.shape == () else value.astype(str)
+    if value.shape == ():
+        return value.item()
+    return value
 
 
 def diffusion_refiner_collate(batch):
@@ -50,16 +75,23 @@ class DiffusionRefinerCacheDataset(Dataset):
     def _load_cache(self):
         if self.cache_path.endswith(".npz"):
             data = np.load(self.cache_path, allow_pickle=True)
+            validate_required_cache_fields(set(data.files), context=self.cache_path)
             self.actor_motion = data["actor_motion"]
             self.reactor_gt = data["reactor_gt"]
             self.reactor_coarse = data["reactor_coarse"]
             self.lengths = data["lengths"]
             self.sample_indices = data.get("sample_indices", np.arange(len(self.lengths)))
+            self.extra_fields = {
+                key: data[key]
+                for key in REQUIRED_CACHE_FIELDS + OPTIONAL_CACHE_FIELDS
+                if key in data.files
+            }
             return
         if self.cache_path.endswith(".h5"):
             import h5py
 
             self._h5 = h5py.File(self.cache_path, "r")
+            validate_required_cache_fields(set(self._h5.keys()), context=self.cache_path)
             self.actor_motion = self._h5["actor_motion"]
             self.reactor_gt = self._h5["reactor_gt"]
             self.reactor_coarse = self._h5["reactor_coarse"]
@@ -69,6 +101,11 @@ class DiffusionRefinerCacheDataset(Dataset):
                 if "sample_indices" in self._h5
                 else np.arange(len(self.lengths))
             )
+            self.extra_fields = {
+                key: self._h5[key]
+                for key in REQUIRED_CACHE_FIELDS + OPTIONAL_CACHE_FIELDS
+                if key in self._h5
+            }
             return
         raise ValueError(f"Unsupported cache format: {self.cache_path}")
 
@@ -130,6 +167,7 @@ class DiffusionRefinerCacheDataset(Dataset):
             "blueprint_conf": conf,
             "strict_windows": strict,
             "near_windows": near,
+            **{key: _read_cache_value(source, idx) for key, source in self.extra_fields.items()},
         }
 
 
@@ -179,8 +217,25 @@ class DiffusionRefinerInputBuilder:
         )
         self.include_buffer = bool(include_buffer)
 
-    def build_teacher_windows(self, actor_motion, gt_motion, lengths=None):
-        labels = self.label_builder.build(actor_motion, gt_motion, lengths=lengths)
+    def restore_pair_batch(self, actor_motion, reactor_motion, metadata):
+        return restore_motion_batch(actor_motion, reactor_motion, metadata)
+
+    def build_teacher_windows(self, actor_motion, gt_motion, lengths=None, restoration_meta=None):
+        if restoration_meta is not None:
+            actor_motion, gt_motion = self.restore_pair_batch(actor_motion, gt_motion, restoration_meta)
+            labels = self.label_builder.build(
+                actor_motion,
+                gt_motion,
+                lengths=lengths,
+                actor_betas=restoration_meta["actor_betas"],
+                reactor_betas=restoration_meta["reactor_betas"],
+                actor_gender_id=restoration_meta["actor_gender_id"],
+                reactor_gender_id=restoration_meta["reactor_gender_id"],
+                body_model_type="smplx",
+                preserve_pair_space=True,
+            )
+        else:
+            labels = self.label_builder.build(actor_motion, gt_motion, lengths=lengths)
         strict, near = self.window_builder.build_from_labels(labels, lengths=lengths)
         return strict, near, labels
 
@@ -224,11 +279,23 @@ class DiffusionRefinerInputBuilder:
         window_items,
         frame_labels,
         blueprint_conf=None,
+        restoration_meta=None,
     ):
         if torch.is_tensor(lengths):
             lengths_list = lengths.detach().cpu().tolist()
         else:
             lengths_list = [int(x) for x in lengths]
+
+        restored_actor_motion = actor_motion
+        restored_coarse_motion = coarse_motion
+        restored_gt_motion = gt_motion
+        if restoration_meta is not None:
+            restored_actor_motion, restored_coarse_motion = self.restore_pair_batch(
+                actor_motion, coarse_motion, restoration_meta
+            )
+            _, restored_gt_motion = self.restore_pair_batch(
+                actor_motion, gt_motion, restoration_meta
+            )
 
         joint_ids = default_refiner_joint_ids(include_buffer=self.include_buffer)
         joint_ids_t = torch.as_tensor(joint_ids, device=actor_motion.device, dtype=torch.long)
@@ -255,12 +322,17 @@ class DiffusionRefinerInputBuilder:
             actor_joint_ids = ACTOR_PART_JOINT_IDS.get(target_part, [])
             max_actor_joints = max(max_actor_joints, max(len(actor_joint_ids), 1))
 
-            actor_slice = actor_motion[b : b + 1, :, :, start : end + 1]
-            coarse_slice = coarse_motion[b : b + 1, :, :, start : end + 1]
-            gt_slice = gt_motion[b : b + 1, :, :, start : end + 1]
+            actor_slice = restored_actor_motion[b : b + 1, :, :, start : end + 1]
+            coarse_slice = restored_coarse_motion[b : b + 1, :, :, start : end + 1]
+            gt_slice = restored_gt_motion[b : b + 1, :, :, start : end + 1]
+            window_meta = select_window_metadata(restoration_meta, b) if restoration_meta is not None else None
 
             mesh_feat = self.mesh_builder.build_window_features(
-                actor_slice, coarse_slice, item.get("hand_side", "left"), target_part
+                actor_slice,
+                coarse_slice,
+                item.get("hand_side", "left"),
+                target_part,
+                metadata=window_meta,
             )
             max_mesh_tokens = max(max_mesh_tokens, mesh_feat["mesh_token_feat"].shape[1])
             max_reactor_patch = max(
@@ -283,6 +355,7 @@ class DiffusionRefinerInputBuilder:
                     "gt_slice": gt_slice,
                     "actor_joint_ids": actor_joint_ids,
                     "mesh_feat": mesh_feat,
+                    "window_meta": window_meta,
                 }
             )
 
@@ -343,6 +416,17 @@ class DiffusionRefinerInputBuilder:
         cond_feat = torch.zeros(num_windows, max_len, cond_feat_dim, device=device)
         band_seq_out = torch.zeros(num_windows, max_len, device=device, dtype=torch.long)
         phase_seq_out = torch.zeros(num_windows, max_len, device=device, dtype=torch.long)
+        actor_betas = torch.zeros(num_windows, 10, device=device)
+        reactor_betas = torch.zeros_like(actor_betas)
+        actor_gender_id = torch.zeros(num_windows, device=device, dtype=torch.long)
+        reactor_gender_id = torch.zeros_like(actor_gender_id)
+        processed_frame_ix = torch.full((num_windows, max_len), -1, device=device, dtype=torch.long)
+        raw_frame_ix = torch.full((num_windows, max_len), -1, device=device, dtype=torch.long)
+        ground_offset_y_actor = torch.zeros(num_windows, device=device)
+        ground_offset_y_reactor = torch.zeros(num_windows, device=device)
+        pair_base_trans = torch.zeros(num_windows, 3, device=device)
+        loader_base_trans = torch.zeros_like(pair_base_trans)
+        body_model_type = []
 
         for idx, entry in enumerate(window_entries):
             item = entry["item"]
@@ -352,6 +436,7 @@ class DiffusionRefinerInputBuilder:
             gt_slice = entry["gt_slice"]
             actor_joint_ids = entry["actor_joint_ids"]
             mesh_feat = entry["mesh_feat"]
+            window_meta = entry["window_meta"]
 
             coarse_full[idx, :, :, :length] = coarse_slice
             gt_full[idx, :, :, :length] = gt_slice
@@ -386,6 +471,26 @@ class DiffusionRefinerInputBuilder:
             phase_seq = frame_labels["phase"][item["batch_index"], item["start_frame"] : item["end_frame"] + 1, side_idx]
             band_seq_out[idx, :length] = band_seq
             phase_seq_out[idx, :length] = phase_seq
+            if window_meta is not None:
+                actor_betas_t = torch.as_tensor(window_meta["actor_betas"], device=device, dtype=actor_betas.dtype).view(-1)
+                reactor_betas_t = torch.as_tensor(window_meta["reactor_betas"], device=device, dtype=reactor_betas.dtype).view(-1)
+                actor_gender_t = torch.as_tensor(window_meta["actor_gender_id"], device=device, dtype=torch.long).view(-1)
+                reactor_gender_t = torch.as_tensor(window_meta["reactor_gender_id"], device=device, dtype=torch.long).view(-1)
+                pf = torch.as_tensor(window_meta["processed_frame_ix"], device=device, dtype=torch.long).view(-1)
+                rf = torch.as_tensor(window_meta["raw_frame_ix"], device=device, dtype=torch.long).view(-1)
+                actor_betas[idx, : actor_betas_t.shape[0]] = actor_betas_t
+                reactor_betas[idx, : reactor_betas_t.shape[0]] = reactor_betas_t
+                actor_gender_id[idx] = actor_gender_t[0]
+                reactor_gender_id[idx] = reactor_gender_t[0]
+                processed_frame_ix[idx, : min(length, pf.shape[0])] = pf[:length]
+                raw_frame_ix[idx, : min(length, rf.shape[0])] = rf[:length]
+                ground_offset_y_actor[idx] = torch.as_tensor(window_meta["ground_offset_y_actor"], device=device, dtype=ground_offset_y_actor.dtype).view(-1)[0]
+                ground_offset_y_reactor[idx] = torch.as_tensor(window_meta["ground_offset_y_reactor"], device=device, dtype=ground_offset_y_reactor.dtype).view(-1)[0]
+                pair_base_trans[idx] = torch.as_tensor(window_meta["pair_base_trans"], device=device, dtype=pair_base_trans.dtype).view(-1, 3)[0]
+                loader_base_trans[idx] = torch.as_tensor(window_meta["loader_base_trans"], device=device, dtype=loader_base_trans.dtype).view(-1, 3)[0]
+                body_model_type.append(str(window_meta.get("body_model_type", "smplx")))
+            else:
+                body_model_type.append("smplx")
 
             band_oh = _one_hot(band_seq, 3)
             phase_oh = _one_hot(phase_seq, 4)
@@ -460,4 +565,18 @@ class DiffusionRefinerInputBuilder:
             "phase_seq": phase_seq_out,
             "joint_ids": joint_ids,
             "window_items": [entry["item"] for entry in window_entries],
+            "actor_betas": actor_betas,
+            "reactor_betas": reactor_betas,
+            "actor_gender_id": actor_gender_id,
+            "reactor_gender_id": reactor_gender_id,
+            "processed_frame_ix": processed_frame_ix,
+            "raw_frame_ix": raw_frame_ix,
+            "ground_offset_y_actor": ground_offset_y_actor,
+            "ground_offset_y_reactor": ground_offset_y_reactor,
+            "pair_base_trans": pair_base_trans,
+            "loader_base_trans": loader_base_trans,
+            "body_model_type": body_model_type,
+            "actor_shape_tokens": None,
+            "reactor_shape_tokens": None,
+            "relative_shape_tokens": None,
         }

@@ -128,7 +128,19 @@ class HandContactLabelBuilder:
         self.recent_window = int(recent_window)
         self.topk = int(topk)
 
-    def build(self, actor_motion, gt_reactor_motion, lengths=None, return_aux=False):
+    def build(
+        self,
+        actor_motion,
+        gt_reactor_motion,
+        lengths=None,
+        return_aux=False,
+        actor_betas=None,
+        reactor_betas=None,
+        actor_gender_id=None,
+        reactor_gender_id=None,
+        body_model_type=None,
+        preserve_pair_space=False,
+    ):
         """
         actor_motion/gt_reactor_motion: [B, J, 6, T]
         returns labels dict with:
@@ -137,8 +149,20 @@ class HandContactLabelBuilder:
             band: [B, T, 2]
             phase: [B, T, 2]
         """
-        actor_xyz = self.geometry.to_xyz(actor_motion)
-        reactor_xyz = self.geometry.to_xyz(gt_reactor_motion)
+        actor_xyz = self.geometry.to_xyz(
+            actor_motion,
+            betas=actor_betas,
+            gender_id=actor_gender_id,
+            body_model_type=body_model_type,
+            preserve_pair_space=preserve_pair_space,
+        )
+        reactor_xyz = self.geometry.to_xyz(
+            gt_reactor_motion,
+            betas=reactor_betas,
+            gender_id=reactor_gender_id,
+            body_model_type=body_model_type,
+            preserve_pair_space=preserve_pair_space,
+        )
 
         top1, topk_mean = _compute_hand_part_distances(
             actor_xyz, reactor_xyz, topk=self.topk

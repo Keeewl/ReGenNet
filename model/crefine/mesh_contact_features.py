@@ -1,8 +1,8 @@
 import torch
 
 from model.contact.contact_geometry import temporal_diff
+from model.crefine.restored_body_model import RestoredBodyModelForward
 from model.crefine.mesh_regions import REACTOR_PATCH_NAMES, get_mesh_region_provider
-from model.rotation2xyz import Rotation2xyz_x
 
 
 PATCH_TYPE_IDS = {
@@ -54,31 +54,31 @@ class MeshContactFeatureBuilder:
         self.density = density
         self.softmin_beta = float(softmin_beta)
         self.max_nontarget_vertices = int(max_nontarget_vertices)
-        self.rot2xyz = Rotation2xyz_x(device=device)
+        self.body_forward = RestoredBodyModelForward(
+            body_model=body_model,
+            pose_rep=pose_rep,
+            translation=translation,
+            glob=glob,
+            device=device,
+        )
         self._provider = get_mesh_region_provider(
             density=density, body_model=body_model, pose_rep=pose_rep
         )
 
     def _ensure_device(self, device):
-        if self.rot2xyz.device != device:
-            self.rot2xyz = Rotation2xyz_x(device=device)
+        self.body_forward.to(device)
 
-    def _to_vertices(self, motion):
+    def _to_vertices(self, motion, betas=None, gender_id=None, body_model_type=None):
         self._ensure_device(motion.device)
         num_frames = motion.shape[-1]
         mask = torch.ones(motion.shape[0], num_frames, device=motion.device, dtype=torch.bool)
-        return self.rot2xyz(
-            x=motion,
-            mask=mask,
-            pose_rep=self.pose_rep,
-            translation=self.translation,
-            glob=self.glob,
+        return self.body_forward.motion_to_xyz(
+            motion,
             jointstype="vertices",
-            vertstrans=True,
-            num_person=1,
-            betas=None,
-            beta=0,
-            glob_rot=None,
+            betas=betas,
+            gender_id=gender_id,
+            mask=mask,
+            body_model_type=body_model_type,
         )
 
     def _gather_patch(self, vertices, ids):
@@ -99,13 +99,29 @@ class MeshContactFeatureBuilder:
         _, idx = torch.topk(dist_mean, k=k, largest=False)
         return ids_t[idx].detach().cpu().tolist()
 
-    def build_window_features(self, actor_motion, reactor_motion, hand_side, target_part):
+    def build_window_features(self, actor_motion, reactor_motion, hand_side, target_part, metadata=None):
         """
         actor_motion/reactor_motion: [1, J, 6, T]
         returns dict with mesh tokens and relation features.
         """
-        actor_vertices = self._to_vertices(actor_motion)
-        reactor_vertices = self._to_vertices(reactor_motion)
+        actor_betas = None if metadata is None else metadata["actor_betas"]
+        reactor_betas = None if metadata is None else metadata["reactor_betas"]
+        actor_gender_id = None if metadata is None else metadata["actor_gender_id"]
+        reactor_gender_id = None if metadata is None else metadata["reactor_gender_id"]
+        body_model_type = None if metadata is None else metadata.get("body_model_type", self.body_model)
+
+        actor_vertices = self._to_vertices(
+            actor_motion,
+            betas=actor_betas,
+            gender_id=actor_gender_id,
+            body_model_type=body_model_type,
+        )
+        reactor_vertices = self._to_vertices(
+            reactor_motion,
+            betas=reactor_betas,
+            gender_id=reactor_gender_id,
+            body_model_type=body_model_type,
+        )
 
         reactor_patches = self._provider.reactor_hand_patch_ids(hand_side)
         actor_patches = self._provider.actor_target_patch_ids(target_part)

@@ -64,6 +64,9 @@ def main():
     parser.add_argument("--num_samples", default=-1, type=int)
     parser.add_argument("--device", default="cuda", type=str)
     args = parser.parse_args()
+    # TODO(crefine_v3): proposal features remain canonical for now. The blueprint
+    # cache keeps sample_indices and dataset_key aligned with the restored-stage2
+    # cache so proposal can be retrained on restored-shape features in a follow-up.
 
     device = torch.device(args.device if torch.cuda.is_available() else "cpu")
 
@@ -97,6 +100,7 @@ def main():
     near_windows_list = []
     lengths_list = []
     indices_list = []
+    dataset_key_list = []
 
     total = 0
     total_batches = len(loader)
@@ -135,6 +139,8 @@ def main():
             conf_list.append(active_prob[:keep].cpu().numpy())
             lengths_list.append(lengths[:keep].cpu().numpy())
             indices_list.append(sample_index[:keep].numpy())
+            if "dataset_key" in batch:
+                dataset_key_list.append(np.asarray(batch["dataset_key"][:keep], dtype=object))
 
             strict_windows_list.extend(strict_windows[:keep])
             near_windows_list.extend(near_windows[:keep])
@@ -154,6 +160,8 @@ def main():
         "near_windows": np.array(near_windows_list, dtype=object),
         "config_json": json.dumps(vars(args)).encode("utf-8"),
     }
+    if dataset_key_list:
+        output["dataset_key"] = np.concatenate(dataset_key_list, axis=0)
 
     _save_npz(args.output_path, output)
     print(f"Saved blueprint cache to {args.output_path} (samples={output['active'].shape[0]})")
