@@ -236,6 +236,7 @@ def main():
     lengths_list = []
     indices_list = []
     coarse_list = []
+    gt_list = []
 
     total = 0
     total_batches = len(loader)
@@ -252,6 +253,7 @@ def main():
 
             actor = batch["actor_motion"].to(device)
             coarse = batch["coarse_motion"].to(device)
+            gt = batch["gt_motion"].to(device)
             lengths = batch["lengths"].to(device)
             sample_index = batch["sample_index"].to("cpu")
 
@@ -357,8 +359,8 @@ def main():
             lengths_list.append(lengths[:keep].cpu().numpy())
             indices_list.append(sample_index[:keep].numpy())
             actor_list.append(actor[:keep].cpu().numpy())
-            if args.save_coarse:
-                coarse_list.append(coarse[:keep].cpu().numpy())
+            coarse_list.append(coarse[:keep].cpu().numpy())
+            gt_list.append(gt[:keep].cpu().numpy())
 
             total += keep
             pbar.set_postfix(samples=total)
@@ -369,12 +371,12 @@ def main():
 
     output = {
         "refined_reactor_motion": refined_motion,
+        "coarse_reactor_motion": np.concatenate(coarse_list, axis=0).astype(np.float32),
+        "gt_reactor_motion": np.concatenate(gt_list, axis=0).astype(np.float32),
         "lengths": lengths_out,
         "sample_indices": indices_out,
         "actor_motion": np.concatenate(actor_list, axis=0).astype(np.float32),
     }
-    if args.save_coarse:
-        output["coarse_reactor_motion"] = np.concatenate(coarse_list, axis=0).astype(np.float32)
     if args.save_config:
         output["refiner_config_json"] = json.dumps(refiner_config).encode("utf-8")
 

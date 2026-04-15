@@ -21,9 +21,14 @@ def _ensure_label_builder(label_builder, **kwargs):
     return HandContactLabelBuilder(**kwargs)
 
 
-def _to_vertices(rot2xyz, motion, pose_rep, body_model, translation=True, glob=True):
+def _to_vertices(rot2xyz, motion, pose_rep, body_model, lengths=None, translation=True, glob=True):
+    batch_size = motion.shape[0]
     num_frames = motion.shape[-1]
-    mask = torch.arange(num_frames, device=motion.device).view(1, -1) < num_frames
+    if lengths is None:
+        mask = torch.ones(batch_size, num_frames, device=motion.device, dtype=torch.bool)
+    else:
+        lengths = torch.as_tensor(lengths, device=motion.device, dtype=torch.long).view(-1)
+        mask = torch.arange(num_frames, device=motion.device).view(1, -1) < lengths.unsqueeze(1)
     return rot2xyz(
         x=motion,
         mask=mask,
@@ -67,8 +72,8 @@ def compute_region_hand_distance(
     valid = (band == BAND_IDS["contact"]) & (target_part > 0)
 
     rot2xyz = Rotation2xyz_x(device=actor_motion.device)
-    actor_vertices = _to_vertices(rot2xyz, actor_motion, pose_rep, body_model)
-    reactor_vertices = _to_vertices(rot2xyz, reactor_motion, pose_rep, body_model)
+    actor_vertices = _to_vertices(rot2xyz, actor_motion, pose_rep, body_model, lengths=lengths)
+    reactor_vertices = _to_vertices(rot2xyz, reactor_motion, pose_rep, body_model, lengths=lengths)
 
     provider = get_mesh_region_provider(density=density, body_model=body_model, pose_rep=pose_rep)
 
@@ -115,8 +120,8 @@ def compute_penetration_surrogate(
     valid = (band >= BAND_IDS["near"]) & (target_part > 0)
 
     rot2xyz = Rotation2xyz_x(device=actor_motion.device)
-    actor_vertices = _to_vertices(rot2xyz, actor_motion, pose_rep, body_model)
-    reactor_vertices = _to_vertices(rot2xyz, reactor_motion, pose_rep, body_model)
+    actor_vertices = _to_vertices(rot2xyz, actor_motion, pose_rep, body_model, lengths=lengths)
+    reactor_vertices = _to_vertices(rot2xyz, reactor_motion, pose_rep, body_model, lengths=lengths)
 
     provider = get_mesh_region_provider(density=density, body_model=body_model, pose_rep=pose_rep)
 
