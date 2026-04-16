@@ -99,6 +99,11 @@ class Feeder(Dataset):
         self._restoration_meta_path = kwargs.get("restoration_meta_path", "")
         self._interaction_order_path = kwargs.get("interaction_order_path", "")
         self._raw_motions_root_override = kwargs.get("raw_motions_root", "")
+        self._restoration_enabled = bool(
+            kwargs.get("enable_restoration_metadata", False)
+            or self._restoration_meta_path
+            or self._raw_motions_root_override
+        )
         self._default_downsample = 4 if self.dataname == "interx" else 1
         self._processed_fps = 30 if self.dataname == "interx" else 30
         self._raw_fps = self._processed_fps * self._default_downsample
@@ -106,12 +111,13 @@ class Feeder(Dataset):
         self._action_names = []
         if self.dataname == 'interx':
             self._action_names = _load_interx_action_names(self.data_path)
-            interaction_order_path = self._interaction_order_path or self._infer_interaction_order_path()
-            self._interaction_order = _load_interaction_order(interaction_order_path)
-            self._raw_motions_root = self._raw_motions_root_override or self._infer_raw_motions_root()
-            self._restoration_package, self._restoration_package_index = _load_restoration_package(
-                self._restoration_meta_path
-            )
+            if self._restoration_enabled:
+                interaction_order_path = self._interaction_order_path or self._infer_interaction_order_path()
+                self._interaction_order = _load_interaction_order(interaction_order_path)
+                self._raw_motions_root = self._raw_motions_root_override or self._infer_raw_motions_root()
+                self._restoration_package, self._restoration_package_index = _load_restoration_package(
+                    self._restoration_meta_path
+                )
 
         with h5py.File(self.data_path, 'r') as f:
             self.keys = list(f.keys())
@@ -473,7 +479,6 @@ class Feeder(Dataset):
 
         frame_ix = np.asarray(frame_ix, dtype=np.int64)
         inp, action = self.get_pose_data(data_index, frame_ix)
-        restoration = self._build_restoration_metadata(data_index, self.keys[data_index], frame_ix)
         output = {
             'inp': inp,
             'action': action,
@@ -486,7 +491,9 @@ class Feeder(Dataset):
             'sampling_step': int(self.sampling_step),
             'num_frames_param': int(self.num_frames),
         }
-        output.update(restoration)
+        if self._restoration_enabled:
+            restoration = self._build_restoration_metadata(data_index, self.keys[data_index], frame_ix)
+            output.update(restoration)
 
         if hasattr(self, '_actions') and hasattr(self, '_action_classes'):
             output['action_text'] = self.action_to_action_name(self.get_action(data_index))
