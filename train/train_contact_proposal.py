@@ -8,7 +8,9 @@ import torch
 from torch.utils.data import DataLoader
 
 from data.refine_dataset import RefineCacheDataset, refine_collate
+from model.contact.proposal_features import HandContactFeatureBuilder
 from model.contact.proposal_model import HandContactProposal
+from model.crefine.restored_space import SUPPORTED_BODY_MODEL_TYPE
 from train.contact_proposal_training_loop import ContactProposalTrainLoop
 from train.train_platforms import ClearmlPlatform, TensorboardPlatform, NoPlatform
 from utils.fixseed import fixseed
@@ -18,6 +20,10 @@ from utils.parser_util import contact_proposal_train_args
 def main():
     args = contact_proposal_train_args()
     fixseed(args.seed)
+    if str(args.body_model).lower() != SUPPORTED_BODY_MODEL_TYPE:
+        raise ValueError(
+            f"stage2 proposal training requires body_model={SUPPORTED_BODY_MODEL_TYPE}, got {args.body_model}."
+        )
 
     if args.cuda and torch.cuda.is_available():
         args.device_str = f"cuda:{args.device}"
@@ -43,28 +49,44 @@ def main():
         persistent_workers=args.num_workers > 0,
     )
 
-    hand_dim = 31
-    part_dim = 13
+    feature_builder = HandContactFeatureBuilder(
+        body_model=args.body_model,
+        pose_rep=args.pose_rep,
+        translation=True,
+        glob=True,
+        topk=args.topk,
+        sigma=args.sigma,
+        density=getattr(args, "proposal_density", "small"),
+        softmin_beta=getattr(args, "proposal_softmin_beta", 30.0),
+        device="cpu",
+    )
+    hand_dim = feature_builder.hand_dim
+    part_dim = feature_builder.part_dim
+    relation_dim = feature_builder.relation_dim
     model = HandContactProposal(
         hand_dim=hand_dim,
         part_dim=part_dim,
-        relation_dim=8,
+        relation_dim=relation_dim,
         hidden_dim=args.hidden_dim,
         num_temporal_blocks=args.num_temporal_blocks,
         dropout=args.dropout,
     )
     model.config = {
-        "stage2": "hcr_contact_proposal",
+        "stage2": "crefine_restored_shape_proposal",
         "hand_dim": hand_dim,
         "part_dim": part_dim,
-        "relation_dim": 8,
+        "relation_dim": relation_dim,
         "hidden_dim": args.hidden_dim,
         "num_temporal_blocks": args.num_temporal_blocks,
         "dropout": args.dropout,
         "topk": args.topk,
         "sigma": args.sigma,
+        "proposal_density": getattr(args, "proposal_density", "small"),
+        "proposal_softmin_beta": getattr(args, "proposal_softmin_beta", 30.0),
         "tau_contact": args.tau_contact,
         "tau_near": args.tau_near,
+        "space_definition": "restored_pair_space",
+        "body_model_type": SUPPORTED_BODY_MODEL_TYPE,
     }
 
     train_platform_type = eval(args.train_platform_type)

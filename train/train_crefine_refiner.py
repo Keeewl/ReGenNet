@@ -8,7 +8,8 @@ import torch
 import argparse
 from torch.utils.data import DataLoader
 
-from model.contact.contact_defs import default_refiner_joint_ids
+from model.contact.contact_defs import hand_centric_joint_ids
+from model.crefine.mesh_contact_features import MeshContactFeatureBuilder
 from model.crefine.crefine_inputs import (
     DiffusionRefinerCacheDataset,
     diffusion_refiner_collate,
@@ -75,15 +76,20 @@ def _parse_args():
     parser.add_argument("--near_contact_margin", default=0.03, type=float)
     parser.add_argument("--aux_alpha_min", default=0.05, type=float)
     parser.add_argument("--delta_clip", default=0.5, type=float)
+    parser.add_argument("--core_delta_clip", default=0.5, type=float)
+    parser.add_argument("--support_delta_clip", default=0.3, type=float)
+    parser.add_argument("--stabilize_delta_clip", default=0.15, type=float)
     parser.add_argument("--grad_clip", default=1.0, type=float)
     parser.add_argument("--blueprint_conf_min", default=0.3, type=float)
     parser.add_argument("--max_nontarget_vertices", default=256, type=int)
 
     parser.add_argument("--lambda_contact_strict", default=1.0, type=float)
     parser.add_argument("--lambda_penetration", default=0.5, type=float)
+    parser.add_argument("--lambda_target_penetration", default=0.25, type=float)
     parser.add_argument("--lambda_contact_near", default=0.1, type=float)
     parser.add_argument("--lambda_identity", default=0.02, type=float)
     parser.add_argument("--lambda_smooth", default=0.01, type=float)
+    parser.add_argument("--lambda_geom_head", default=0.25, type=float)
     parser.add_argument("--penetration_margin", default=0.005, type=float)
     parser.add_argument("--nontarget_margin", default=0.02, type=float)
     parser.add_argument("--penalize_target_penetration", action="store_true")
@@ -104,6 +110,14 @@ def main():
     if str(args.body_model).lower() != SUPPORTED_BODY_MODEL_TYPE:
         raise ValueError(
             f"stage2 crefine training requires body_model={SUPPORTED_BODY_MODEL_TYPE}, got {args.body_model}."
+        )
+    if not args.use_restored_shape:
+        raise ValueError(
+            "stage2 crefine training now requires --use_restored_shape so all stage2 modules stay in restored pair space."
+        )
+    if not args.use_shape_condition:
+        raise ValueError(
+            "stage2 crefine training now requires --use_shape_condition so restored-shape metadata is part of the main path."
         )
     if args.use_restored_shape and not args.use_shape_condition:
         raise ValueError(
@@ -134,7 +148,17 @@ def main():
         persistent_workers=args.num_workers > 0,
     )
 
-    joint_ids = default_refiner_joint_ids(include_buffer=args.include_buffer)
+    joint_ids = hand_centric_joint_ids(include_buffer=args.include_buffer)
+    mesh_builder = MeshContactFeatureBuilder(
+        body_model=args.body_model,
+        pose_rep=args.pose_rep,
+        translation=True,
+        glob=True,
+        density=args.density,
+        softmin_beta=args.softmin_beta,
+        max_nontarget_vertices=args.max_nontarget_vertices,
+        device="cpu",
+    )
     model = MeshConditionalDiffusionRefiner(
         joint_ids=joint_ids,
         hidden_dim=args.hidden_dim,
@@ -144,8 +168,10 @@ def main():
         dropout=args.dropout,
         cond_dim=18,
         actor_dim=6,
-        mesh_dim=6,
-        mesh_rel_dim=15,
+        mesh_dim=mesh_builder.mesh_token_dim,
+        mesh_rel_dim=mesh_builder.mesh_relation_dim,
+        geometry_dim=mesh_builder.geometry_state_dim,
+        target_summary_dim=mesh_builder.target_summary_dim,
         mesh_type_vocab=16,
         time_embed_dim=args.hidden_dim,
         use_spatial_attn=args.num_spatial_blocks > 0,
@@ -154,9 +180,14 @@ def main():
         use_shape_condition=args.use_shape_condition,
     )
     model.config = {
-        "stage2": "crefine_residual_diffusion_refiner",
+        "stage2": "crefine_hand_centric_geometry_first",
+        "stage2_mode": "hand_centric_geometry_first",
         "crefine_version": args.crefine_version,
         "joint_ids": joint_ids,
+        "mesh_dim": mesh_builder.mesh_token_dim,
+        "mesh_rel_dim": mesh_builder.mesh_relation_dim,
+        "geometry_dim": mesh_builder.geometry_state_dim,
+        "target_summary_dim": mesh_builder.target_summary_dim,
         "hidden_dim": args.hidden_dim,
         "num_temporal_blocks": args.num_temporal_blocks,
         "num_cross_blocks": args.num_cross_blocks,
@@ -170,6 +201,9 @@ def main():
         "density": args.density,
         "aux_alpha_min": args.aux_alpha_min,
         "delta_clip": args.delta_clip,
+        "core_delta_clip": args.core_delta_clip,
+        "support_delta_clip": args.support_delta_clip,
+        "stabilize_delta_clip": args.stabilize_delta_clip,
         "grad_clip": args.grad_clip,
         "alignment_only_steps": args.alignment_only_steps,
         "cleanup_ramp_steps": args.cleanup_ramp_steps,
@@ -185,9 +219,11 @@ def main():
         "gender_num_embeddings": args.gender_num_embeddings,
         "lambda_contact_strict": args.lambda_contact_strict,
         "lambda_penetration": args.lambda_penetration,
+        "lambda_target_penetration": args.lambda_target_penetration,
         "lambda_contact_near": args.lambda_contact_near,
         "lambda_identity": args.lambda_identity,
         "lambda_smooth": args.lambda_smooth,
+        "lambda_geom_head": args.lambda_geom_head,
         "lambda_contact_normal": args.lambda_contact_normal,
         "lambda_clearance": args.lambda_clearance,
         "lr": args.lr,

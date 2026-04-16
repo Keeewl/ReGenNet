@@ -15,15 +15,12 @@ from model.crefine.restored_space import (
 )
 
 
-def _masked_mse(diff, mask):
+def _masked_weighted_mse(diff, time_mask, joint_weight):
     if diff.numel() == 0:
         return diff.sum() * 0.0
-    mask = mask.float()
-    while mask.dim() < diff.dim():
-        mask = mask.unsqueeze(-1)
-    extra = diff[0, 0].numel() if diff.dim() > 2 else 1
-    denom = (mask.sum() * extra).clamp(min=1.0)
-    return (diff * diff * mask).sum() / denom
+    weight = time_mask.float().unsqueeze(-1).unsqueeze(-1) * joint_weight[:, None, :, None]
+    denom = weight.sum().clamp(min=1.0) * diff.shape[-1]
+    return (diff * diff * weight).sum() / denom
 
 
 def _masked_ratio(values, mask, threshold):
@@ -32,10 +29,26 @@ def _masked_ratio(values, mask, threshold):
     mask = mask.float()
     while mask.dim() < values.dim():
         mask = mask.unsqueeze(-1)
-    extra = values[0, 0].numel() if values.dim() > 2 else 1
-    denom = (mask.sum() * extra).clamp(min=1.0)
+    denom = mask.sum().clamp(min=1.0) * values.shape[-1]
     hit = (values >= threshold).float()
     return (hit * mask).sum() / denom
+
+
+def _role_saturation_ratio(values, time_mask, role_mask, threshold):
+    if values.numel() == 0 or not bool(role_mask.any()):
+        return values.sum() * 0.0
+    mask = time_mask.float().unsqueeze(-1) * role_mask.float().unsqueeze(1)
+    denom = mask.sum().clamp(min=1.0) * values.shape[-1]
+    hit = (values >= threshold).float()
+    return (hit * mask.unsqueeze(-1)).sum() / denom
+
+
+def _apply_jointwise_clip(x0_pred, role_id, core_clip, support_clip, stabilize_clip):
+    clip = torch.full_like(role_id.float(), float(stabilize_clip))
+    clip = torch.where(role_id == 1, torch.full_like(clip, float(support_clip)), clip)
+    clip = torch.where(role_id == 0, torch.full_like(clip, float(core_clip)), clip)
+    clip = clip[:, None, :, None]
+    return torch.maximum(torch.minimum(x0_pred, clip), -clip)
 
 
 class ContactDiffusionRefinerTrainLoop:
@@ -86,9 +99,11 @@ class ContactDiffusionRefinerTrainLoop:
             softmin_beta=args.softmin_beta,
             lambda_contact_strict=args.lambda_contact_strict,
             lambda_penetration=args.lambda_penetration,
+            lambda_target_penetration=args.lambda_target_penetration,
             lambda_contact_near=args.lambda_contact_near,
             lambda_identity=args.lambda_identity,
             lambda_smooth=args.lambda_smooth,
+            lambda_geom_head=args.lambda_geom_head,
             penetration_margin=args.penetration_margin,
             nontarget_margin=args.nontarget_margin,
             strict_contact_target=args.strict_contact_target,
@@ -195,7 +210,10 @@ class ContactDiffusionRefinerTrainLoop:
                 teacher_window_stats = None
                 if use_teacher:
                     strict_windows, near_windows, labels = self.builder.build_teacher_windows(
-                        actor, gt, lengths=lengths, restoration_meta=restoration_meta
+                        actor,
+                        gt,
+                        lengths=lengths,
+                        restoration_meta=restoration_meta,
                     )
                     frame_labels = labels
                     blueprint_conf = None
@@ -233,7 +251,6 @@ class ContactDiffusionRefinerTrainLoop:
                     strict_ratio=self.args.strict_near_ratio,
                     max_windows=self.args.max_windows_per_batch,
                 )
-
                 window_batch = self.builder.build_window_batch(
                     actor,
                     coarse,
@@ -262,22 +279,15 @@ class ContactDiffusionRefinerTrainLoop:
 
                 residual = window_batch["gt_local"] - window_batch["coarse_local"]
                 noise = torch.randn_like(residual)
-                t = torch.randint(
-                    0,
-                    self.diffusion.num_timesteps,
-                    (residual.shape[0],),
-                    device=self.device,
-                )
+                t = torch.randint(0, self.diffusion.num_timesteps, (residual.shape[0],), device=self.device)
                 x_t = self.diffusion.q_sample(residual, t, noise=noise)
 
-                alpha = torch.from_numpy(self.diffusion.sqrt_alphas_cumprod).to(
-                    device=self.device, dtype=residual.dtype
-                )[t]
+                alpha = torch.from_numpy(self.diffusion.sqrt_alphas_cumprod).to(device=self.device, dtype=residual.dtype)[t]
                 alpha_bar = alpha * alpha
                 aux_weight = alpha_bar.clamp(min=self.args.aux_alpha_min, max=1.0)
                 aux_weight_mean = aux_weight.mean()
 
-                pred_eps = self.model(
+                pred_out = self.model(
                     x_t,
                     t,
                     coarse_local=window_batch["coarse_local"],
@@ -288,23 +298,59 @@ class ContactDiffusionRefinerTrainLoop:
                     mesh_mask=window_batch["mesh_token_mask"],
                     cond_feat=window_batch["cond_feat"],
                     mesh_relation_feat=window_batch["mesh_relation_features"],
+                    geometry_state_feat=window_batch["geometry_state_feat"],
+                    target_geometry_summary=window_batch["target_geometry_summary"],
                     time_mask=window_batch["time_mask"],
                     actor_shape_tokens=window_batch.get("actor_shape_tokens"),
                     reactor_shape_tokens=window_batch.get("reactor_shape_tokens"),
                     relative_shape_tokens=window_batch.get("relative_shape_tokens"),
                     shape_mask=window_batch.get("shape_mask"),
+                    return_aux=True,
                 )
-
+                pred_eps = pred_out["pred_eps"]
                 pred_eps_absmax = pred_eps.abs().max()
-                loss_diff = _masked_mse(pred_eps - noise, window_batch["time_mask"])
+
+                loss_diff = _masked_weighted_mse(
+                    pred_eps - noise,
+                    window_batch["time_mask"],
+                    window_batch["diffusion_joint_weights"],
+                )
                 x0_pred_preclip = predict_xstart_from_eps(self.diffusion, x_t, t, pred_eps)
                 x0_preclip_absmax = x0_pred_preclip.abs().max()
+
+                core_clip = float(getattr(self.args, "core_delta_clip", self.args.delta_clip) or self.args.delta_clip)
+                support_clip = float(getattr(self.args, "support_delta_clip", self.args.delta_clip) or self.args.delta_clip)
+                stabilize_clip = float(getattr(self.args, "stabilize_delta_clip", self.args.delta_clip) or self.args.delta_clip)
+                x0_pred = _apply_jointwise_clip(
+                    x0_pred_preclip,
+                    window_batch["joint_role_id"],
+                    core_clip=core_clip,
+                    support_clip=support_clip,
+                    stabilize_clip=stabilize_clip,
+                )
                 clip_saturation_ratio = _masked_ratio(
                     x0_pred_preclip.abs(),
                     window_batch["time_mask"],
-                    threshold=max(float(self.args.delta_clip) - 1e-6, 0.0),
+                    threshold=max(float(max(core_clip, support_clip, stabilize_clip)) - 1e-6, 0.0),
                 )
-                x0_pred = x0_pred_preclip.clamp(-self.args.delta_clip, self.args.delta_clip)
+                clip_saturation_core = _role_saturation_ratio(
+                    x0_pred_preclip.abs(),
+                    window_batch["time_mask"],
+                    window_batch["core_joint_mask"],
+                    threshold=max(core_clip - 1e-6, 0.0),
+                )
+                clip_saturation_support = _role_saturation_ratio(
+                    x0_pred_preclip.abs(),
+                    window_batch["time_mask"],
+                    window_batch["support_joint_mask"],
+                    threshold=max(support_clip - 1e-6, 0.0),
+                )
+                clip_saturation_stabilize = _role_saturation_ratio(
+                    x0_pred_preclip.abs(),
+                    window_batch["time_mask"],
+                    window_batch["stabilize_joint_mask"],
+                    threshold=max(stabilize_clip - 1e-6, 0.0),
+                )
                 x0_pred = x0_pred.to(window_batch["coarse_full"].dtype)
                 x0_absmax = x0_pred.abs().max()
 
@@ -319,6 +365,7 @@ class ContactDiffusionRefinerTrainLoop:
                     window_batch["gt_full"],
                     window_batch["actor_full"],
                     window_batch,
+                    aux_predictions=pred_out,
                     aux_weight=aux_weight,
                     alignment_weight=alignment_weight,
                     cleanup_weight=cleanup_weight,
@@ -347,17 +394,30 @@ class ContactDiffusionRefinerTrainLoop:
                         "loss_total": total_loss,
                         "loss_diff": loss_diff,
                         "loss_contact_strict": loss_dict["loss_contact_strict"],
+                        "loss_contact_near": loss_dict["loss_contact_near"],
                         "loss_penetration": loss_dict["loss_penetration"],
                         "loss_clearance": loss_dict["loss_clearance"],
                         "loss_target_penetration": loss_dict["loss_target_penetration"],
-                        "loss_contact_near": loss_dict["loss_contact_near"],
                         "loss_identity": loss_dict["loss_identity"],
+                        "loss_identity_core": loss_dict["loss_identity_core"],
+                        "loss_identity_support": loss_dict["loss_identity_support"],
+                        "loss_identity_stabilize": loss_dict["loss_identity_stabilize"],
                         "loss_smooth": loss_dict["loss_smooth"],
+                        "loss_smooth_core": loss_dict["loss_smooth_core"],
+                        "loss_smooth_support": loss_dict["loss_smooth_support"],
+                        "loss_smooth_stabilize": loss_dict["loss_smooth_stabilize"],
+                        "loss_geom_head": loss_dict["loss_geom_head"],
+                        "loss_contact_head": loss_dict["loss_contact_head"],
+                        "loss_target_distance_head": loss_dict["loss_target_distance_head"],
+                        "loss_clearance_head": loss_dict["loss_clearance_head"],
                         "aux_weight_mean": aux_weight_mean,
                         "pred_eps_absmax": pred_eps_absmax,
                         "x0_preclip_absmax": x0_preclip_absmax,
                         "x0_absmax": x0_absmax,
                         "clip_saturation_ratio": clip_saturation_ratio,
+                        "clip_saturation_core": clip_saturation_core,
+                        "clip_saturation_support": clip_saturation_support,
+                        "clip_saturation_stabilize": clip_saturation_stabilize,
                         "grad_norm": grad_norm,
                         "nonfinite_loss": float(nonfinite_loss),
                         "nonfinite_grad": float(nonfinite_grad),
@@ -373,17 +433,13 @@ class ContactDiffusionRefinerTrainLoop:
                     }
                     if teacher_window_stats is not None:
                         log_items.update(teacher_window_stats)
-
                     if self.args.log_events:
                         patch_sizes = window_batch["actor_target_patch_mask"].sum(dim=-1).float()
                         log_items["avg_target_patch"] = patch_sizes.mean().item()
 
                     parts = []
                     for key, value in log_items.items():
-                        if torch.is_tensor(value):
-                            val = value.detach().item()
-                        else:
-                            val = float(value)
+                        val = value.detach().item() if torch.is_tensor(value) else float(value)
                         parts.append(f"{key}={val:.6f}")
                         self.train_platform.report_scalar(key, val, self.step, group_name="train")
                     self._log(f"step={self.step} " + " ".join(parts))

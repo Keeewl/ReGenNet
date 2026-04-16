@@ -65,10 +65,61 @@ PHASE_IDS = {
 
 BUFFER_JOINT_IDS = [18, 19]
 
+CORE_CONTACT_JOINT_IDS = {
+    "left": [WRIST_JOINT_IDS["left"]] + PART_JOINT_IDS["left_hand"],
+    "right": [WRIST_JOINT_IDS["right"]] + PART_JOINT_IDS["right_hand"],
+}
+
+# Hand-centric refinement remains local, but elbow/shoulder/upper-torso/root
+# can move slightly to support contact formation when hand-only edits are not enough.
+SUPPORT_CONTACT_JOINT_IDS = {
+    "left": [16, 18, 3, 6, 9, 55],
+    "right": [17, 19, 3, 6, 9, 55],
+}
+
+HAND_CENTRIC_SHARED_JOINT_IDS = [3, 6, 9, 55]
+
 
 def default_refiner_joint_ids(include_buffer=False):
-    joint_ids = [WRIST_JOINT_IDS["left"], WRIST_JOINT_IDS["right"]]
-    joint_ids += PART_JOINT_IDS["left_hand"] + PART_JOINT_IDS["right_hand"]
+    return hand_centric_joint_ids(include_buffer=include_buffer)
+
+
+def core_contact_joint_ids(side=None):
+    if side is None:
+        return {name: list(ids) for name, ids in CORE_CONTACT_JOINT_IDS.items()}
+    return list(CORE_CONTACT_JOINT_IDS[str(side)])
+
+
+def support_contact_joint_ids(side=None, include_buffer=False):
+    if side is None:
+        out = {name: list(ids) for name, ids in SUPPORT_CONTACT_JOINT_IDS.items()}
+        if include_buffer:
+            for name in out:
+                out[name] = sorted(set(out[name] + BUFFER_JOINT_IDS))
+        return out
+    ids = list(SUPPORT_CONTACT_JOINT_IDS[str(side)])
     if include_buffer:
-        joint_ids += BUFFER_JOINT_IDS
-    return joint_ids
+        ids = sorted(set(ids + BUFFER_JOINT_IDS))
+    return ids
+
+
+def hand_centric_joint_ids(include_buffer=False):
+    joint_ids = []
+    for side in HAND_SIDES:
+        joint_ids.extend(core_contact_joint_ids(side))
+        joint_ids.extend(support_contact_joint_ids(side, include_buffer=include_buffer))
+    return sorted(set(int(jid) for jid in joint_ids))
+
+
+def joint_scope_masks(joint_ids, side, include_buffer=False):
+    joint_ids = [int(jid) for jid in joint_ids]
+    core = set(core_contact_joint_ids(side))
+    support = set(support_contact_joint_ids(side, include_buffer=include_buffer)) - core
+    core_mask = [jid in core for jid in joint_ids]
+    support_mask = [jid in support for jid in joint_ids]
+    stabilize_mask = [not (c or s) for c, s in zip(core_mask, support_mask)]
+    return {
+        "core": core_mask,
+        "support": support_mask,
+        "stabilize": stabilize_mask,
+    }

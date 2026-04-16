@@ -10,6 +10,11 @@ from model.contact.proposal_labels import HandContactLabelBuilder
 from model.contact.proposal_loss import HandContactProposalLoss
 from model.contact.contact_geometry import build_time_mask
 from model.contact.proposal_events import parse_contact_events
+from model.crefine.restored_space import (
+    extract_restoration_metadata,
+    restore_motion_batch,
+    validate_restoration_metadata,
+)
 
 
 class ContactProposalTrainLoop:
@@ -29,6 +34,8 @@ class ContactProposalTrainLoop:
             glob=True,
             topk=args.topk,
             sigma=args.sigma,
+            density=getattr(args, "proposal_density", "small"),
+            softmin_beta=getattr(args, "proposal_softmin_beta", 30.0),
             device=self.device,
         )
         self.label_builder = HandContactLabelBuilder(
@@ -163,11 +170,27 @@ class ContactProposalTrainLoop:
                 coarse = batch["coarse_motion"]
                 gt = batch["gt_motion"]
                 lengths = batch["lengths"]
+                restoration_meta = extract_restoration_metadata(batch, device=self.device)
+                validate_restoration_metadata(restoration_meta, context="stage2 proposal restoration metadata")
 
                 hand_feat, part_feat, rel_feat = self.feature_builder.build(
-                    actor, coarse, lengths=lengths
+                    actor,
+                    coarse,
+                    lengths=lengths,
+                    restoration_meta=restoration_meta,
                 )
-                labels = self.label_builder.build(actor, gt, lengths=lengths)
+                actor_restored, gt_restored = restore_motion_batch(actor, gt, restoration_meta)
+                labels = self.label_builder.build(
+                    actor_restored,
+                    gt_restored,
+                    lengths=lengths,
+                    actor_betas=restoration_meta["actor_betas"],
+                    reactor_betas=restoration_meta["reactor_betas"],
+                    actor_gender_id=restoration_meta["actor_gender_id"],
+                    reactor_gender_id=restoration_meta["reactor_gender_id"],
+                    body_model_type=restoration_meta["body_model_type"],
+                    preserve_pair_space=True,
+                )
                 logits = self.model(hand_feat, part_feat, rel_feat)
                 loss, loss_dict = self.loss_fn(logits, labels, lengths=lengths)
 

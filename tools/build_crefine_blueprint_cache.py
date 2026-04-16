@@ -14,6 +14,12 @@ from data.refine_dataset import RefineCacheDataset, refine_collate
 from model.crefine.crefine_windows import DiffusionWindowBuilder, logits_to_frame_labels
 from model.contact.proposal_features import HandContactFeatureBuilder
 from model.contact.proposal_model import HandContactProposal
+from model.crefine.restored_space import (
+    RESTORED_PAIR_SPACE,
+    SUPPORTED_BODY_MODEL_TYPE,
+    extract_restoration_metadata,
+    validate_restoration_metadata,
+)
 
 
 def _build_proposal_model(checkpoint_path, device):
@@ -54,6 +60,8 @@ def main():
 
     parser.add_argument("--body_model", default="smplx", type=str)
     parser.add_argument("--pose_rep", default="rot6d", type=str)
+    parser.add_argument("--proposal_density", default="small", choices=["small", "medium"], type=str)
+    parser.add_argument("--proposal_softmin_beta", default=30.0, type=float)
     parser.add_argument("--window_size", default=12, type=int)
     parser.add_argument("--window_pad", default=2, type=int)
     parser.add_argument("--window_buffer", default=0, type=int)
@@ -65,9 +73,10 @@ def main():
     parser.add_argument("--num_samples", default=-1, type=int)
     parser.add_argument("--device", default="cuda", type=str)
     args = parser.parse_args()
-    # TODO(crefine_v3): proposal features remain canonical for now. The blueprint
-    # cache keeps sample_indices and dataset_key aligned with the restored-stage2
-    # cache so proposal can be retrained on restored-shape features in a follow-up.
+    if str(args.body_model).lower() != SUPPORTED_BODY_MODEL_TYPE:
+        raise ValueError(
+            f"stage2 blueprint building requires body_model={SUPPORTED_BODY_MODEL_TYPE}, got {args.body_model}."
+        )
 
     device = torch.device(args.device if torch.cuda.is_available() else "cpu")
 
@@ -88,6 +97,8 @@ def main():
         pose_rep=args.pose_rep,
         translation=True,
         glob=True,
+        density=args.proposal_density,
+        softmin_beta=args.proposal_softmin_beta,
         device=device,
     )
     window_builder = DiffusionWindowBuilder(window_size=args.window_size, pad=args.window_pad)
@@ -120,8 +131,15 @@ def main():
             coarse = batch["coarse_motion"].to(device)
             lengths = batch["lengths"].to(device)
             sample_index = batch["sample_index"].to("cpu")
+            restoration_meta = extract_restoration_metadata(batch, device=device)
+            validate_restoration_metadata(restoration_meta, context="stage2 blueprint restoration metadata")
 
-            hand_feat, part_feat, rel_feat = feature_builder.build(actor, coarse, lengths=lengths)
+            hand_feat, part_feat, rel_feat = feature_builder.build(
+                actor,
+                coarse,
+                lengths=lengths,
+                restoration_meta=restoration_meta,
+            )
             logits = proposal(hand_feat, part_feat, rel_feat)
             labels = logits_to_frame_labels(logits, active_threshold=args.active_threshold)
 
@@ -171,6 +189,8 @@ def main():
         "strict_windows": np.array(strict_windows_list, dtype=object),
         "near_windows": np.array(near_windows_list, dtype=object),
         "config_json": json.dumps(vars(args)).encode("utf-8"),
+        "space_definition": np.asarray(RESTORED_PAIR_SPACE),
+        "proposal_mode": np.asarray("fully_restored_shape"),
     }
     if dataset_key_list:
         output["dataset_key"] = np.concatenate(dataset_key_list, axis=0)

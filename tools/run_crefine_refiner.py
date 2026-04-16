@@ -11,9 +11,11 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 from data.refine_dataset import RefineCacheDataset, refine_collate
-from model.contact.contact_defs import default_refiner_joint_ids
+from model.contact.contact_defs import hand_centric_joint_ids
 from model.crefine.crefine_inputs import DiffusionRefinerInputBuilder
 from model.crefine.crefine_model import MeshConditionalDiffusionRefiner, create_spaced_diffusion
+from model.crefine.mesh_regions import get_mesh_region_provider
+from model.crefine.restored_body_model import RestoredBodyModelForward
 from model.crefine.restored_space import (
     OPTIONAL_CACHE_FIELDS,
     REQUIRED_CACHE_FIELDS,
@@ -23,8 +25,6 @@ from model.crefine.restored_space import (
     get_space_definition,
     validate_restoration_metadata,
 )
-from model.crefine.mesh_regions import get_mesh_region_provider
-from model.crefine.restored_body_model import RestoredBodyModelForward
 
 
 def _load_refiner_checkpoint(path, device):
@@ -39,8 +39,10 @@ def _load_refiner_checkpoint(path, device):
         dropout=float(cfg.get("dropout", 0.1)),
         cond_dim=18,
         actor_dim=6,
-        mesh_dim=6,
-        mesh_rel_dim=15,
+        mesh_dim=int(cfg.get("mesh_dim", 12)),
+        mesh_rel_dim=int(cfg.get("mesh_rel_dim", 22)),
+        geometry_dim=int(cfg.get("geometry_dim", 13)),
+        target_summary_dim=int(cfg.get("target_summary_dim", 10)),
         mesh_type_vocab=16,
         time_embed_dim=int(cfg.get("hidden_dim", 128)),
         use_spatial_attn=int(cfg.get("num_spatial_blocks", 1)) > 0,
@@ -58,7 +60,12 @@ def _require_shape_condition_checkpoint(cfg):
     if not bool(cfg.get("use_shape_condition", False)):
         raise ValueError(
             "Refiner checkpoint was loaded without use_shape_condition=True. "
-            "stage2 crefine_v3 inference requires restored-shape conditioning and will not silently fall back."
+            "stage2 inference requires restored-shape conditioning and will not silently fall back."
+        )
+    if not bool(cfg.get("use_restored_shape", False)):
+        raise ValueError(
+            "Refiner checkpoint was loaded without use_restored_shape=True. "
+            "stage2 inference requires restored pair-space training and will not silently fall back."
         )
 
 
@@ -69,6 +76,13 @@ def _validate_blueprint_alignment(blueprint, dataset, blueprint_path):
             f"Blueprint cache size mismatch for {blueprint_path}: expected {expected} samples, "
             f"got strict={len(blueprint['strict_windows'])}, near={len(blueprint['near_windows'])}."
         )
+    if "space_definition" in blueprint:
+        space_definition = get_space_definition(blueprint["space_definition"]).lower()
+        if space_definition != RESTORED_PAIR_SPACE:
+            raise ValueError(
+                f"Blueprint cache {blueprint_path} has space_definition='{space_definition}', "
+                f"expected '{RESTORED_PAIR_SPACE}'."
+            )
 
     dataset_indices = np.asarray(dataset.sample_indices).astype(np.int64)
     blueprint_indices = blueprint.get("sample_indices", None)
@@ -107,14 +121,33 @@ def _accumulate_windows(delta_sum, weight_sum, delta_full, window_items, joint_i
         length = end - start + 1
         center = (length - 1) / 2.0
         weights = 1.0 - (torch.abs(torch.arange(length, device=device) - center) / max(center, 1.0))
-        weights = weights.clamp(min=0.1)
-        weights = weights.view(1, 1, -1)
-
+        weights = weights.clamp(min=0.1).view(1, 1, -1)
         delta_slice = delta_full[idx, :, :, :length]
         delta_sum[b, :, :, start : end + 1] += delta_slice * weights
         weight_sum[b, joint_ids_t, start : end + 1] += weights.squeeze(0)
 
 
+def _accumulate_diag(diag_sum, diag_weight, values, window_items):
+    for idx, item in enumerate(window_items):
+        b = int(item["batch_index"])
+        start = int(item["start_frame"])
+        end = int(item["end_frame"])
+        if start > end:
+            continue
+        length = end - start + 1
+        center = (length - 1) / 2.0
+        weights = 1.0 - (torch.abs(torch.arange(length, device=values.device) - center) / max(center, 1.0))
+        weights = weights.clamp(min=0.1).view(-1, 1)
+        diag_sum[b, start : end + 1] += values[idx, :length] * weights
+        diag_weight[b, start : end + 1] += weights
+
+
+def _apply_jointwise_clip(x0_pred, role_id, core_clip, support_clip, stabilize_clip):
+    clip = torch.full_like(role_id.float(), float(stabilize_clip))
+    clip = torch.where(role_id == 1, torch.full_like(clip, float(support_clip)), clip)
+    clip = torch.where(role_id == 0, torch.full_like(clip, float(core_clip)), clip)
+    clip = clip[:, None, :, None]
+    return torch.maximum(torch.minimum(x0_pred, clip), -clip)
 
 
 def _softmin_distance(a_xyz, b_xyz, beta=30.0):
@@ -180,14 +213,14 @@ def _post_cleanup(
     for part in provider.actor_parts.values():
         for ids in part.values():
             actor_ids.extend(ids)
-
     if not hand_ids or not actor_ids:
         return delta_avg
 
     hand_ids_t = torch.as_tensor(sorted(set(hand_ids)), device=device, dtype=torch.long)
     actor_ids_t = torch.as_tensor(sorted(set(actor_ids)), device=device, dtype=torch.long)
-
     delta = delta_avg.clone()
+    joint_ids_t = torch.as_tensor(joint_ids, device=device, dtype=torch.long)
+    stabilize_strength = float(strength) * 1.5
     for b in range(refined.shape[0]):
         hand_xyz = refined_verts[b].index_select(0, hand_ids_t).permute(2, 0, 1)
         actor_xyz = actor_verts[b].index_select(0, actor_ids_t).permute(2, 0, 1)
@@ -195,10 +228,8 @@ def _post_cleanup(
         mask_close = dist < float(margin)
         if mask_close.any():
             scale = torch.ones_like(dist)
-            scale = torch.where(mask_close, 1.0 - float(strength), scale)
-            scale = scale.view(1, 1, -1)
-            joint_ids_t = torch.as_tensor(joint_ids, device=device, dtype=torch.long)
-            delta_sel = delta[b].index_select(0, joint_ids_t) * scale
+            scale = torch.where(mask_close, 1.0 - stabilize_strength, scale)
+            delta_sel = delta[b].index_select(0, joint_ids_t) * scale.view(1, 1, -1)
             delta[b].index_copy_(0, joint_ids_t, delta_sel)
     return delta
 
@@ -233,6 +264,9 @@ def main():
 
     parser.add_argument("--sampling_steps", default=50, type=int)
     parser.add_argument("--delta_clip", default=0.5, type=float)
+    parser.add_argument("--core_delta_clip", default=0.5, type=float)
+    parser.add_argument("--support_delta_clip", default=0.3, type=float)
+    parser.add_argument("--stabilize_delta_clip", default=0.15, type=float)
     parser.add_argument("--batch_size", default=8, type=int)
     parser.add_argument("--num_workers", default=2, type=int)
     parser.add_argument("--max_batches", default=-1, type=int)
@@ -248,10 +282,10 @@ def main():
     parser.add_argument("--density", default="medium", choices=["small", "medium"], type=str)
     parser.add_argument("--post_cleanup", action="store_true")
     parser.add_argument("--post_cleanup_strength", default=0.2, type=float)
+    parser.add_argument("--export_geometry_diagnostics", action="store_true")
 
     parser.add_argument("--device", default="cuda", type=str)
     parser.add_argument("--overwrite", action="store_true")
-    parser.add_argument("--save_coarse", action="store_true")
     parser.add_argument("--save_config", action="store_true")
     args = parser.parse_args()
 
@@ -263,7 +297,6 @@ def main():
         )
 
     device = torch.device(args.device if torch.cuda.is_available() else "cpu")
-
     dataset = RefineCacheDataset(args.cache_path)
     loader = DataLoader(
         dataset,
@@ -285,10 +318,12 @@ def main():
 
     refiner, refiner_config = _load_refiner_checkpoint(args.model_path, device=device)
     _require_shape_condition_checkpoint(refiner_config)
-    joint_ids = refiner_config.get("joint_ids")
-    if not joint_ids:
-        joint_ids = default_refiner_joint_ids(include_buffer=args.include_buffer)
+    if str(refiner_config.get("stage2_mode", "hand_centric_geometry_first")) != "hand_centric_geometry_first":
+        raise ValueError(
+            f"Refiner checkpoint {args.model_path} is not a hand_centric_geometry_first stage2 model."
+        )
 
+    joint_ids = refiner_config.get("joint_ids") or hand_centric_joint_ids(include_buffer=args.include_buffer)
     diffusion_steps = int(refiner_config.get("diffusion_steps", 1000))
     noise_schedule = refiner_config.get("noise_schedule", "cosine")
     sampling_diffusion = create_spaced_diffusion(
@@ -315,6 +350,7 @@ def main():
     indices_list = []
     coarse_list = []
     gt_list = []
+    geometry_diag_list = []
     meta_lists = {key: [] for key in REQUIRED_CACHE_FIELDS + OPTIONAL_CACHE_FIELDS}
 
     total = 0
@@ -323,7 +359,7 @@ def main():
         total_batches = min(total_batches, args.max_batches)
 
     with torch.no_grad():
-        pbar = tqdm(enumerate(loader), total=total_batches, desc="Run diffusion refiner")
+        pbar = tqdm(enumerate(loader), total=total_batches, desc="Run geometry-first refiner")
         for batch_idx, batch in pbar:
             if args.max_batches > 0 and batch_idx >= args.max_batches:
                 break
@@ -343,16 +379,8 @@ def main():
             strict_windows = strict_windows_all[batch_idx * args.batch_size : batch_idx * args.batch_size + actor.shape[0]]
             near_windows = near_windows_all[batch_idx * args.batch_size : batch_idx * args.batch_size + actor.shape[0]]
             if args.blueprint_window_buffer > 0:
-                strict_windows = builder.window_builder.expand_windows_batch(
-                    strict_windows,
-                    lengths,
-                    buffer_frames=args.blueprint_window_buffer,
-                )
-                near_windows = builder.window_builder.expand_windows_batch(
-                    near_windows,
-                    lengths,
-                    buffer_frames=args.blueprint_window_buffer,
-                )
+                strict_windows = builder.window_builder.expand_windows_batch(strict_windows, lengths, buffer_frames=args.blueprint_window_buffer)
+                near_windows = builder.window_builder.expand_windows_batch(near_windows, lengths, buffer_frames=args.blueprint_window_buffer)
             band = torch.from_numpy(blueprint_band[batch_idx * args.batch_size : batch_idx * args.batch_size + actor.shape[0]]).to(device)
             phase = torch.from_numpy(blueprint_phase[batch_idx * args.batch_size : batch_idx * args.batch_size + actor.shape[0]]).to(device)
             conf = None
@@ -373,10 +401,14 @@ def main():
 
             if not window_items:
                 refined = coarse_restored
+                geometry_diag = None
             else:
                 max_len = int(lengths.max().item())
                 delta_sum = torch.zeros(actor.shape[0], coarse.shape[1], coarse.shape[2], max_len, device=device)
                 weight_sum = torch.zeros(actor.shape[0], coarse.shape[1], max_len, device=device)
+                if args.export_geometry_diagnostics:
+                    geometry_diag_sum = torch.zeros(actor.shape[0], max_len, 3, device=device)
+                    geometry_diag_weight = torch.zeros(actor.shape[0], max_len, 1, device=device)
 
                 for start_idx in range(0, len(window_items), args.max_windows_per_batch):
                     chunk_items = window_items[start_idx : start_idx + args.max_windows_per_batch]
@@ -403,6 +435,7 @@ def main():
                     window_batch.update(shape_tokens)
                     if window_batch.get("shape_mask") is None:
                         raise RuntimeError("Shape-conditioned stage2 inference expected shape_mask, got None.")
+
                     model_kwargs = {
                         "coarse_local": window_batch["coarse_local"],
                         "actor_tokens": window_batch["actor_local_motion"],
@@ -412,6 +445,8 @@ def main():
                         "mesh_mask": window_batch["mesh_token_mask"],
                         "cond_feat": window_batch["cond_feat"],
                         "mesh_relation_feat": window_batch["mesh_relation_features"],
+                        "geometry_state_feat": window_batch["geometry_state_feat"],
+                        "target_geometry_summary": window_batch["target_geometry_summary"],
                         "time_mask": window_batch["time_mask"],
                         "actor_shape_tokens": window_batch.get("actor_shape_tokens"),
                         "reactor_shape_tokens": window_batch.get("reactor_shape_tokens"),
@@ -428,19 +463,35 @@ def main():
                         device=device,
                         progress=False,
                     )
-                    residual = residual.clamp(-args.delta_clip, args.delta_clip)
+                    residual = _apply_jointwise_clip(
+                        residual,
+                        window_batch["joint_role_id"],
+                        core_clip=args.core_delta_clip,
+                        support_clip=args.support_delta_clip,
+                        stabilize_clip=args.stabilize_delta_clip,
+                    )
 
                     joint_ids_t = torch.as_tensor(window_batch["joint_ids"], device=device, dtype=torch.long)
                     delta_full = torch.zeros_like(window_batch["coarse_full"])
                     delta_full.index_copy_(1, joint_ids_t, residual.permute(0, 2, 3, 1))
+                    _accumulate_windows(delta_sum, weight_sum, delta_full, window_batch["window_items"], window_batch["joint_ids"])
 
-                    _accumulate_windows(
-                        delta_sum,
-                        weight_sum,
-                        delta_full,
-                        window_batch["window_items"],
-                        window_batch["joint_ids"],
-                    )
+                    if args.export_geometry_diagnostics:
+                        aux = refiner(
+                            residual,
+                            torch.zeros(residual.shape[0], device=device, dtype=torch.long),
+                            **model_kwargs,
+                            return_aux=True,
+                        )
+                        diag = torch.cat(
+                            [
+                                torch.sigmoid(aux["contact_conf"]),
+                                aux["target_distance"].clamp(min=0.0),
+                                aux["clearance"].clamp(min=0.0),
+                            ],
+                            dim=-1,
+                        )
+                        _accumulate_diag(geometry_diag_sum, geometry_diag_weight, diag, window_batch["window_items"])
 
                 weight = weight_sum.clamp(min=1.0).unsqueeze(2)
                 delta_avg = delta_sum / weight
@@ -463,6 +514,9 @@ def main():
                         body_model_type="smplx",
                     )
                 refined = coarse_restored + delta_avg
+                geometry_diag = None
+                if args.export_geometry_diagnostics:
+                    geometry_diag = geometry_diag_sum / geometry_diag_weight.clamp(min=1.0)
 
             keep = refined.shape[0]
             if args.num_samples > 0 and total + keep > args.num_samples:
@@ -474,6 +528,8 @@ def main():
             actor_list.append(actor_restored[:keep].cpu().numpy())
             coarse_list.append(coarse_restored[:keep].cpu().numpy())
             gt_list.append(gt_restored[:keep].cpu().numpy())
+            if geometry_diag is not None:
+                geometry_diag_list.append(geometry_diag[:keep].cpu().numpy())
             for key in meta_lists.keys():
                 value = batch[key]
                 if torch.is_tensor(value):
@@ -487,20 +543,23 @@ def main():
             total += keep
             pbar.set_postfix(samples=total)
 
-    refined_motion = np.concatenate(refined_list, axis=0).astype(np.float32)
-    lengths_out = np.concatenate(lengths_list, axis=0).astype(np.int64)
-    indices_out = np.concatenate(indices_list, axis=0).astype(np.int64)
-
     output = {
         "space_definition": np.asarray(RESTORED_PAIR_SPACE),
-        "refined_reactor_motion": refined_motion,
+        "stage2_mode": np.asarray("hand_centric_geometry_first"),
+        "shape_condition_enabled": np.asarray(1, dtype=np.int64),
+        "refined_reactor_motion": np.concatenate(refined_list, axis=0).astype(np.float32),
         "coarse_reactor_motion": np.concatenate(coarse_list, axis=0).astype(np.float32),
         "gt_reactor_motion": np.concatenate(gt_list, axis=0).astype(np.float32),
-        "lengths": lengths_out,
-        "sample_indices": indices_out,
         "actor_motion": np.concatenate(actor_list, axis=0).astype(np.float32),
-        "shape_condition_enabled": np.asarray(int(refiner_config.get("use_shape_condition", False)), dtype=np.int64),
+        "lengths": np.concatenate(lengths_list, axis=0).astype(np.int64),
+        "sample_indices": np.concatenate(indices_list, axis=0).astype(np.int64),
     }
+    if geometry_diag_list:
+        output["geometry_diagnostics"] = np.concatenate(geometry_diag_list, axis=0).astype(np.float32)
+        output["geometry_diagnostic_fields"] = np.asarray(
+            ["contact_conf", "target_distance", "clearance"],
+            dtype=object,
+        )
     for key, chunks in meta_lists.items():
         if not chunks:
             continue
@@ -518,11 +577,6 @@ def main():
         _save_h5(args.output_path, output)
     else:
         _save_npz(args.output_path, output)
-
-    print(
-        f"Saved refined motion to {args.output_path} (samples={refined_motion.shape[0]}, "
-        f"space_definition={get_space_definition(output['space_definition'])})"
-    )
 
 
 if __name__ == "__main__":

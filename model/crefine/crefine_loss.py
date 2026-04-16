@@ -1,38 +1,38 @@
 import math
+
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
-from model.contact.contact_defs import (
-    BUFFER_JOINT_IDS,
-    HAND_JOINT_IDS,
-    PHASE_IDS,
-    TARGET_PARTS,
-    WRIST_JOINT_IDS,
-)
+from model.contact.contact_defs import PHASE_IDS, TARGET_PARTS
 from model.contact.contact_geometry import temporal_diff
+from model.crefine.mesh_regions import WINDOW_STATE_IDS, get_mesh_region_provider
 from model.crefine.restored_body_model import RestoredBodyModelForward
-from model.crefine.mesh_regions import get_mesh_region_provider, WINDOW_STATE_IDS
 
 
-def _masked_mse(diff, mask):
+def _expand_mask(mask, target_dim):
+    out = mask.float()
+    while out.dim() < target_dim:
+        out = out.unsqueeze(-1)
+    return out
+
+
+def _weighted_mse(diff, time_mask, joint_weight=None):
     if diff.numel() == 0:
         return diff.sum() * 0.0
-    mask = mask.float()
-    while mask.dim() < diff.dim():
-        mask = mask.unsqueeze(-1)
-    extra = diff[0, 0].numel() if diff.dim() > 2 else 1
-    denom = (mask.sum() * extra).clamp(min=1.0)
-    return (diff * diff * mask).sum() / denom
+    weight = _expand_mask(time_mask, diff.dim())
+    if joint_weight is not None:
+        weight = weight * joint_weight[:, None, :, None]
+    denom = weight.sum().clamp(min=1.0) * diff.shape[-1]
+    return (diff * diff * weight).sum() / denom
 
 
-def _masked_mean(loss, mask):
+def _weighted_mean(loss, weight):
     if loss.numel() == 0:
         return loss.sum() * 0.0
-    mask = mask.float()
-    while mask.dim() < loss.dim():
-        mask = mask.unsqueeze(-1)
-    denom = mask.sum().clamp(min=1.0)
-    return (loss * mask).sum() / denom
+    weight = _expand_mask(weight, loss.dim())
+    denom = weight.sum().clamp(min=1.0)
+    return (loss * weight).sum() / denom
 
 
 def _softmin_distance(a_xyz, b_xyz, beta=30.0):
@@ -55,22 +55,13 @@ def _build_phase_weight(phase_seq, weights):
     return weight
 
 
-def _joint_mask_from_side(joint_ids, side):
-    if side == 0:
-        target_ids = set([WRIST_JOINT_IDS["left"]] + HAND_JOINT_IDS["left"] + BUFFER_JOINT_IDS)
-    else:
-        target_ids = set([WRIST_JOINT_IDS["right"]] + HAND_JOINT_IDS["right"] + BUFFER_JOINT_IDS)
-    return torch.as_tensor([jid in target_ids for jid in joint_ids], dtype=torch.bool)
-
-
 class ContactDiffusionRefinerLoss(nn.Module):
     """
-    Loss for mesh-aware diffusion refiner.
+    Geometry-first refinement loss.
 
-    `loss_penetration` keeps the historical interface, but the default term is
-    primarily a non-target clearance / repulsion surrogate. When
-    `penalize_target_penetration=True`, an extra target-side penetration guard is
-    added and exposed separately as `loss_target_penetration`.
+    Layer A is the diffusion loss in the training loop.
+    Layer B here enforces hand-target contact, non-target clearance, target-side
+    penetration guarding, support-region stability, and auxiliary geometry heads.
     """
 
     def __init__(
@@ -84,10 +75,11 @@ class ContactDiffusionRefinerLoss(nn.Module):
         contact_weights=None,
         lambda_contact_strict=1.0,
         lambda_penetration=1.0,
+        lambda_target_penetration=0.25,
         lambda_contact_near=0.3,
         lambda_identity=0.1,
         lambda_smooth=0.1,
-        lambda_self_penetration=0.0,
+        lambda_geom_head=0.25,
         penetration_margin=0.005,
         nontarget_margin=0.02,
         strict_contact_target=0.008,
@@ -103,10 +95,11 @@ class ContactDiffusionRefinerLoss(nn.Module):
         self.softmin_beta = float(softmin_beta)
         self.lambda_contact_strict = float(lambda_contact_strict)
         self.lambda_penetration = float(lambda_penetration)
+        self.lambda_target_penetration = float(lambda_target_penetration)
         self.lambda_contact_near = float(lambda_contact_near)
         self.lambda_identity = float(lambda_identity)
         self.lambda_smooth = float(lambda_smooth)
-        self.lambda_self_penetration = float(lambda_self_penetration)
+        self.lambda_geom_head = float(lambda_geom_head)
         self.penetration_margin = float(penetration_margin)
         self.nontarget_margin = float(nontarget_margin)
         self.strict_contact_target = float(strict_contact_target)
@@ -121,9 +114,9 @@ class ContactDiffusionRefinerLoss(nn.Module):
         }
         self.phase_weights = {
             "idle": 0.0,
-            "approach": 0.4,
+            "approach": 0.35,
             "hold": 1.0,
-            "release": 0.4,
+            "release": 0.45,
         }
 
         self.mesh_provider = get_mesh_region_provider(density=density, body_model=body_model, pose_rep=pose_rep)
@@ -155,8 +148,7 @@ class ContactDiffusionRefinerLoss(nn.Module):
         if not ids:
             return None
         ids_t = torch.as_tensor(ids, device=vertices.device, dtype=torch.long)
-        patch = vertices.index_select(1, ids_t).permute(0, 3, 1, 2)
-        return patch.squeeze(0)
+        return vertices.index_select(1, ids_t).permute(0, 3, 1, 2).squeeze(0)
 
     def _contact_distance(self, refined_vertices, actor_vertices, hand_side, target_part):
         reactor_patches = self.mesh_provider.reactor_hand_patch_ids(hand_side)
@@ -169,11 +161,7 @@ class ContactDiffusionRefinerLoss(nn.Module):
         distances = {}
         for name, ids in reactor_patches.items():
             patch = self._patch_vertices(refined_vertices, ids)
-            if patch is None:
-                dist = refined_vertices.new_full((refined_vertices.shape[-1],), 1e6)
-            else:
-                dist = _softmin_distance(patch, target_patch, beta=self.softmin_beta)
-            distances[name] = dist
+            distances[name] = _softmin_distance(patch, target_patch, beta=self.softmin_beta) if patch is not None else refined_vertices.new_full((refined_vertices.shape[-1],), 1e6)
         return distances
 
     def _penetration_distance(self, refined_vertices, actor_vertices, hand_side, target_part):
@@ -191,16 +179,37 @@ class ContactDiffusionRefinerLoss(nn.Module):
                 target_dist = refined_vertices.new_full((refined_vertices.shape[-1],), 1e6)
                 nontarget_dist = refined_vertices.new_full((refined_vertices.shape[-1],), 1e6)
             else:
-                if target_patch is None:
-                    target_dist = refined_vertices.new_full((refined_vertices.shape[-1],), 1e6)
-                else:
-                    target_dist = _softmin_distance(patch, target_patch, beta=self.softmin_beta)
-                if nontarget_patch is None:
-                    nontarget_dist = refined_vertices.new_full((refined_vertices.shape[-1],), 1e6)
-                else:
-                    nontarget_dist = _softmin_distance(patch, nontarget_patch, beta=self.softmin_beta)
+                target_dist = _softmin_distance(patch, target_patch, beta=self.softmin_beta) if target_patch is not None else refined_vertices.new_full((refined_vertices.shape[-1],), 1e6)
+                nontarget_dist = _softmin_distance(patch, nontarget_patch, beta=self.softmin_beta) if nontarget_patch is not None else refined_vertices.new_full((refined_vertices.shape[-1],), 1e6)
             results[name] = (target_dist, nontarget_dist)
         return results
+
+    def _head_losses(self, aux_predictions, window_batch, head_weight):
+        if aux_predictions is None:
+            zero = window_batch["coarse_full"].sum() * 0.0
+            return zero, {"loss_contact_head": zero, "loss_target_distance_head": zero, "loss_clearance_head": zero}
+
+        pred_contact = aux_predictions["contact_conf"]
+        pred_target_distance = aux_predictions["target_distance"]
+        pred_clearance = aux_predictions["clearance"]
+
+        tgt_contact = window_batch["geometry_contact_conf_target"]
+        tgt_target_distance = window_batch["geometry_target_distance_target"]
+        tgt_clearance = window_batch["geometry_clearance_target"]
+
+        contact_loss = F.binary_cross_entropy_with_logits(pred_contact, tgt_contact, reduction="none")
+        target_distance_loss = F.smooth_l1_loss(pred_target_distance, tgt_target_distance, reduction="none")
+        clearance_loss = F.smooth_l1_loss(pred_clearance, tgt_clearance, reduction="none")
+
+        loss_contact = _weighted_mean(contact_loss, head_weight)
+        loss_target_distance = _weighted_mean(target_distance_loss, head_weight)
+        loss_clearance = _weighted_mean(clearance_loss, head_weight)
+        total = loss_contact + loss_target_distance + loss_clearance
+        return total, {
+            "loss_contact_head": loss_contact,
+            "loss_target_distance_head": loss_target_distance,
+            "loss_clearance_head": loss_clearance,
+        }
 
     def forward(
         self,
@@ -209,6 +218,7 @@ class ContactDiffusionRefinerLoss(nn.Module):
         gt_full,
         actor_full,
         window_batch,
+        aux_predictions=None,
         aux_weight=None,
         alignment_weight=1.0,
         cleanup_weight=1.0,
@@ -227,13 +237,16 @@ class ContactDiffusionRefinerLoss(nn.Module):
         coarse_local = coarse_full.index_select(1, joint_ids_t).permute(0, 3, 1, 2)
         delta_local = refined_local - coarse_local
 
-        identity_loss = 0.0
-        smooth_loss = 0.0
-        contact_strict = 0.0
-        contact_near = 0.0
-        clearance = 0.0
-        target_penetration = 0.0
-        self_pen = 0.0
+        identity_core = refined_local.sum() * 0.0
+        identity_support = refined_local.sum() * 0.0
+        identity_stabilize = refined_local.sum() * 0.0
+        smooth_core = refined_local.sum() * 0.0
+        smooth_support = refined_local.sum() * 0.0
+        smooth_stabilize = refined_local.sum() * 0.0
+        contact_strict = refined_local.sum() * 0.0
+        contact_near = refined_local.sum() * 0.0
+        clearance = refined_local.sum() * 0.0
+        target_penetration = refined_local.sum() * 0.0
 
         body_model_type = window_batch.get("body_model_type", None)
         refined_vertices = self._to_vertices(
@@ -259,12 +272,18 @@ class ContactDiffusionRefinerLoss(nn.Module):
             blueprint_confidence = blueprint_confidence.to(device=device, dtype=refined_local.dtype)
         blueprint_confidence = blueprint_confidence.clamp(min=self.blueprint_conf_min, max=1.0)
 
+        core_joint_mask = window_batch["core_joint_mask"].to(device)
+        support_joint_mask = window_batch["support_joint_mask"].to(device)
+        stabilize_joint_mask = window_batch["stabilize_joint_mask"].to(device)
+        identity_joint_weights = window_batch["identity_joint_weights"].to(device)
+        smooth_joint_weights = window_batch["smooth_joint_weights"].to(device)
+
         for i in range(refined_local.shape[0]):
-            side = int(hand_side_idx[i].item())
             target_id = int(target_part_id[i].item())
-            state_id = int(window_state_id[i].item())
             if target_id == 0:
                 continue
+            side = "left" if int(hand_side_idx[i].item()) == 0 else "right"
+            state_id = int(window_state_id[i].item())
             target_name = TARGET_PARTS[target_id]
 
             frame_mask = time_mask[i].float()
@@ -272,27 +291,42 @@ class ContactDiffusionRefinerLoss(nn.Module):
             conf = blueprint_confidence[i]
             aux_w = aux_weight[i]
             frame_weight = frame_mask * phase_weight * conf * aux_w
+            align_w = frame_weight * float(alignment_weight)
+            cleanup_w = frame_weight * float(cleanup_weight)
 
-            align_weight = frame_weight * float(alignment_weight)
-            clean_weight = frame_weight * float(cleanup_weight)
-
-            joint_mask = _joint_mask_from_side(joint_ids, side).to(device)
-            non_target_mask = ~joint_mask
-
-            if non_target_mask.any():
-                idx = torch.nonzero(non_target_mask, as_tuple=False).flatten()
-                identity_loss = identity_loss + _masked_mse(delta_local[i, :, idx, :], clean_weight)
-
-            if joint_mask.any():
-                idx = torch.nonzero(joint_mask, as_tuple=False).flatten()
-                smooth_loss = smooth_loss + _masked_mse(
-                    temporal_diff(delta_local[i, :, idx, :]),
-                    clean_weight,
+            if core_joint_mask[i].any():
+                idx = torch.nonzero(core_joint_mask[i], as_tuple=False).flatten()
+                identity_core = identity_core + _weighted_mse(delta_local[i : i + 1, :, idx, :], cleanup_w.view(1, -1))
+                smooth_core = smooth_core + _weighted_mse(
+                    temporal_diff(delta_local[i : i + 1, :, idx, :]),
+                    cleanup_w.view(1, -1),
+                )
+            if support_joint_mask[i].any():
+                idx = torch.nonzero(support_joint_mask[i], as_tuple=False).flatten()
+                identity_support = identity_support + _weighted_mse(
+                    delta_local[i : i + 1, :, idx, :],
+                    cleanup_w.view(1, -1),
+                )
+                smooth_support = smooth_support + _weighted_mse(
+                    temporal_diff(delta_local[i : i + 1, :, idx, :]),
+                    cleanup_w.view(1, -1),
+                )
+            if stabilize_joint_mask[i].any():
+                idx = torch.nonzero(stabilize_joint_mask[i], as_tuple=False).flatten()
+                identity_stabilize = identity_stabilize + _weighted_mse(
+                    delta_local[i : i + 1, :, idx, :],
+                    cleanup_w.view(1, -1),
+                )
+                smooth_stabilize = smooth_stabilize + _weighted_mse(
+                    temporal_diff(delta_local[i : i + 1, :, idx, :]),
+                    cleanup_w.view(1, -1),
                 )
 
             distances = self._contact_distance(
-                refined_vertices[i : i + 1], actor_vertices[i : i + 1],
-                "left" if side == 0 else "right", target_name
+                refined_vertices[i : i + 1],
+                actor_vertices[i : i + 1],
+                side,
+                target_name,
             )
             if distances is None:
                 continue
@@ -300,7 +334,6 @@ class ContactDiffusionRefinerLoss(nn.Module):
             fingertip = torch.stack([distances[f"fingertip_{k}"] for k in range(5)], dim=-1).mean(dim=-1)
             palm = distances.get("palm", fingertip)
             knuckle = distances.get("knuckle", fingertip)
-
             contact_dist = (
                 self.contact_weights["fingertip"] * fingertip
                 + self.contact_weights["palm"] * palm
@@ -310,49 +343,72 @@ class ContactDiffusionRefinerLoss(nn.Module):
 
             if state_id == WINDOW_STATE_IDS["strict"]:
                 target = contact_dist.new_full(contact_dist.shape, self.strict_contact_target)
-                strict_err = torch.nn.functional.smooth_l1_loss(contact_dist, target, reduction="none")
-                contact_strict = contact_strict + _masked_mean(strict_err, align_weight)
+                strict_err = F.smooth_l1_loss(contact_dist, target, reduction="none")
+                contact_strict = contact_strict + _weighted_mean(strict_err, align_w)
             else:
                 near_err = torch.relu(contact_dist - float(self.near_contact_margin))
-                contact_near = contact_near + _masked_mean(near_err, align_weight)
+                contact_near = contact_near + _weighted_mean(near_err, align_w)
 
             pen_dists = self._penetration_distance(
-                refined_vertices[i : i + 1], actor_vertices[i : i + 1],
-                "left" if side == 0 else "right", target_name
+                refined_vertices[i : i + 1],
+                actor_vertices[i : i + 1],
+                side,
+                target_name,
             )
             for _, (target_dist, nontarget_dist) in pen_dists.items():
-                clearance_term = torch.relu(self.nontarget_margin - nontarget_dist)
-                clearance = clearance + _masked_mean(clearance_term, clean_weight)
-                if self.penalize_target_penetration:
-                    target_term = torch.relu(self.penetration_margin - target_dist)
-                    target_penetration = target_penetration + _masked_mean(target_term, clean_weight)
+                clearance = clearance + _weighted_mean(torch.relu(self.nontarget_margin - nontarget_dist), cleanup_w)
+                target_penetration = target_penetration + _weighted_mean(
+                    torch.relu(self.penetration_margin - target_dist),
+                    cleanup_w,
+                )
 
         num_windows = max(refined_local.shape[0], 1)
-        identity_loss = identity_loss / num_windows
-        smooth_loss = smooth_loss / num_windows
+        identity_core = identity_core / num_windows
+        identity_support = identity_support / num_windows
+        identity_stabilize = identity_stabilize / num_windows
+        smooth_core = smooth_core / num_windows
+        smooth_support = smooth_support / num_windows
+        smooth_stabilize = smooth_stabilize / num_windows
         contact_strict = contact_strict / num_windows
         contact_near = contact_near / num_windows
         clearance = clearance / num_windows
         target_penetration = target_penetration / num_windows
-        penetration = clearance + target_penetration
-        self_pen = self_pen / num_windows
+
+        identity_loss = 0.25 * identity_core + 1.0 * identity_support + 1.5 * identity_stabilize
+        smooth_loss = 0.35 * smooth_core + 1.0 * smooth_support + 1.2 * smooth_stabilize
+
+        penetration_total = clearance
+        if self.penalize_target_penetration or self.lambda_target_penetration > 0.0:
+            penetration_total = penetration_total + target_penetration
+
+        head_weight = time_mask.float() * blueprint_confidence[:, None]
+        head_total, head_dict = self._head_losses(aux_predictions, window_batch, head_weight)
 
         total = (
             self.lambda_contact_strict * contact_strict
-            + self.lambda_penetration * penetration
             + self.lambda_contact_near * contact_near
+            + self.lambda_penetration * clearance
+            + self.lambda_target_penetration * target_penetration
             + self.lambda_identity * identity_loss
             + self.lambda_smooth * smooth_loss
-            + self.lambda_self_penetration * self_pen
+            + self.lambda_geom_head * head_total
         )
 
         return total, {
             "loss_contact_strict": contact_strict,
-            "loss_penetration": penetration,
+            "loss_contact_near": contact_near,
             "loss_clearance": clearance,
             "loss_target_penetration": target_penetration,
-            "loss_contact_near": contact_near,
+            "loss_penetration": penetration_total,
             "loss_identity": identity_loss,
+            "loss_identity_core": identity_core,
+            "loss_identity_support": identity_support,
+            "loss_identity_stabilize": identity_stabilize,
             "loss_smooth": smooth_loss,
+            "loss_smooth_core": smooth_core,
+            "loss_smooth_support": smooth_support,
+            "loss_smooth_stabilize": smooth_stabilize,
+            "loss_geom_head": head_total,
+            **head_dict,
             "loss_total": total,
         }

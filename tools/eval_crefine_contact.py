@@ -37,6 +37,37 @@ META_KEYS = {
     "body_model_type": "body_model_type",
 }
 
+FIELD_INFO = {
+    "hand_cd": {
+        "category": "local_contact_surrogate",
+        "description": "GT-conditioned hand contact distance on GT contact frames.",
+    },
+    "contact_ratio": {
+        "category": "local_contact_surrogate",
+        "description": "Fraction of frames classified as hand contact or near-contact by the evaluator.",
+    },
+    "avg_contact_duration": {
+        "category": "local_contact_surrogate",
+        "description": "Average duration of predicted contact segments.",
+    },
+    "contact_frequency": {
+        "category": "local_contact_surrogate",
+        "description": "Average number of contact segments per valid sequence.",
+    },
+    "region_hand_dist": {
+        "category": "mesh_distance_surrogate",
+        "description": "Softmin distance between hand mesh patches and GT target-region mesh patches.",
+    },
+    "penetration_rate": {
+        "category": "target_penetration_surrogate",
+        "description": "Fraction of near/contact frames whose hand-target mesh softmin distance violates the penetration margin.",
+    },
+    "penetration_depth": {
+        "category": "target_penetration_surrogate",
+        "description": "Average soft penetration depth under the configured target penetration margin.",
+    },
+}
+
 
 def _check_pack_space_definition(pack, context):
     value = pack.get("space_definition", None)
@@ -243,6 +274,8 @@ def _finalize_metrics(acc, include_debug=False):
         "region_hand_dist": region_hand_dist,
         "penetration_rate": penetration_rate,
         "penetration_depth": penetration_depth,
+        "target_penetration_surrogate_rate": penetration_rate,
+        "target_penetration_surrogate_depth": penetration_depth,
         "num_valid_sequences": int(acc["num_valid_sequences"]),
         "num_contact_segments": int(acc["num_contact_segments"]),
         "num_contact_frames": int(acc["num_contact_frames"]),
@@ -520,7 +553,14 @@ def main():
 
     if args.json_out:
         with open(args.json_out, "w") as f:
-            json.dump(results, f, indent=2)
+            json.dump(
+                {
+                    "results": results,
+                    "field_info": FIELD_INFO,
+                },
+                f,
+                indent=2,
+            )
     _write_csv(args.csv_out, results)
 
 

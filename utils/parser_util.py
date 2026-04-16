@@ -355,6 +355,10 @@ def add_contact_proposal_training_options(parser):
     group.add_argument("--pose_rep", default="rot6d", type=str, help="Pose representation.")
     group.add_argument("--topk", default=3, type=int, help="Top-k distances for relations.")
     group.add_argument("--sigma", default=0.1, type=float, help="Sigma for soft contact.")
+    group.add_argument("--proposal_density", default="small", choices=["small", "medium"], type=str,
+                       help="Sparse mesh density for restored-shape proposal features.")
+    group.add_argument("--proposal_softmin_beta", default=30.0, type=float,
+                       help="Softmin beta for restored-shape mesh proximity proposal features.")
     group.add_argument("--hidden_dim", default=64, type=int, help="Proposal hidden dim.")
     group.add_argument("--num_temporal_blocks", default=2, type=int,
                        help="Number of temporal blocks.")
@@ -466,4 +470,3 @@ def contact_refiner_train_args():
     add_base_options(parser)
     add_contact_refiner_training_options(parser)
     return parser.parse_args()
-

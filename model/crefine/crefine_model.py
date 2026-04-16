@@ -213,8 +213,10 @@ class MeshConditionalDiffusionRefiner(nn.Module):
         dropout=0.1,
         cond_dim=18,
         actor_dim=6,
-        mesh_dim=6,
-        mesh_rel_dim=15,
+        mesh_dim=12,
+        mesh_rel_dim=22,
+        geometry_dim=13,
+        target_summary_dim=10,
         mesh_type_vocab=16,
         time_embed_dim=128,
         use_spatial_attn=True,
@@ -233,6 +235,8 @@ class MeshConditionalDiffusionRefiner(nn.Module):
         self.coarse_encoder = FeatureEncoder(6, hidden_dim, dropout=dropout)
         self.cond_encoder = FeatureEncoder(cond_dim, hidden_dim, dropout=dropout)
         self.rel_encoder = FeatureEncoder(mesh_rel_dim, hidden_dim, dropout=dropout)
+        self.geometry_encoder = FeatureEncoder(geometry_dim, hidden_dim, dropout=dropout)
+        self.target_summary_encoder = FeatureEncoder(target_summary_dim, hidden_dim, dropout=dropout)
 
         self.actor_encoder = FeatureEncoder(actor_dim, hidden_dim, dropout=dropout)
         self.mesh_encoder = FeatureEncoder(mesh_dim, hidden_dim, dropout=dropout)
@@ -274,6 +278,9 @@ class MeshConditionalDiffusionRefiner(nn.Module):
         )
 
         self.out_head = nn.Linear(hidden_dim, 6)
+        self.contact_conf_head = nn.Linear(hidden_dim, 1)
+        self.target_distance_head = nn.Linear(hidden_dim, 1)
+        self.clearance_head = nn.Linear(hidden_dim, 1)
 
     def forward(
         self,
@@ -287,11 +294,14 @@ class MeshConditionalDiffusionRefiner(nn.Module):
         mesh_mask=None,
         cond_feat=None,
         mesh_relation_feat=None,
+        geometry_state_feat=None,
+        target_geometry_summary=None,
         time_mask=None,
         actor_shape_tokens=None,
         reactor_shape_tokens=None,
         relative_shape_tokens=None,
         shape_mask=None,
+        return_aux=False,
     ):
         if x_t.dim() != 4:
             raise ValueError("x_t must be [B,T,J,6]")
@@ -303,6 +313,10 @@ class MeshConditionalDiffusionRefiner(nn.Module):
             h = h + self.cond_encoder(cond_feat).unsqueeze(2)
         if mesh_relation_feat is not None:
             h = h + self.rel_encoder(mesh_relation_feat).unsqueeze(2)
+        if geometry_state_feat is not None:
+            h = h + self.geometry_encoder(geometry_state_feat).unsqueeze(2)
+        if target_geometry_summary is not None:
+            h = h + self.target_summary_encoder(target_geometry_summary).unsqueeze(2)
 
         time_emb = timestep_embedding(timesteps, self.time_embed_dim)
         time_emb = self.time_mlp(time_emb).view(x_t.shape[0], 1, 1, self.hidden_dim)
@@ -348,7 +362,16 @@ class MeshConditionalDiffusionRefiner(nn.Module):
             for block in self.spatial_blocks:
                 h = block(h)
 
-        return self.out_head(h)
+        pred_eps = self.out_head(h)
+        if not return_aux:
+            return pred_eps
+        geom_token = h.mean(dim=2)
+        return {
+            "pred_eps": pred_eps,
+            "contact_conf": self.contact_conf_head(geom_token),
+            "target_distance": self.target_distance_head(geom_token),
+            "clearance": self.clearance_head(geom_token),
+        }
 
     def encode_shape_tokens(self, actor_betas, reactor_betas, actor_gender_id, reactor_gender_id):
         if not self.use_shape_condition:
