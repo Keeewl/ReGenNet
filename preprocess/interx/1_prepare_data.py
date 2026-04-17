@@ -12,7 +12,7 @@ from ipdb import set_trace
 
 SRC = '../datasets/interx/motions'
 DEST_H5 = './regen/inter-x.h5'
-neutral_bm_path = '../visualize/smplx_viewer_tool/body_models/smplx/SMPLX_NEUTRAL.npz'
+neutral_bm_path = '../body_models/smplx/SMPLX_NEUTRAL.npz'
 
 comp_device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 from human_body_prior.body_model.body_model import BodyModel

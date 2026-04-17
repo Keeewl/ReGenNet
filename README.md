@@ -140,7 +140,20 @@ python -m eval.easy_table PATH/TO/evaluation_results_XXXX_full.yaml
     python -m sample.cgenerate --model_path PATH/TO/model_XXXX.pt --action_file assets/action_names_chi3d.txt --num_repetitions 10 --dataset chi3d --body_model smplx --num_person 2 --pose_rep rot6d --data_path PATH/TO/chi3d_smplx_test.h5 --output_dir XXX
     ```
 
-2. Render the results
+2. Primary visualization workflow
+
+    ReGenNet now ships a migrated Inter-X-based visualization stack under `visualize/viewer/` and `visualize/converters/`.
+    It supports:
+
+    - raw GT visualization,
+    - processed Inter-X h5 visualization,
+    - model output visualization,
+    - `canonical / restored / restored_shape_height` modes,
+    - actor/reactor metadata and split index lookup.
+
+    See `visualize/readme/dataset.md` and `visualize/readme/gen.md` for the visualization commands.
+
+3. Legacy mp4 rendering
 
     Install additional dependencies
     ```
@@ -150,7 +163,7 @@ python -m eval.easy_table PATH/TO/evaluation_results_XXXX_full.yaml
     ```
 
     ```
-    python -m render.crendermotion --data_path PATH/TO/results.npy --num_person 2 --setting cmdm --body_model smplx
+    python -m visualize.legacy.render.crendermotion --data_path PATH/TO/results.npy --num_person 2 --setting cmdm --body_model smplx
     ```
 
 ## TODO
