@@ -70,7 +70,18 @@ def main():
         action_conditioned = False
     else:
         action_conditioned = True
-    print("Setting:", args.setting, "| Dataset:", args.dataset, "| Arch:", arch_mode, "| Action conditioned:", action_conditioned)
+    print(
+        "Setting:",
+        args.setting,
+        "| Baseline:",
+        getattr(args, "baseline_family", "regennet"),
+        "| Dataset:",
+        args.dataset,
+        "| Arch:",
+        arch_mode,
+        "| Action conditioned:",
+        action_conditioned,
+    )
     data = get_dataset_loader(name=args.dataset, batch_size=args.batch_size, num_frames=args.num_frames, 
                               num_person=args.num_person, data_path = args.data_path, pose_rep = args.pose_rep, body_model=args.body_model, setting=args.setting, ar_shuffle=args.shuffle,
                               shard=MPI.COMM_WORLD.Get_rank(), num_shards=MPI.COMM_WORLD.Get_size())

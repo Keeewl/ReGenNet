@@ -103,6 +103,16 @@ def create_gaussian_diffusion(args):
     if not timestep_respacing:
         timestep_respacing = [steps]
 
+    lambda_orient = args.lambda_orient
+    lambda_body = args.lambda_body
+    lambda_transl = args.lambda_transl
+    if getattr(args, 'baseline_family', 'regennet') == 'mdm':
+        # Paper-style MDM baselines should not use ReGenNet explicit interaction
+        # losses; keep the conditional shell and denoiser path unchanged.
+        lambda_orient = 0.0
+        lambda_body = 0.0
+        lambda_transl = 0.0
+
     return SpacedDiffusion(
         use_timesteps=space_timesteps(steps, timestep_respacing),
         betas=betas,
@@ -123,9 +133,9 @@ def create_gaussian_diffusion(args):
         lambda_vel=args.lambda_vel,
         lambda_rcxyz=args.lambda_rcxyz,
         lambda_fc=args.lambda_fc,
-        lambda_orient=args.lambda_orient,
-        lambda_body=args.lambda_body,
-        lambda_transl=args.lambda_transl,
+        lambda_orient=lambda_orient,
+        lambda_body=lambda_body,
+        lambda_transl=lambda_transl,
         data_rep=args.pose_rep,
         num_person=args.num_person,
         body_model=args.body_model,

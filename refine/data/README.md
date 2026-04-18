@@ -11,6 +11,13 @@ What lives here:
 - `restored_space.py`: local restored-pair-space helpers copied/refactored from the archived Stage2 logic.
 - `cache_dataset.py` and `collate.py`: minimal Stage2-lite read path for the new pack.
 
+Current status:
+
+- The current build chain has already produced a normal baseline pack at `refine/dataset/train/reaction_data.npz`.
+- That build is treated as the current "known good" Stage2-lite data-entry result.
+- No restoration warning was observed in that successful build path, so the present `build_reaction_data.py` logic is intentionally left unchanged for now.
+- If restored-space handling needs to become a stricter hard requirement later, that cleanup should be done in one dedicated follow-up pass.
+
 Isolation rule:
 
 - New `refine/` code may reference archived `stage2_old` for design, but it must not runtime import archived Stage2 modules.

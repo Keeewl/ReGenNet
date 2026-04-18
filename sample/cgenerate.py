@@ -435,6 +435,7 @@ def load_dataset(args, max_frames, n_frames, num_person, data_path, pose_rep):
                               num_person=num_person,
                               data_path=data_path,
                               pose_rep=pose_rep,
+                              setting=args.setting,
                               split='test',
                               hml_mode='text_only')
     data.fixed_length = n_frames

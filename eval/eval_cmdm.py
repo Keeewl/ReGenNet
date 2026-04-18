@@ -68,7 +68,7 @@ def main():
         raise NotImplementedError("This dataset is not supported.")
     data_path = args.data_path
     data_loader = get_dataset_loader(name=args.dataset, num_frames=num_frames, batch_size=args.batch_size, num_person=args.num_person, data_path=data_path, pose_rep=args.pose_rep,
-                                    body_model='smplx', setting='cmdm')
+                                    body_model='smplx', setting=args.setting)
 
     print("creating model and diffusion...")
     model, diffusion = create_model_and_diffusion(args, data_loader)
@@ -76,7 +76,7 @@ def main():
     print(f"Loading checkpoints from [{args.model_path}]...")
     state_dict = torch.load(args.model_path, map_location='cpu')
     load_model_wo_clip(model, state_dict)
-    eval_results = evaluate(args, model, diffusion, data_loader.dataset, args.rec_model_path, setting='cmdm', acc_only=acc_only, auto_regressive=args.auto_regressive)
+    eval_results = evaluate(args, model, diffusion, data_loader.dataset, args.rec_model_path, setting=args.setting, acc_only=acc_only, auto_regressive=args.auto_regressive)
 
     fid_to_print = {k : sum([float(vv) for vv in v])/len(v) for k, v in eval_results['feats'].items() if 'fid' in k and 'gen' in k}
     print(fid_to_print)

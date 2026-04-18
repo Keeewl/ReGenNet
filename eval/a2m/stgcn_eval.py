@@ -139,11 +139,11 @@ def evaluate_cd_gt(gt_loader, tau_contact=0.1):
 
 
 class NewDataloader:
-    def __init__(self, mode, model, diffusion, dataiterator, device, dataset, num_samples, num_person, body_model, setting, reaction_mode="offline", online_strategy="sliding_window", window_size=30, window_stride=10, window_emit="stride", window_pad_mode="edge", window_overlap_handling="latest", auto_regressive=False):
+    def __init__(self, mode, model, diffusion, dataiterator, device, dataset, num_samples, num_person, body_model, setting, reaction_mode="offline", online_strategy="sliding_window", window_size=30, window_stride=10, window_emit="stride", window_pad_mode="edge", window_overlap_handling="latest", auto_regressive=False, use_ddim=False):
         assert mode in ["gen", "gt"]
 
         self.batches = []
-        sample_fn = diffusion.p_sample_loop
+        sample_fn = diffusion.ddim_sample_loop if use_ddim else diffusion.p_sample_loop
         model_window_size = None
         if getattr(model, 'arch', None) == 'mlp':
             try:
@@ -174,7 +174,7 @@ class NewDataloader:
                             sample_fn=sample_fn,
                             model_window_size=model_window_size,
                         )
-                        if setting == 'cmdm':
+                        if setting == 'cmdm' or 'cmotion' in model_kwargs['y']:
                             batch['output'] = torch.cat((model_kwargs['y']['cmotion'], sample), axis=2)
                         else:
                             batch['output'] = sample
@@ -182,7 +182,7 @@ class NewDataloader:
                         cmotion_bak = model_kwargs['y']['cmotion']
                         B, V, C, T = cmotion_bak.shape
                         cmotion = torch.zeros_like(model_kwargs['y']['cmotion']).to(device)
-                        if setting == 'cmdm':
+                        if setting == 'cmdm' or 'cmotion' in model_kwargs['y']:
                             output = torch.zeros((B, V, C*2, T)).to(device)
                         else:
                             output = torch.zeros((B, V, C, T)).to(device)
@@ -190,7 +190,7 @@ class NewDataloader:
                             cmotion[:,:,:,frame_idx] = cmotion_bak[:,:,:,frame_idx]
                             model_kwargs['y']['cmotion'] = cmotion
                             sample = sample_fn(model, motions.shape, clip_denoised=False, model_kwargs=model_kwargs)
-                            if setting == 'cmdm':
+                            if setting == 'cmdm' or 'cmotion' in model_kwargs['y']:
                                 tmp = torch.cat((model_kwargs['y']['cmotion'], sample), axis=2)
                             else:
                                 tmp = sample
@@ -198,7 +198,7 @@ class NewDataloader:
                         batch['output'] = output
                     else:
                         sample = sample_fn(model, motions.shape, clip_denoised=False, model_kwargs=model_kwargs)
-                        if setting == 'cmdm':
+                        if setting == 'cmdm' or 'cmotion' in model_kwargs['y']:
                             batch['output'] = torch.cat((model_kwargs['y']['cmotion'], sample), axis=2)
                         else:
                             batch['output'] = sample
@@ -311,7 +311,7 @@ def evaluate(args, model, diffusion, data, rec_model_path, setting, acc_only, au
                                             dataset=args.dataset, num_samples=args.num_samples, num_person=2, body_model=args.body_model, setting=setting,
                                             reaction_mode=args.reaction_mode, online_strategy=args.online_strategy, window_size=args.window_size, window_stride=args.window_stride,
                                             window_emit=args.window_emit, window_pad_mode=args.window_pad_mode, window_overlap_handling=args.window_overlap_handling,
-                                            auto_regressive=auto_regressive)
+                                            auto_regressive=auto_regressive, use_ddim=args.use_ddim)
         gtLoaders = {key: new_data_loader(mode="gt", dataiterator=dataiterator[key][0])
                      for key in ["train", "test"]}
 
