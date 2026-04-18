@@ -45,6 +45,8 @@ python3 refine/data/build_reaction_data.py \
   --num_person 2 \
   --latent_dim 512 \
   --layers 8 \
+  --use_ddim \
+  --timestep_respacing ddim5 \
   --enable_restoration_metadata true \
   --restoration_meta_path "${RESTORATION_META_PATH}" \
   --interaction_order_path "${INTERACTION_ORDER_PATH}"
