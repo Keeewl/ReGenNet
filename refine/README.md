@@ -13,3 +13,5 @@ Current state:
 
 - This directory is only a scaffold.
 - No new Stage2-lite model, loss, training loop, or inference logic is implemented here yet.
+- `refine/data/` now contains the new independent `reaction_data` bridge package for Stage1 -> Stage2-lite.
+- `refine/commands/` contains the current runnable Stage2-lite data-entry commands, with InterX as the preferred dataset path.
