@@ -14,18 +14,19 @@ set -euo pipefail
 #   INTERACTION_ORDER_PATH=/path/to/interx/annots/interaction_order.pkl \
 #   bash refine/commands/02_build_reaction_data_interx_meta_package.sh
 
-MODEL_PATH="${MODEL_PATH:-save/your_stage1/model000200000.pt}"
+MODEL_PATH="${MODEL_PATH:-save/cnet_v5/interx_smplx_online_exp1/model000200000.pt}"
 DATA_PATH="${DATA_PATH:-dataset/interx/regen/train.h5}"
 SPLIT="${SPLIT:-train}"
-OUTPUT_PATH="${OUTPUT_PATH:-tmp/refine/interx/${SPLIT}/reaction_data.npz}"
+OUTPUT_PATH="${OUTPUT_PATH:-refine/dataset/${SPLIT}/reaction_data.npz}"
 DEVICE="${DEVICE:-cuda}"
-BATCH_SIZE="${BATCH_SIZE:-4}"
+BATCH_SIZE="${BATCH_SIZE:-128}"
 NUM_SAMPLES="${NUM_SAMPLES:--1}"
 SEED="${SEED:-10}"
 
-RESTORATION_META_PATH="${RESTORATION_META_PATH:?Set RESTORATION_META_PATH to the exported restoration package}"
-INTERACTION_ORDER_PATH="${INTERACTION_ORDER_PATH:-}"
+RESTORATION_META_PATH="${RESTORATION_META_PATH:-dataset/interx/cache/interx_restoration_meta.npz}"
+INTERACTION_ORDER_PATH="${INTERACTION_ORDER_PATH:-dataset/interx/annots/interaction_order.pkl}"
 
+export CUDA_VISIBLE_DEVICES=7
 python3 refine/data/build_reaction_data.py \
   --model_path "${MODEL_PATH}" \
   --output_path "${OUTPUT_PATH}" \
