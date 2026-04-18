@@ -9,7 +9,7 @@ import numpy as np
 
 ACTOR_COLOR = (0.10, 0.47, 0.78, 1.0)
 REACTOR_COLOR = (0.88, 0.30, 0.20, 1.0)
-TIME_GRADIENT_LIGHTEST_MIX = 0.65
+TIME_GRADIENT_LIGHTEST_MIX = 0.20
 
 
 def _meta_value(params: dict, key: str, default=None):
