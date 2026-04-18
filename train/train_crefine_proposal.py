@@ -1,4 +1,9 @@
-from train.train_contact_proposal import main
+import os
+import sys
+
+sys.path.append(os.path.dirname(os.path.dirname(__file__)))
+
+from stage2_old.crefine.train.train_crefine_proposal import main
 
 
 if __name__ == "__main__":

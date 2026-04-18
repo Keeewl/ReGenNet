@@ -1,4 +1,4 @@
-from model.contact.contact_defs import (
+from stage2_old.common.geometry.contact_defs import (
     HAND_SIDES,
     PART_JOINT_IDS,
     WRIST_JOINT_IDS,
@@ -13,14 +13,14 @@ from model.contact.contact_defs import (
     PHASE_IDS,
     default_refiner_joint_ids,
 )
-from model.contact.contact_geometry import ContactGeometry
-from model.contact.proposal_labels import HandContactLabelBuilder
-from model.contact.proposal_features import HandContactFeatureBuilder
-from model.contact.proposal_model import HandContactProposal
-from model.contact.proposal_loss import HandContactProposalLoss
-from model.contact.proposal_events import ContactEventParser, parse_contact_events
-from model.contact.proposal_windows import ContactWindowBuilder
-from model.contact.refiner_model import HandContactRefiner
-from model.contact.refiner_loss import HandContactRefinerLoss
-from model.contact.refiner_inputs import ContactWindowSampler
-from model.contact.refiner_schedule import RefinerWindowSchedule
+from stage2_old.common.geometry.contact_geometry import ContactGeometry
+from stage2_old.common.geometry.proposal_labels import HandContactLabelBuilder
+from stage2_old.proposal.model.proposal_features import HandContactFeatureBuilder
+from stage2_old.proposal.model.proposal_model import HandContactProposal
+from stage2_old.proposal.model.proposal_loss import HandContactProposalLoss
+from stage2_old.proposal.model.proposal_events import ContactEventParser, parse_contact_events
+from stage2_old.proposal.model.proposal_windows import ContactWindowBuilder
+from stage2_old.proposal.model.refiner_model import HandContactRefiner
+from stage2_old.proposal.model.refiner_loss import HandContactRefinerLoss
+from stage2_old.proposal.model.refiner_inputs import ContactWindowSampler
+from stage2_old.proposal.model.refiner_schedule import RefinerWindowSchedule
