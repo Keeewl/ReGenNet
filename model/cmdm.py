@@ -229,7 +229,7 @@ class CMDM(nn.Module):
         cmx = self.cmo_process(cmx)
 
         # online
-        if self.arch == 'online':
+        if self.arch == 'online' or self.arch == 'trans_dec':
             # concat the condition motion feature
             if self.cm_mode == 'add':
                 xseq = x + cmx
@@ -256,7 +256,7 @@ class CMDM(nn.Module):
                 output = self.seqTransDecoder(tgt=xseq, memory=emb, tgt_mask=mask)
         
         # offline
-        elif self.arch == 'offline':
+        elif self.arch == 'offline' or self.arch == 'trans_enc':
             if self.cm_mode == 'add':
                 xseq = x + cmx
             elif self.cm_mode == 'concat':
