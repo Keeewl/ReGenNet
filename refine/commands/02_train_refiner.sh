@@ -1,0 +1,46 @@
+export CUDA_VISIBLE_DEVICES=6
+python3 -m refine.train.cli \
+  --reaction_data_path refine/dataset/train/reaction_data.npz \
+  --save_dir refine/outputs/stage2_lite_run1 \
+  --batch_size 64 \
+  --num_workers 4 \
+  --shuffle \
+  --no-drop_last \
+  --body_model smplx \
+  --pose_rep rot6d \
+  --window_strict_score_threshold 0.62 \
+  --window_near_score_threshold_pre 0.42 \
+  --window_near_score_threshold_post 0.34 \
+  --window_raw_L_min 6 \
+  --window_raw_L_max 24 \
+  --window_model_W 16 \
+  --window_gap_merge 2 \
+  --window_pre_max 8 \
+  --window_post_max 6 \
+  --window_per_hand_max_windows 3 \
+  --window_per_seq_max_windows 6 \
+  --window_target_smooth_k 5 \
+  --hidden_dim 256 \
+  --num_heads 4 \
+  --num_blocks 3 \
+  --dropout 0.1 \
+  --mlp_ratio 2.0 \
+  --delta_scale 0.15 \
+  --residual_loss_type smooth_l1 \
+  --lambda_res 1.0 \
+  --lambda_smooth 0.1 \
+  --lambda_contact 0.2 \
+  --lambda_identity 0.05 \
+  --core_weight 1.0 \
+  --support_weight 0.5 \
+  --identity_core_weight 0.25 \
+  --identity_support_weight 1.0 \
+  --lr 1e-4 \
+  --weight_decay 1e-4 \
+  --grad_clip 1.0 \
+  --num_steps 20000 \
+  --max_epochs 200 \
+  --log_interval 20 \
+  --save_interval 1000 \
+  --device cuda:0 \
+  --seed 10
