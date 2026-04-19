@@ -131,3 +131,45 @@ python visualize/viewer/snapshot_viewer.py \
 - `canonical`: neutral body shape for motion inspection.
 - `restored`: restore raw `betas/gender` while keeping predicted translation.
 - `restored_shape_height`: restore raw `betas/gender` and align to raw Inter-X height/global placement.
+
+## Stage2-Lite Refined Pack
+
+Stage2-Lite inference writes `refined_pack.npz`, not Stage1-style `results.npy`.
+Use the Stage2 converter directly; it assumes the pack is already in
+`restored_pair_space` and does not apply Stage1 restored conversion again.
+
+```bash
+python -m visualize.converters.convert_stage2_pack_to_motions \
+  --pack refine/outputs/eval_stage2_lite_step000019000_test1000/refined_pack.npz \
+  --output_dir outputs/stage2_lite_step19000_refined/motions \
+  --variant refined \
+  --overwrite
+```
+
+Convert coarse / refined / gt together:
+
+```bash
+python -m visualize.converters.convert_stage2_pack_to_motions \
+  --pack refine/outputs/eval_stage2_lite_step000019000_test1000/refined_pack.npz \
+  --output_dir outputs/stage2_lite_step19000_all \
+  --variant all \
+  --overwrite
+```
+
+Then view one exported directory:
+
+```bash
+cd visualize/viewer
+python data_viewer.py \
+  --dataset interx \
+  --data_dir ../../outputs/stage2_lite_step19000_refined/motions \
+  --texts_dir '' \
+  --title 'stage2-lite-refined'
+```
+
+Notes:
+
+- `variant=refined` writes `actor_motion + reactor_refined`.
+- `variant=coarse` writes `actor_motion + reactor_coarse`.
+- `variant=gt` writes `actor_motion + reactor_gt`.
+- Viewer conversion requires rot6d motion. xyz-only debug packs cannot reconstruct SMPL-X poses.

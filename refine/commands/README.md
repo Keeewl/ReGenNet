@@ -1,6 +1,7 @@
 # refine/commands
 
-Current Stage2-lite command set is focused on the data-entry bridge only.
+Current Stage2-lite command set covers the data-entry bridge and lightweight
+development utilities.
 
 Files:
 
@@ -12,6 +13,9 @@ Files:
   Verifies that `ReactionDataDataset` and restored metadata extraction can read a generated pack.
 - `04_show_reaction_data_fields.sh`
   Dumps the fields, shapes, and dtypes stored in a generated pack.
+- `06_visualize_stage2_pack.sh`
+  Converts a Stage2-Lite `refined_pack.npz` into viewer-ready `P1.npz/P2.npz`
+  clip folders for `visualize/viewer/data_viewer.py`.
 
 Notes:
 
