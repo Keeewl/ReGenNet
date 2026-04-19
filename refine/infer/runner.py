@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import os
-import re
 from collections import Counter, defaultdict
 from dataclasses import asdict
 from typing import Any
@@ -20,13 +19,8 @@ from refine.infer.writer import write_inference_outputs
 from refine.model.features import FeatureBuilderConfig, JointFeatureBuilder
 from refine.model.network import JointLocalRefiner, JointLocalRefinerConfig
 from refine.model.windows import DeterministicWindowSelector, WindowConfig
+from refine.protocols.interx_actions import parse_action_label_from_dataset_key
 from refine.train.checkpoint import load_checkpoint
-
-
-_ACTION_PATTERNS = (
-    re.compile(r"A(\d+)"),
-    re.compile(r"action[_-]?(\d+)", re.IGNORECASE),
-)
 
 
 def _cfg_get(config: dict[str, Any] | None, key: str, default):
@@ -63,19 +57,7 @@ def _to_numpy(value: Any):
 
 
 def _parse_action_label(dataset_key: Any) -> tuple[str, str]:
-    key = str(_as_jsonable_scalar(dataset_key))
-    for pattern in _ACTION_PATTERNS:
-        match = pattern.search(key)
-        if match:
-            return f"A{int(match.group(1)):03d}", "parsed_from_dataset_key"
-
-    # Fallback: group by a stable prefix before common separators.
-    for sep in ("|", "/", "\\", ":", "_"):
-        if sep in key:
-            prefix = key.split(sep)[0]
-            if prefix:
-                return prefix, "fallback_dataset_key_prefix"
-    return "unknown", "fallback_unknown"
+    return parse_action_label_from_dataset_key(dataset_key)
 
 
 def _read_subset_payload(path: str):
