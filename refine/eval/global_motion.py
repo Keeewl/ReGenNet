@@ -8,7 +8,9 @@ Protocol split:
 
 The global protocol is an auxiliary check that the local refiner did not break
 overall action distribution. It should not be mixed numerically with local
-restored-space metrics.
+restored-space metrics. Inverse restore and STGCN feature extraction are both
+batch-wise to match the Stage1 evaluation style and avoid materializing the
+entire restored pack on GPU.
 """
 
 from __future__ import annotations
@@ -16,14 +18,12 @@ from __future__ import annotations
 import argparse
 import csv
 import json
-import os
 import re
 from typing import Any
 
 import h5py
 import numpy as np
 import torch
-from torch.utils.data import DataLoader, Dataset
 
 from eval.a2m.recognition.models.stgcn import STGCN
 from eval.a2m.stgcn.diversity import calculate_diversity_multimodality
@@ -77,6 +77,13 @@ def _to_tensor(value, device: torch.device, dtype=torch.float32) -> torch.Tensor
     return torch.as_tensor(value, device=device, dtype=dtype)
 
 
+def _slice_array(value, start: int, end: int):
+    arr = np.asarray(value)
+    if arr.ndim == 0:
+        return np.repeat(arr.reshape(1), end - start, axis=0)
+    return arr[start:end]
+
+
 def _inverse_restore_motion(
     motion: torch.Tensor,
     common_shift: torch.Tensor,
@@ -94,17 +101,24 @@ def _inverse_restore_motion(
     return out
 
 
-def _convert_pack_to_stage1_aligned_space(pack: dict[str, Any], device: torch.device) -> dict[str, torch.Tensor]:
-    common_shift = _to_tensor(pack["loader_base_trans"], device) + _to_tensor(pack["pair_base_trans"], device)
-    actor_y = _to_tensor(pack["ground_offset_y_actor"], device)
-    reactor_y = _to_tensor(pack["ground_offset_y_reactor"], device)
-    actor = _inverse_restore_motion(_to_tensor(pack["actor_motion"], device), common_shift, actor_y)
+def _convert_batch_to_stage1_aligned_space(
+    pack: dict[str, Any],
+    *,
+    reactor_field: str,
+    start: int,
+    end: int,
+    device: torch.device,
+) -> dict[str, torch.Tensor]:
+    common_shift = _to_tensor(_slice_array(pack["loader_base_trans"], start, end), device) + _to_tensor(
+        _slice_array(pack["pair_base_trans"], start, end), device
+    )
+    actor_y = _to_tensor(_slice_array(pack["ground_offset_y_actor"], start, end), device)
+    reactor_y = _to_tensor(_slice_array(pack["ground_offset_y_reactor"], start, end), device)
+    actor = _inverse_restore_motion(_to_tensor(pack["actor_motion"][start:end], device), common_shift, actor_y)
     return {
         "actor_motion": actor,
-        "reactor_gt": _inverse_restore_motion(_to_tensor(pack["reactor_gt"], device), common_shift, reactor_y),
-        "reactor_coarse": _inverse_restore_motion(_to_tensor(pack["reactor_coarse"], device), common_shift, reactor_y),
-        "reactor_refined": _inverse_restore_motion(_to_tensor(pack["reactor_refined"], device), common_shift, reactor_y),
-        "lengths": torch.as_tensor(pack["lengths"], device=device, dtype=torch.long),
+        "reactor_motion": _inverse_restore_motion(_to_tensor(pack[reactor_field][start:end], device), common_shift, reactor_y),
+        "lengths": torch.as_tensor(pack["lengths"][start:end], device=device, dtype=torch.long),
     }
 
 
@@ -130,41 +144,32 @@ def _pad_smplx_nodes_if_needed(motion: torch.Tensor) -> torch.Tensor:
     return motion
 
 
-class PackedMotionDataset(Dataset):
-    def __init__(
-        self,
-        actor_motion: torch.Tensor,
-        reactor_motion: torch.Tensor,
-        labels: torch.Tensor,
-        lengths: torch.Tensor,
-    ):
-        self.output = torch.cat(
-            [
-                _pad_smplx_nodes_if_needed(actor_motion),
-                _pad_smplx_nodes_if_needed(reactor_motion),
-            ],
-            dim=2,
-        ).detach().cpu()
-        self.labels = labels.detach().cpu().long()
-        self.lengths = lengths.detach().cpu().long()
-
-    def __len__(self):
-        return int(self.output.shape[0])
-
-    def __getitem__(self, idx):
-        return {
-            "output": self.output[idx],
-            "y": self.labels[idx],
-            "lengths": self.lengths[idx],
-        }
+def _extract_state_dict(checkpoint) -> dict[str, torch.Tensor]:
+    state = checkpoint
+    if isinstance(checkpoint, dict):
+        for key in ("state_dict", "model_state_dict", "model"):
+            if key in checkpoint and isinstance(checkpoint[key], dict):
+                state = checkpoint[key]
+                break
+    if not isinstance(state, dict):
+        raise ValueError("STGCN checkpoint does not contain a state_dict.")
+    cleaned = {}
+    for key, value in state.items():
+        new_key = key
+        for prefix in ("module.", "model."):
+            if new_key.startswith(prefix):
+                new_key = new_key[len(prefix) :]
+        cleaned[new_key] = value
+    return cleaned
 
 
-def _motion_collate(batch):
-    return {
-        "output": torch.stack([item["output"] for item in batch], dim=0),
-        "y": torch.stack([item["y"] for item in batch], dim=0),
-        "lengths": torch.stack([item["lengths"] for item in batch], dim=0),
-    }
+def _infer_num_classes_from_checkpoint(stgcn_model_path: str) -> int | None:
+    checkpoint = torch.load(stgcn_model_path, map_location="cpu")
+    state_dict = _extract_state_dict(checkpoint)
+    weight = state_dict.get("fcn.weight")
+    if weight is None:
+        return None
+    return int(weight.shape[0])
 
 
 def _load_stgcn(
@@ -185,31 +190,73 @@ def _load_stgcn(
         edge_importance_weighting=True,
         device=device,
     ).to(device)
-    state_dict = torch.load(stgcn_model_path, map_location=device)
+    checkpoint = torch.load(stgcn_model_path, map_location="cpu")
+    state_dict = _extract_state_dict(checkpoint)
     model.load_state_dict(state_dict)
     model.eval()
     return model
 
 
-def _compute_features_and_accuracy(stgcn, loader, device: torch.device) -> tuple[torch.Tensor, torch.Tensor, float]:
+def _make_stgcn_batch(
+    actor_motion: torch.Tensor,
+    reactor_motion: torch.Tensor,
+    labels: torch.Tensor,
+    lengths: torch.Tensor,
+) -> dict[str, torch.Tensor]:
+    return {
+        "output": torch.cat(
+            [
+                _pad_smplx_nodes_if_needed(actor_motion),
+                _pad_smplx_nodes_if_needed(reactor_motion),
+            ],
+            dim=2,
+        ),
+        "y": labels,
+        "lengths": lengths,
+    }
+
+
+def _compute_features_and_accuracy_for_variant(
+    stgcn,
+    pack: dict[str, Any],
+    *,
+    reactor_field: str,
+    labels: torch.Tensor,
+    batch_size: int,
+    device: torch.device,
+) -> tuple[torch.Tensor, torch.Tensor, float]:
     feats = []
-    labels = []
+    y_values = []
     correct = 0
     total = 0
+    num_sequences = int(labels.numel())
     with torch.no_grad():
-        for batch in loader:
-            batch = {
-                "output": batch["output"].to(device),
-                "y": batch["y"].to(device),
-                "lengths": batch["lengths"].to(device),
-            }
+        for start in range(0, num_sequences, batch_size):
+            end = min(start + batch_size, num_sequences)
+            processed = _convert_batch_to_stage1_aligned_space(
+                pack,
+                reactor_field=reactor_field,
+                start=start,
+                end=end,
+                device=device,
+            )
+            batch = _make_stgcn_batch(
+                processed["actor_motion"],
+                processed["reactor_motion"],
+                labels[start:end].to(device),
+                processed["lengths"],
+            )
             out = stgcn(batch)
             pred = out["yhat"].argmax(dim=1)
             correct += int((pred == batch["y"]).sum().item())
             total += int(batch["y"].numel())
-            feats.append(out["features"].detach().cpu())
-            labels.append(batch["y"].detach().cpu())
-    return torch.cat(feats, dim=0), torch.cat(labels, dim=0), float(correct / max(total, 1))
+            features = out["features"].detach().cpu()
+            if features.dim() == 1:
+                features = features.unsqueeze(0)
+            feats.append(features)
+            y_values.append(batch["y"].detach().cpu())
+            del processed, batch, out
+    return torch.cat(feats, dim=0), torch.cat(y_values, dim=0), float(correct / max(total, 1))
 
 
 def _activation_stats(feats: torch.Tensor) -> tuple[np.ndarray, np.ndarray]:
@@ -226,22 +273,30 @@ def evaluate_global_motion(
     batch_size: int = 64,
     device: str = "cpu",
     seed: int = 42,
+    num_classes: int | None = None,
 ) -> dict[str, Any]:
     pack = _load_pack(pack_or_path) if isinstance(pack_or_path, str) else pack_or_path
     _check_global_pack(pack)
 
     dev = torch.device(device if torch.cuda.is_available() or str(device) == "cpu" else "cpu")
-    processed = _convert_pack_to_stage1_aligned_space(pack, dev)
     labels = torch.as_tensor([_parse_action_label(x) for x in np.asarray(pack["dataset_key"]).reshape(-1)], dtype=torch.long)
-    num_classes = int(labels.max().item()) + 1
+    inferred_num_classes = _infer_num_classes_from_checkpoint(stgcn_model_path)
+    if num_classes is None or num_classes <= 0:
+        num_classes = inferred_num_classes or int(labels.max().item()) + 1
+    num_classes = int(num_classes)
+    if int(labels.max().item()) >= num_classes:
+        raise ValueError(
+            f"Parsed action label {int(labels.max().item())} exceeds num_classes={num_classes}. "
+            "Check dataset_key parsing or pass --num_classes."
+        )
 
     variants = {
-        "gt": processed["reactor_gt"],
-        "coarse": processed["reactor_coarse"],
-        "refined": processed["reactor_refined"],
+        "gt": "reactor_gt",
+        "coarse": "reactor_coarse",
+        "refined": "reactor_refined",
     }
-    actor = processed["actor_motion"]
-    in_channels = int(actor.shape[2] * 2)
+    in_channels = int(np.asarray(pack["actor_motion"]).shape[2] * 2)
+    batch_size = max(int(batch_size), 1)
     stgcn = _load_stgcn(
         dataset=dataset,
         body_model=body_model,
@@ -254,15 +309,15 @@ def evaluate_global_motion(
     results = {}
     features = {}
     gt_stats = None
-    for name, reactor in variants.items():
-        loader = DataLoader(
-            PackedMotionDataset(actor, reactor, labels.to(dev), processed["lengths"]),
+    for name, reactor_field in variants.items():
+        feats, y, acc = _compute_features_and_accuracy_for_variant(
+            stgcn,
+            pack,
+            reactor_field=reactor_field,
+            labels=labels,
             batch_size=batch_size,
-            shuffle=False,
-            num_workers=0,
-            collate_fn=_motion_collate,
+            device=dev,
         )
-        feats, y, acc = _compute_features_and_accuracy(stgcn, loader, dev)
         stats = _activation_stats(feats)
         if name == "gt":
             gt_stats = stats
@@ -294,7 +349,9 @@ def evaluate_global_motion(
             "refined_field": "reactor_refined",
             "dataset_key_field": "dataset_key",
             "num_sequences": int(labels.numel()),
-            "num_classes_observed": int(num_classes),
+            "num_classes": int(num_classes),
+            "num_classes_inferred_from_checkpoint": int(inferred_num_classes) if inferred_num_classes else None,
+            "batch_size": batch_size,
             "inverse_restore": "translation joint subtracts loader_base_trans + pair_base_trans and actor/reactor ground offsets",
         },
         "space_protocol": STAGE1_ALIGNED_SPACE,
@@ -331,6 +388,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--body_model", default="smplx", type=str)
     parser.add_argument("--dataset_key_field", default="dataset_key", type=str)
     parser.add_argument("--batch_size", default=64, type=int)
+    parser.add_argument("--num_classes", default=0, type=int)
     parser.add_argument("--device", default="cpu", type=str)
     parser.add_argument("--seed", default=42, type=int)
     parser.add_argument("--json_out", default="", type=str)
@@ -350,6 +408,7 @@ def main(argv: list[str] | None = None):
         batch_size=args.batch_size,
         device=args.device,
         seed=args.seed,
+        num_classes=args.num_classes,
     )
     if args.json_out:
         _write_json(args.json_out, payload)

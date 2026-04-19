@@ -8,7 +8,8 @@ Protocol:
 
 This evaluator directly consumes the new infer pack field names and implements a
 lightweight joint-based contact proxy. It intentionally does not import old
-Stage2 runtime modules or mesh-aware losses.
+Stage2 runtime modules or mesh-aware losses. Evaluation is batch-wise so large
+packs do not need to be converted to SMPL-X xyz in one GPU pass.
 """
 
 from __future__ import annotations
@@ -109,10 +110,9 @@ def _pairwise_min_dist(actor_xyz: torch.Tensor, reactor_xyz: torch.Tensor) -> to
     return torch.cdist(hand, actor).amin(dim=(-1, -2))
 
 
-def _segment_stats(contact_mask: torch.Tensor, valid_mask: torch.Tensor) -> tuple[float, float, int]:
+def _segment_durations(contact_mask: torch.Tensor, valid_mask: torch.Tensor) -> list[int]:
     durations = []
-    seq_count = contact_mask.shape[0]
-    for seq_idx in range(seq_count):
+    for seq_idx in range(contact_mask.shape[0]):
         valid_len = int(valid_mask[seq_idx].sum().item())
         current = 0
         for frame_idx in range(valid_len):
@@ -123,13 +123,26 @@ def _segment_stats(contact_mask: torch.Tensor, valid_mask: torch.Tensor) -> tupl
                 current = 0
         if current > 0:
             durations.append(current)
-    if not durations:
-        return 0.0, 0.0, 0
-    return float(np.mean(durations)), float(len(durations) / max(seq_count, 1)), int(len(durations))
+    return durations
 
 
-def _evaluate_variant(
-    name: str,
+def _empty_metric_accumulator() -> dict[str, float]:
+    return {
+        "hand_cd_sum": 0.0,
+        "hand_cd_count": 0.0,
+        "contact_count": 0.0,
+        "valid_count": 0.0,
+        "duration_sum": 0.0,
+        "num_contact_segments": 0.0,
+        "region_dist_sum": 0.0,
+        "penetration_count": 0.0,
+        "penetration_depth_sum": 0.0,
+        "num_valid_sequences": 0.0,
+    }
+
+
+def _accumulate_variant_stats(
+    acc: dict[str, float],
     actor_xyz: torch.Tensor,
     pred_xyz: torch.Tensor,
     gt_xyz: torch.Tensor,
@@ -137,7 +150,7 @@ def _evaluate_variant(
     *,
     tau_contact: float,
     penetration_threshold: float,
-) -> dict[str, float | int]:
+) -> None:
     valid_mask = _length_mask(lengths, actor_xyz.shape[-1])
     gt_dist = _pairwise_min_dist(actor_xyz, gt_xyz)
     pred_dist = _pairwise_min_dist(actor_xyz, pred_xyz)
@@ -146,24 +159,35 @@ def _evaluate_variant(
     pred_contact = (pred_dist < tau_contact) & valid_mask
     valid = valid_mask.float()
     contact_weight = gt_contact.float()
-
-    hand_cd = (pred_dist * contact_weight).sum() / contact_weight.sum().clamp_min(1.0)
-    region_hand_dist = (pred_dist * valid).sum() / valid.sum().clamp_min(1.0)
-    contact_ratio = pred_contact.float().sum() / valid.sum().clamp_min(1.0)
-    avg_duration, frequency, num_segments = _segment_stats(pred_contact, valid_mask)
+    durations = _segment_durations(pred_contact, valid_mask)
     penetration_depth = (penetration_threshold - pred_dist).clamp_min(0.0)
-    penetration_rate = ((penetration_depth > 0) & valid_mask).float().sum() / valid.sum().clamp_min(1.0)
-    penetration_depth_mean = (penetration_depth * valid).sum() / valid.sum().clamp_min(1.0)
 
+    acc["hand_cd_sum"] += float((pred_dist * contact_weight).sum().item())
+    acc["hand_cd_count"] += float(contact_weight.sum().item())
+    acc["contact_count"] += float(pred_contact.float().sum().item())
+    acc["valid_count"] += float(valid.sum().item())
+    acc["duration_sum"] += float(sum(durations))
+    acc["num_contact_segments"] += float(len(durations))
+    acc["region_dist_sum"] += float((pred_dist * valid).sum().item())
+    acc["penetration_count"] += float(((penetration_depth > 0) & valid_mask).float().sum().item())
+    acc["penetration_depth_sum"] += float((penetration_depth * valid).sum().item())
+    acc["num_valid_sequences"] += float(lengths.numel())
+
+
+def _finalize_variant_stats(acc: dict[str, float]) -> dict[str, float | int]:
+    valid_count = max(acc["valid_count"], 1.0)
+    hand_cd_count = max(acc["hand_cd_count"], 1.0)
+    num_segments = int(acc["num_contact_segments"])
+    num_sequences = int(acc["num_valid_sequences"])
     return {
-        "hand_cd": float(hand_cd.item()),
-        "contact_ratio": float(contact_ratio.item()),
-        "avg_contact_duration": avg_duration,
-        "contact_frequency": frequency,
-        "region_hand_dist": float(region_hand_dist.item()),
-        "penetration_rate": float(penetration_rate.item()),
-        "penetration_depth": float(penetration_depth_mean.item()),
-        "num_valid_sequences": int(lengths.numel()),
+        "hand_cd": float(acc["hand_cd_sum"] / hand_cd_count),
+        "contact_ratio": float(acc["contact_count"] / valid_count),
+        "avg_contact_duration": float(acc["duration_sum"] / max(num_segments, 1)),
+        "contact_frequency": float(num_segments / max(num_sequences, 1)),
+        "region_hand_dist": float(acc["region_dist_sum"] / valid_count),
+        "penetration_rate": float(acc["penetration_count"] / valid_count),
+        "penetration_depth": float(acc["penetration_depth_sum"] / valid_count),
+        "num_valid_sequences": num_sequences,
         "num_contact_segments": num_segments,
     }
 
@@ -176,62 +200,82 @@ def evaluate_local_contact(
     pose_rep: str = "rot6d",
     tau_contact: float = 0.10,
     penetration_threshold: float = 0.015,
+    batch_size: int = 16,
 ) -> dict[str, Any]:
     pack = _load_pack(pack_or_path) if isinstance(pack_or_path, str) else pack_or_path
     _check_local_pack(pack)
 
     dev = torch.device(device if torch.cuda.is_available() or str(device) == "cpu" else "cpu")
-    lengths = torch.as_tensor(pack["lengths"], device=dev, dtype=torch.long)
-    actor = torch.as_tensor(pack["actor_motion"], device=dev, dtype=torch.float32)
-    gt = torch.as_tensor(pack["reactor_gt"], device=dev, dtype=torch.float32)
-    coarse = torch.as_tensor(pack["reactor_coarse"], device=dev, dtype=torch.float32)
-    refined = torch.as_tensor(pack["reactor_refined"], device=dev, dtype=torch.float32)
+    lengths_np = np.asarray(pack["lengths"])
+    num_sequences = int(lengths_np.shape[0])
+    batch_size = max(int(batch_size), 1)
+    accumulators = {
+        "gt": _empty_metric_accumulator(),
+        "coarse": _empty_metric_accumulator(),
+        "refined": _empty_metric_accumulator(),
+    }
 
     with torch.no_grad():
-        actor_xyz = _motions_to_xyz(actor, lengths, body_model=body_model, pose_rep=pose_rep, device=dev)
-        gt_xyz = _motions_to_xyz(gt, lengths, body_model=body_model, pose_rep=pose_rep, device=dev)
-        coarse_xyz = _motions_to_xyz(coarse, lengths, body_model=body_model, pose_rep=pose_rep, device=dev)
-        refined_xyz = _motions_to_xyz(refined, lengths, body_model=body_model, pose_rep=pose_rep, device=dev)
+        for start in range(0, num_sequences, batch_size):
+            end = min(start + batch_size, num_sequences)
+            lengths = torch.as_tensor(lengths_np[start:end], device=dev, dtype=torch.long)
+            actor = torch.as_tensor(pack["actor_motion"][start:end], device=dev, dtype=torch.float32)
+            gt = torch.as_tensor(pack["reactor_gt"][start:end], device=dev, dtype=torch.float32)
 
-        results = {
-            "gt": _evaluate_variant(
-                "gt",
+            actor_xyz = _motions_to_xyz(actor, lengths, body_model=body_model, pose_rep=pose_rep, device=dev)
+            gt_xyz = _motions_to_xyz(gt, lengths, body_model=body_model, pose_rep=pose_rep, device=dev)
+
+            _accumulate_variant_stats(
+                accumulators["gt"],
                 actor_xyz,
                 gt_xyz,
                 gt_xyz,
                 lengths,
                 tau_contact=tau_contact,
                 penetration_threshold=penetration_threshold,
-            ),
-            "coarse": _evaluate_variant(
-                "coarse",
+            )
+
+            coarse = torch.as_tensor(pack["reactor_coarse"][start:end], device=dev, dtype=torch.float32)
+            coarse_xyz = _motions_to_xyz(coarse, lengths, body_model=body_model, pose_rep=pose_rep, device=dev)
+            _accumulate_variant_stats(
+                accumulators["coarse"],
                 actor_xyz,
                 coarse_xyz,
                 gt_xyz,
                 lengths,
                 tau_contact=tau_contact,
                 penetration_threshold=penetration_threshold,
-            ),
-            "refined": _evaluate_variant(
-                "refined",
+            )
+
+            refined = torch.as_tensor(pack["reactor_refined"][start:end], device=dev, dtype=torch.float32)
+            refined_xyz = _motions_to_xyz(refined, lengths, body_model=body_model, pose_rep=pose_rep, device=dev)
+            _accumulate_variant_stats(
+                accumulators["refined"],
                 actor_xyz,
                 refined_xyz,
                 gt_xyz,
                 lengths,
                 tau_contact=tau_contact,
                 penetration_threshold=penetration_threshold,
-            ),
-            "field_info": {
-                "actor_field": "actor_motion",
-                "gt_field": "reactor_gt",
-                "coarse_field": "reactor_coarse",
-                "refined_field": "reactor_refined",
-                "num_sequences": int(lengths.numel()),
-                "tau_contact": float(tau_contact),
-                "penetration_threshold": float(penetration_threshold),
-            },
-            "space_protocol": RESTORED_PAIR_SPACE,
-        }
+            )
+            del actor, gt, coarse, refined, actor_xyz, gt_xyz, coarse_xyz, refined_xyz, lengths
+
+    results = {
+        "gt": _finalize_variant_stats(accumulators["gt"]),
+        "coarse": _finalize_variant_stats(accumulators["coarse"]),
+        "refined": _finalize_variant_stats(accumulators["refined"]),
+        "field_info": {
+            "actor_field": "actor_motion",
+            "gt_field": "reactor_gt",
+            "coarse_field": "reactor_coarse",
+            "refined_field": "reactor_refined",
+            "num_sequences": num_sequences,
+            "batch_size": batch_size,
+            "tau_contact": float(tau_contact),
+            "penetration_threshold": float(penetration_threshold),
+        },
+        "space_protocol": RESTORED_PAIR_SPACE,
+    }
     return results
 
 
@@ -268,6 +312,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--device", default="cpu", type=str)
     parser.add_argument("--body_model", default="smplx", type=str)
     parser.add_argument("--pose_rep", default="rot6d", type=str)
+    parser.add_argument("--batch_size", default=16, type=int)
     parser.add_argument("--tau_contact", default=0.10, type=float)
     parser.add_argument("--penetration_threshold", default=0.015, type=float)
     parser.add_argument("--json_out", default="", type=str)
@@ -284,6 +329,7 @@ def main(argv: list[str] | None = None):
         pose_rep=args.pose_rep,
         tau_contact=args.tau_contact,
         penetration_threshold=args.penetration_threshold,
+        batch_size=args.batch_size,
     )
     if args.json_out:
         _write_json(args.json_out, payload)
