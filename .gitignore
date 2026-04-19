@@ -177,3 +177,10 @@ save/
 
 # legacy
 legacy/
+
+# imgui
+*.ini
+imgui.ini
+
+# tmp
+tmp/
