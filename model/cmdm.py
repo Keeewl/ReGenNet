@@ -281,7 +281,9 @@ class CMDM(nn.Module):
             else:
                 raise NotImplementedError
             xseq = self.sequence_pos_encoder(xseq)  # [seqlen, bs, d]
+            xseq = xseq.permute(1, 0, 2)  # GRU(batch_first=True) expects [bs, seqlen, d]
             output, _ = self.gru(xseq)
+            output = output.permute(1, 0, 2)  # [seqlen, bs, d]
 
         # OutputProcess
         output = self.output_process(output)  # [bs, njoints, nfeats, nframes] denoted x_0^ in the paper
