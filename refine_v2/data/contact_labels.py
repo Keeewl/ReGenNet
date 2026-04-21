@@ -21,6 +21,7 @@ from .schema import (
 )
 from .restored_space import RestoredBodyModelForward, motions_to_vertices, restore_pair_if_needed
 from refine_v2.model.regions import region_map_summary
+from refine_v2.utils.progress import ProgressBar
 
 
 def _to_numpy(value):
@@ -285,6 +286,7 @@ def build_contact_labels_for_loader(
     device: str = "cpu",
     frame_chunk: int = 1,
     target_chunk: int = 2048,
+    show_progress: bool = True,
 ) -> dict[str, Any]:
     device_t = torch.device(device)
     body_forward = RestoredBodyModelForward(device=device_t)
@@ -295,6 +297,8 @@ def build_contact_labels_for_loader(
     dataset_row_indices_all = []
     dataset_keys_all = []
     segments_all: list[dict[str, Any]] = []
+    total_samples = len(loader.dataset) if hasattr(loader, "dataset") else None
+    progress = ProgressBar("build_contact_labels", total_samples, unit="samples", enabled=show_progress).start()
 
     for batch in loader:
         actor_motion = batch["actor_motion"].to(device_t)
@@ -320,6 +324,8 @@ def build_contact_labels_for_loader(
         dataset_row_indices_all.extend(result["dataset_row_indices"])
         dataset_keys_all.extend(result["dataset_keys"])
         segments_all.extend(result["segments"])
+        progress.update(len(result["lengths"]))
+    progress.finish()
 
     metadata = {
         "artifact": "contact_labels_gt",

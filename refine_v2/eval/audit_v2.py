@@ -14,6 +14,7 @@ from refine_v2.data.schema import (
     object_array_to_records,
     to_jsonable,
 )
+from refine_v2.utils.progress import ProgressBar
 
 
 def _load_npz(path: str):
@@ -64,7 +65,12 @@ def _mask_index_by_row(dataset_row_indices: np.ndarray) -> dict[int, int]:
     return {int(row): idx for idx, row in enumerate(np.asarray(dataset_row_indices).reshape(-1).tolist())}
 
 
-def audit_windows(contact_labels_path: str, selector_windows_path: str) -> dict[str, Any]:
+def audit_windows(
+    contact_labels_path: str,
+    selector_windows_path: str,
+    *,
+    show_progress: bool = True,
+) -> dict[str, Any]:
     labels = _load_npz(contact_labels_path)
     windows_pack = _load_npz(selector_windows_path)
 
@@ -74,6 +80,8 @@ def audit_windows(contact_labels_path: str, selector_windows_path: str) -> dict[
     lengths = np.asarray(labels["lengths"], dtype=np.int64).reshape(-1)
     label_rows = np.asarray(labels["dataset_row_indices"], dtype=np.int64).reshape(-1)
     row_to_mask_index = _mask_index_by_row(label_rows)
+    progress_total = len(gt_segments) + len(row_to_mask_index) + len(pred_windows)
+    progress = ProgressBar("audit_windows", progress_total, unit="items", enabled=show_progress).start()
 
     gt_by_group: dict[tuple[int, int, int], list[dict[str, Any]]] = {}
     for gt in gt_segments:
@@ -112,6 +120,7 @@ def audit_windows(contact_labels_path: str, selector_windows_path: str) -> dict[
             }
         )
         _ = candidates
+        progress.update()
 
     total_gt_contact_frames = 0
     covered_gt_contact_frames = 0
@@ -135,6 +144,7 @@ def audit_windows(contact_labels_path: str, selector_windows_path: str) -> dict[
                         if end > start:
                             covered[start:end] = True
                 covered_gt_contact_frames += int((gt_seq & covered).sum())
+        progress.update()
 
     per_window_debug = []
     matched_window_count = 0
@@ -194,6 +204,7 @@ def audit_windows(contact_labels_path: str, selector_windows_path: str) -> dict[
                 "best_same_hand_any_region_overlap": int(best_any_region_overlap),
             }
         )
+        progress.update()
 
     num_sequences = int(len(label_rows))
     zero_window_sequences = [
@@ -216,6 +227,7 @@ def audit_windows(contact_labels_path: str, selector_windows_path: str) -> dict[
         "total_gt_contact_frames": int(total_gt_contact_frames),
         "covered_gt_contact_frames": int(covered_gt_contact_frames),
     }
+    progress.finish()
     return {
         "artifact": "selector_audit_v2",
         "contact_labels_path": contact_labels_path,

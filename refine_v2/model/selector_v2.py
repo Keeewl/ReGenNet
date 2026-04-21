@@ -23,6 +23,7 @@ from refine_v2.data.schema import (
     dumps_metadata,
     records_to_object_array,
 )
+from refine_v2.utils.progress import ProgressBar
 
 
 def _window_bounds(center: int, valid_len: int, window_size: int) -> tuple[int, int]:
@@ -148,6 +149,7 @@ def build_windows_for_loader(
     device: str = "cpu",
     frame_chunk: int = 1,
     target_chunk: int = 2048,
+    show_progress: bool = True,
 ) -> dict[str, Any]:
     device_t = torch.device(device)
     body_forward = RestoredBodyModelForward(device=device_t)
@@ -159,6 +161,8 @@ def build_windows_for_loader(
     dataset_keys_all: list[str] = []
     raw_segments_all: list[dict[str, Any]] = []
     windows_all: list[dict[str, Any]] = []
+    total_samples = len(loader.dataset) if hasattr(loader, "dataset") else None
+    progress = ProgressBar("select_windows", total_samples, unit="samples", enabled=show_progress).start()
 
     for batch in loader:
         actor_motion = batch["actor_motion"].to(device_t)
@@ -202,6 +206,8 @@ def build_windows_for_loader(
         dataset_keys_all.extend(result["dataset_keys"])
         raw_segments_all.extend(batch_segments)
         windows_all.extend(batch_windows)
+        progress.update(len(result["lengths"]))
+    progress.finish()
 
     metadata = {
         "artifact": "selector_windows_v2",

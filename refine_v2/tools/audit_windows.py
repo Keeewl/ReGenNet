@@ -13,12 +13,17 @@ def build_parser():
     parser.add_argument("--contact_labels_path", required=True, type=str)
     parser.add_argument("--selector_windows_path", required=True, type=str)
     parser.add_argument("--output_json", required=True, type=str)
+    parser.add_argument("--no_progress", action="store_true")
     return parser
 
 
 def main(argv=None):
     args = build_parser().parse_args(argv)
-    payload = audit_windows(args.contact_labels_path, args.selector_windows_path)
+    payload = audit_windows(
+        args.contact_labels_path,
+        args.selector_windows_path,
+        show_progress=not args.no_progress,
+    )
     out_dir = os.path.dirname(os.path.abspath(args.output_json))
     if out_dir:
         os.makedirs(out_dir, exist_ok=True)

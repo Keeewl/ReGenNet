@@ -22,6 +22,7 @@ def build_parser():
     parser.add_argument("--device", default="cpu", type=str)
     parser.add_argument("--frame_chunk", default=1, type=int)
     parser.add_argument("--target_chunk", default=2048, type=int)
+    parser.add_argument("--no_progress", action="store_true")
     return parser
 
 
@@ -45,6 +46,7 @@ def main(argv=None):
         device=args.device,
         frame_chunk=args.frame_chunk,
         target_chunk=args.target_chunk,
+        show_progress=not args.no_progress,
     )
     out_dir = os.path.dirname(os.path.abspath(args.output_path))
     if out_dir:

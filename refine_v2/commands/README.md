@@ -24,6 +24,12 @@ Default inputs and outputs embedded in the scripts:
 - `DEVICE=cuda:0`
 - `BATCH_SIZE=1`
 
+Progress:
+
+- `00_build_contact_labels.sh`, `01_select_windows.sh`, and `02_audit_windows.sh`
+  print processed count, elapsed time, and ETA by default.
+- Add `--no_progress` to the underlying `python -m ...` command if you want quiet output.
+
 Examples:
 
 ```bash
