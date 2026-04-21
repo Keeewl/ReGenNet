@@ -23,6 +23,7 @@ Files:
 - `11_inspect_refiner_data.sh`: inspect the fast window-level refiner dataset and export a small JSON summary.
 - `12_train_refiner_overfit.sh`: run the 64-window small overfit test for the first refiner.
 - `12_train_refiner.sh`: train the first mesh-aware residual refiner on the contact-rich subset.
+- `12_train_refiner_large_overnight.sh`: train a larger 8-layer/512-dim refiner for an overnight run.
 - `13_eval_refiner.sh`: run window-level eval for a trained refine_v2 refiner checkpoint.
 
 Default inputs and outputs embedded in the scripts:
@@ -60,5 +61,6 @@ bash refine_v2/commands/10_view_subset_window_ait.sh
 bash refine_v2/commands/11_inspect_refiner_data.sh
 bash refine_v2/commands/12_train_refiner_overfit.sh
 bash refine_v2/commands/12_train_refiner.sh
+bash refine_v2/commands/12_train_refiner_large_overnight.sh
 bash refine_v2/commands/13_eval_refiner.sh
 ```
