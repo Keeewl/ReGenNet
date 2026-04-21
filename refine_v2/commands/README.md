@@ -10,8 +10,8 @@ corresponding `.sh` file before running.
 Files:
 
 - `00_build_contact_labels.sh`: build `contact_labels_gt.npz` from `reaction_data`.
-- `01_select_windows.sh`: build `selector_windows_v2.npz` from coarse binary mesh contact.
-- `02_audit_windows.sh`: strict audit against direct GT contact labels.
+- `01_select_windows.sh`: build relaxed `selector_windows_v2_relaxed_tau010.npz` from coarse binary mesh contact.
+- `02_audit_windows.sh`: strict + relaxed audit against direct GT contact labels.
 - `03_vis_contact_labels.sh`: text inspection of one sample's GT contact labels.
 - `04_vis_windows_vs_gt.sh`: text inspection of one sample's predicted windows vs GT.
 - `05_run_minimal_loop.sh`: runs steps 00, 01, and 02.
@@ -21,8 +21,9 @@ Default inputs and outputs embedded in the scripts:
 - `REACTION_DATA_PATH=refine/dataset/train/reaction_data.npz`
 - `OUTPUT_DIR=refine_v2/outputs/train`
 - `REGION_MAP_PATH=visualize/viewer/part_segm/6_parts/six_parts.pkl`
-- `DEVICE=cuda:0`
-- `BATCH_SIZE=1`
+- selector relaxed params: `tau_contact=0.10`, `gap_merge=4`, `raw_L_min=2`, `window_size=30`
+- caps stay unchanged: `per_hand_max_windows=2`, `per_seq_max_windows=3`
+- current script device settings: `CUDA_VISIBLE_DEVICES=1`, `DEVICE=cuda`, `BATCH_SIZE=64`
 
 Progress:
 

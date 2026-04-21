@@ -23,6 +23,7 @@ from refine_v2.data.schema import (
     dumps_metadata,
     records_to_object_array,
 )
+from refine_v2.data.schema import to_jsonable
 from refine_v2.utils.progress import ProgressBar
 
 
@@ -107,7 +108,7 @@ def _limit_windows(
     *,
     per_hand_max_windows: int,
     per_seq_max_windows: int,
-) -> list[dict[str, Any]]:
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     def sort_key(item: dict[str, Any]):
         return (
             -int(item.get("raw_length", 0)),
@@ -126,14 +127,81 @@ def _limit_windows(
         by_sample.setdefault(int(item["dataset_row_index"]), []).append(item)
 
     kept: list[dict[str, Any]] = []
+    cap_debug: list[dict[str, Any]] = []
     for _, sample_items in sorted(by_sample.items()):
         hand_kept: list[dict[str, Any]] = []
+        hand_drop_count = 0
         for hand_id in range(len(HAND_SIDE_NAMES)):
             hand_items = [item for item in sample_items if int(item["hand_side_id"]) == hand_id]
-            hand_kept.extend(sorted(hand_items, key=sort_key)[: int(per_hand_max_windows)])
+            sorted_hand_items = sorted(hand_items, key=sort_key)
+            hand_kept.extend(sorted_hand_items[: int(per_hand_max_windows)])
+            hand_drop_count += max(0, len(sorted_hand_items) - int(per_hand_max_windows))
         seq_kept = sorted(hand_kept, key=sort_key)[: int(per_seq_max_windows)]
+        seq_drop_count = max(0, len(hand_kept) - len(seq_kept))
         kept.extend(sorted(seq_kept, key=lambda item: (int(item["dataset_row_index"]), int(item["start_frame"]), int(item["hand_side_id"]), int(item["target_region_id"]))))
-    return kept
+        sample0 = sample_items[0] if sample_items else {}
+        cap_debug.append(
+            {
+                "dataset_row_index": int(sample0.get("dataset_row_index", -1)),
+                "sample_index": int(sample0.get("sample_index", -1)),
+                "dataset_key": str(sample0.get("dataset_key", "")),
+                "num_windows_pre_cap": int(len(sample_items)),
+                "num_windows_after_hand_cap": int(len(hand_kept)),
+                "num_windows_post_cap": int(len(seq_kept)),
+                "num_windows_dropped_by_hand_cap": int(hand_drop_count),
+                "num_windows_dropped_by_seq_cap": int(seq_drop_count),
+            }
+        )
+    return kept, cap_debug
+
+
+def _summarize_selector_sequence_stats(sequence_stats: list[dict[str, Any]]) -> dict[str, Any]:
+    if not sequence_stats:
+        return {
+            "num_sequences": 0,
+            "num_sequences_with_pred_contact_frames": 0,
+            "num_pred_contact_frames_total": 0,
+            "num_pred_contact_frames_per_sequence_mean": 0.0,
+            "num_raw_segments_pre_filter": 0,
+            "num_raw_segments_post_filter": 0,
+            "num_sequences_with_raw_segments_pre_filter": 0,
+            "num_sequences_with_raw_segments_post_filter": 0,
+            "num_windows_pre_cap": 0,
+            "num_windows_post_cap": 0,
+            "num_sequences_with_windows_pre_cap": 0,
+            "num_sequences_with_windows_post_cap": 0,
+            "num_windows_dropped_by_hand_cap": 0,
+            "num_windows_dropped_by_seq_cap": 0,
+            "avg_raw_segment_length_pre_filter": 0.0,
+            "avg_raw_segment_length_post_filter": 0.0,
+        }
+
+    def total(name: str) -> int:
+        return int(sum(int(item.get(name, 0)) for item in sequence_stats))
+
+    num_sequences = len(sequence_stats)
+    total_pre_len = total("raw_segment_length_sum_pre_filter")
+    total_post_len = total("raw_segment_length_sum_post_filter")
+    pre_count = total("num_raw_segments_pre_filter")
+    post_count = total("num_raw_segments_post_filter")
+    return {
+        "num_sequences": int(num_sequences),
+        "num_sequences_with_pred_contact_frames": int(sum(1 for item in sequence_stats if int(item.get("num_pred_contact_frames", 0)) > 0)),
+        "num_pred_contact_frames_total": total("num_pred_contact_frames"),
+        "num_pred_contact_frames_per_sequence_mean": float(total("num_pred_contact_frames") / max(num_sequences, 1)),
+        "num_raw_segments_pre_filter": int(pre_count),
+        "num_raw_segments_post_filter": int(post_count),
+        "num_sequences_with_raw_segments_pre_filter": int(sum(1 for item in sequence_stats if int(item.get("num_raw_segments_pre_filter", 0)) > 0)),
+        "num_sequences_with_raw_segments_post_filter": int(sum(1 for item in sequence_stats if int(item.get("num_raw_segments_post_filter", 0)) > 0)),
+        "num_windows_pre_cap": total("num_windows_pre_cap"),
+        "num_windows_post_cap": total("num_windows_post_cap"),
+        "num_sequences_with_windows_pre_cap": int(sum(1 for item in sequence_stats if int(item.get("num_windows_pre_cap", 0)) > 0)),
+        "num_sequences_with_windows_post_cap": int(sum(1 for item in sequence_stats if int(item.get("num_windows_post_cap", 0)) > 0)),
+        "num_windows_dropped_by_hand_cap": total("num_windows_dropped_by_hand_cap"),
+        "num_windows_dropped_by_seq_cap": total("num_windows_dropped_by_seq_cap"),
+        "avg_raw_segment_length_pre_filter": float(total_pre_len / max(pre_count, 1)),
+        "avg_raw_segment_length_post_filter": float(total_post_len / max(post_count, 1)),
+    }
 
 
 def build_windows_for_loader(
@@ -161,6 +229,7 @@ def build_windows_for_loader(
     dataset_keys_all: list[str] = []
     raw_segments_all: list[dict[str, Any]] = []
     windows_all: list[dict[str, Any]] = []
+    sequence_stats_all: list[dict[str, Any]] = []
     total_samples = len(loader.dataset) if hasattr(loader, "dataset") else None
     progress = ProgressBar("select_windows", total_samples, unit="samples", enabled=show_progress).start()
 
@@ -182,21 +251,68 @@ def build_windows_for_loader(
             target_chunk=target_chunk,
         )
         pred_mask = result["contact_mask"]
+        pre_filter_segments = _add_batch_index_to_segments(
+            result["segments_pre_filter"],
+            result["dataset_row_indices"],
+        )
         batch_segments = _add_batch_index_to_segments(
             result["segments"],
             result["dataset_row_indices"],
         )
-        batch_windows: list[dict[str, Any]] = []
+        batch_windows_pre_cap: list[dict[str, Any]] = []
         for segment in batch_segments:
             batch_index = int(segment["batch_index"])
             valid_len = int(result["lengths"][batch_index]) if batch_index >= 0 else 0
-            batch_windows.extend(windows_from_segment(segment, valid_len, window_size=window_size))
-        batch_windows = _limit_windows(
-            batch_windows,
+            batch_windows_pre_cap.extend(windows_from_segment(segment, valid_len, window_size=window_size))
+        batch_windows, cap_debug = _limit_windows(
+            batch_windows_pre_cap,
             pred_mask,
             per_hand_max_windows=per_hand_max_windows,
             per_seq_max_windows=per_seq_max_windows,
         )
+        cap_by_row = {int(item["dataset_row_index"]): item for item in cap_debug}
+        pre_segments_by_row: dict[int, list[dict[str, Any]]] = {}
+        post_segments_by_row: dict[int, list[dict[str, Any]]] = {}
+        for segment in pre_filter_segments:
+            pre_segments_by_row.setdefault(int(segment["dataset_row_index"]), []).append(segment)
+        for segment in batch_segments:
+            post_segments_by_row.setdefault(int(segment["dataset_row_index"]), []).append(segment)
+
+        for local_index, row_index in enumerate(result["dataset_row_indices"]):
+            row_index = int(row_index)
+            valid_len = int(result["lengths"][local_index])
+            pred_contact_frames = int(pred_mask[local_index, :, :, :valid_len].sum())
+            pre_segments = pre_segments_by_row.get(row_index, [])
+            post_segments = post_segments_by_row.get(row_index, [])
+            cap_item = cap_by_row.get(
+                row_index,
+                {
+                    "num_windows_pre_cap": 0,
+                    "num_windows_after_hand_cap": 0,
+                    "num_windows_post_cap": 0,
+                    "num_windows_dropped_by_hand_cap": 0,
+                    "num_windows_dropped_by_seq_cap": 0,
+                },
+            )
+            sequence_stats_all.append(
+                {
+                    "dataset_row_index": row_index,
+                    "sample_index": int(result["sample_indices"][local_index]),
+                    "dataset_key": str(result["dataset_keys"][local_index]),
+                    "length": int(valid_len),
+                    "num_pred_contact_frames": pred_contact_frames,
+                    "has_pred_contact_frames": bool(pred_contact_frames > 0),
+                    "num_raw_segments_pre_filter": int(len(pre_segments)),
+                    "num_raw_segments_post_filter": int(len(post_segments)),
+                    "raw_segment_length_sum_pre_filter": int(sum(int(item["raw_length"]) for item in pre_segments)),
+                    "raw_segment_length_sum_post_filter": int(sum(int(item["raw_length"]) for item in post_segments)),
+                    "num_windows_pre_cap": int(cap_item.get("num_windows_pre_cap", 0)),
+                    "num_windows_after_hand_cap": int(cap_item.get("num_windows_after_hand_cap", 0)),
+                    "num_windows_post_cap": int(cap_item.get("num_windows_post_cap", 0)),
+                    "num_windows_dropped_by_hand_cap": int(cap_item.get("num_windows_dropped_by_hand_cap", 0)),
+                    "num_windows_dropped_by_seq_cap": int(cap_item.get("num_windows_dropped_by_seq_cap", 0)),
+                }
+            )
 
         masks.append(pred_mask)
         dists.append(result["min_region_dist"])
@@ -208,16 +324,23 @@ def build_windows_for_loader(
         windows_all.extend(batch_windows)
         progress.update(len(result["lengths"]))
     progress.finish()
-
-    metadata = {
-        "artifact": "selector_windows_v2",
-        "space_definition": RESTORED_PAIR_SPACE,
+    selector_params = {
         "tau_contact": float(tau_contact),
         "gap_merge": int(gap_merge),
         "raw_L_min": int(raw_L_min),
         "window_size": int(window_size),
         "per_hand_max_windows": int(per_hand_max_windows),
         "per_seq_max_windows": int(per_seq_max_windows),
+        "frame_chunk": int(frame_chunk),
+        "target_chunk": int(target_chunk),
+    }
+    selector_stats_summary = _summarize_selector_sequence_stats(sequence_stats_all)
+
+    metadata = {
+        "artifact": "selector_windows_v2",
+        "space_definition": RESTORED_PAIR_SPACE,
+        "selector_params": selector_params,
+        "selector_stats_summary": selector_stats_summary,
         "hand_side_names": HAND_SIDE_NAMES,
         "target_region_names": TARGET_REGION_NAMES,
         "region_map_summary": region_map_summary(region_map),
@@ -237,6 +360,9 @@ def build_windows_for_loader(
         "hand_side_names": np.asarray(HAND_SIDE_NAMES, dtype=object),
         "target_region_names": np.asarray(TARGET_REGION_NAMES, dtype=object),
         "metadata_json": np.asarray(dumps_metadata(metadata)),
+        "selector_params_json": np.asarray(dumps_metadata(selector_params)),
+        "selector_stats_json": np.asarray(dumps_metadata(selector_stats_summary)),
+        "selector_sequence_stats": records_to_object_array(sequence_stats_all),
     }
 
 

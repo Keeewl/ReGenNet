@@ -12,6 +12,7 @@ from refine_v2.data.schema import (
     DEFAULT_RAW_L_MIN,
     DEFAULT_TAU_CONTACT,
     DEFAULT_WINDOW_SIZE,
+    loads_metadata,
 )
 from refine_v2.model.regions import DEFAULT_REGION_MAP_PATH, load_region_map
 
@@ -76,6 +77,11 @@ def main(argv=None):
         f"(raw_segments={len(artifact['raw_segments'])}, windows={len(artifact['windows'])}, "
         f"default_region_map={DEFAULT_REGION_MAP_PATH})"
     )
+    stats = loads_metadata(artifact.get("selector_stats_json", "{}"))
+    if stats:
+        print("selector_stats_summary:")
+        for key, value in stats.items():
+            print(f"{key}: {value}")
 
 
 if __name__ == "__main__":

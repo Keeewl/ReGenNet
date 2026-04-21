@@ -256,6 +256,15 @@ def compute_contact_for_batch(
         dataset_keys = [f"sample_{sample_indices[idx]}" for idx in range(batch_size)]
     mask_np = _to_numpy(contact_mask).astype(np.uint8)
     dist_np = _to_numpy(min_dist).astype(np.float32)
+    segments_pre_filter = segments_from_contact_mask(
+        mask_np,
+        lengths_np,
+        sample_indices,
+        dataset_row_indices,
+        dataset_keys,
+        gap_merge=gap_merge,
+        raw_L_min=1,
+    )
     segments = segments_from_contact_mask(
         mask_np,
         lengths_np,
@@ -268,6 +277,7 @@ def compute_contact_for_batch(
     return {
         "contact_mask": mask_np,
         "min_region_dist": dist_np,
+        "segments_pre_filter": segments_pre_filter,
         "segments": segments,
         "lengths": lengths_np,
         "sample_indices": sample_indices,
