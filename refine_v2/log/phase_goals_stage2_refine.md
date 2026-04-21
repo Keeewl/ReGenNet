@@ -89,7 +89,7 @@ top-k attribution  -> region annotation for downstream refiner supervision
 
 ## Phase 1: Full Train Contact Statistics By Action Type
 
-Status: implemented, waiting for full train run
+Status: completed for first contact-rich subset pass
 
 Goal:
 
@@ -154,9 +154,22 @@ Expected output:
 - ranked contact-rich action type candidates
 - initial recommended contact-rich subset action types
 
+Completed outputs:
+
+- `refine_v2/outputs/train/action_type_stats/action_type_stats.json`
+- `refine_v2/outputs/train/action_type_stats/action_type_stats.csv`
+- `refine_v2/outputs/train/action_type_stats/action_type_stats.md`
+
+First-pass result:
+
+- 40 action types were analyzed.
+- 30 action types passed the initial broad recommendation rule.
+- The broad rule was considered too wide for the first refiner subset.
+- A narrower 15-action contact-rich subset was selected manually from the ranked statistics.
+
 ## Phase 2: Contact-Rich Sequence Subset
 
-Status: implemented, waiting for action-type stats results
+Status: completed for first 15-action subset
 
 Goal:
 
@@ -192,9 +205,37 @@ Expected output:
 - bucket labels
 - summary statistics
 
+Selected 15 action types:
+
+```text
+A028 Hand wrestling
+A025 Carry on back
+A001 Handshake
+A009 Sit on leg
+A021 Dance
+A000 Hug
+A008 Pull
+A019 Support with hand
+A023 Shoulder to shoulder
+A035 Help up
+A027 Massaging leg
+A022 Link arms
+A003 Grab
+A016 High-five
+A034 Kiss on cheek
+```
+
+Completed outputs:
+
+- `refine_v2/outputs/train/contact_subset/subset_manifest.json`
+- `refine_v2/outputs/train/contact_subset/subset_sequences.csv`
+- `refine_v2/outputs/train/contact_subset/main_positive_sequences.csv`
+- `refine_v2/outputs/train/contact_subset/hard_negative_sequences.csv`
+- `refine_v2/outputs/train/contact_subset/subset_summary.md`
+
 ## Phase 3: Rerun Fixed Selector/Window On Subset
 
-Status: implemented, waiting for subset manifest results
+Status: completed for first 15-action subset
 
 Goal:
 
@@ -229,9 +270,39 @@ Expected output:
 - subset audit json
 - subset audit log summary
 
+Completed outputs:
+
+- `refine_v2/outputs/train/contact_subset/selector_rerun/subset_selector_windows.npz`
+- `refine_v2/outputs/train/contact_subset/selector_rerun/subset_selector_audit.json`
+- `refine_v2/outputs/train/contact_subset/selector_rerun/subset_selector_audit_summary.md`
+- `refine_v2/outputs/train/contact_subset/selector_rerun/subset_window_metadata.json`
+- `refine_v2/outputs/train/contact_subset/selector_rerun/subset_window_metadata.csv`
+
+Key subset audit results:
+
+```text
+num_sequences = 2842
+num_gt_segments = 13190
+num_pred_windows = 6749
+gt_positive_zero_window_ratio = 0.0
+topk_gt_segment_recall = 0.6860
+topk_window_match_ratio = 0.8947
+topk_region_match_ratio = 0.9655
+window_contact_purity = 0.6857
+false_positive_window_ratio = 0.1556
+gt_negative_nonzero_window_ratio = 0.0
+```
+
+Decision:
+
+```text
+The 15-action contact-rich subset and fixed selector/window rerun are good enough
+to become the first Stage2 refiner training domain.
+```
+
 ## Phase 4: Refiner Data Interface
 
-Status: pending
+Status: completed for first fast-path implementation
 
 Goal:
 
@@ -265,9 +336,67 @@ Expected output:
 - data inspection CLI
 - sanity-check commands
 
+Completed outputs:
+
+- `refine_v2/refiner_data/__init__.py`
+- `refine_v2/refiner_data/schema.py`
+- `refine_v2/refiner_data/sanity_checks.py`
+- `refine_v2/refiner_data/feature_pack.py`
+- `refine_v2/refiner_data/window_dataset.py`
+- `refine_v2/refiner_data/window_loader.py`
+- `refine_v2/refiner_data/README.md`
+- `refine_v2/tools/inspect_refiner_data.py`
+- `refine_v2/cli_inspect_refiner_data.py`
+- `refine_v2/commands/11_inspect_refiner_data.sh`
+
+Implemented sample unit:
+
+```text
+one sample = one hand-time selector window
+```
+
+Implemented fast-path fields:
+
+```text
+actor_motion_window
+coarse_motion_window
+gt_motion_window
+coarse_region_contact_mask_window
+coarse_min_region_dist_window
+gt_region_contact_mask_window
+gt_min_region_dist_window
+hand_side / primary region / top-k region metadata
+valid_mask
+sequence and window metadata
+```
+
+Alignment policy:
+
+```text
+reaction_data row index = dataset_row_index
+label_row_to_index      = {dataset_row_index -> label array index}
+selector_row_to_index   = {dataset_row_index -> selector artifact local index}
+manifest_row_to_record  = {dataset_row_index -> manifest sequence metadata}
+```
+
+Decision:
+
+```text
+The fast-path refiner data interface is good enough for the first trainable
+refiner implementation.
+```
+
+Deferred:
+
+```text
+include_xyz=True remains NotImplementedError.
+Dynamic SMPL-X xyz debug should be added only after the fast motion/contact
+dataset and first refiner are stable.
+```
+
 ## Phase 5: Refiner Feature / Network / Loss
 
-Status: pending
+Status: next
 
 Goal:
 
@@ -275,15 +404,17 @@ Implement the first trainable refiner after subset/data loader are stable.
 
 This phase is intentionally deferred until subset quality is audited.
 
-Possible first-scope requirements:
+Next first-scope requirements:
 
-- window-level input features
-- coarse motion crop
-- actor motion context
-- hand side / top-k region annotations
-- binary contact supervision
-- restoration-aware output handling
-- minimal train/eval loop
+- model input packing from `RefineV2WindowDataset`
+- minimal residual refiner architecture
+- residual output over `coarse_motion_window`
+- supervised target from `gt_motion_window`
+- contact-aware auxiliary losses from GT mesh-region labels
+- valid-mask-aware loss computation
+- train/eval split protocol on the 15-action subset
+- minimal checkpointing and metric logging
+- one-batch and small-overfit tests before full subset training
 
 Open design questions:
 
@@ -291,18 +422,20 @@ Open design questions:
 - whether to train on one primary region target or multi-region contact targets
 - whether to include hard-negative windows from `GT0 / Pred+`
 - whether refiner predicts full pose deltas, hand deltas, or contact-region corrections
+- whether motion loss should initially be full-body MSE or weighted toward reactor hands/contact frames
 
 ## Current Recommendation
 
-Freeze selector/window for now.
+Freeze selector/window, the first 15-action subset, and the fast-path refiner
+data interface for now.
 
 Next concrete task:
 
 ```text
-implement full train action-type contact statistics
+minimal residual refiner + train loop + loss + eval framework
 ```
 
-Then decide the contact-rich subset from measured action-type statistics, not from intuition alone.
+The first refiner should be developed on the subset rerun outputs rather than on full train.
 
 ## Update Log
 
@@ -311,4 +444,13 @@ Then decide the contact-rich subset from measured action-type statistics, not fr
   - Main next phase changed to action-type contact-rich subset selection.
   - This `phase_goals` file created as the living plan for Stage2 refine.
   - Implemented action-type stats, contact-rich subset manifest, and subset selector rerun CLIs.
-  - Full train action-type stats and subset rerun still need to be executed in the `regennet5090` environment.
+  - Full train action-type stats were run and used to select a 15-action contact-rich subset.
+  - The 15-action subset selector rerun passed the current quality bar:
+    - `topk_window_match_ratio = 0.8947`
+    - `window_contact_purity = 0.6857`
+    - `false_positive_window_ratio = 0.1556`
+    - `gt_positive_zero_window_ratio = 0.0`
+  - Next phase is subset visual sanity check plus refiner data/feature interface.
+  - Added subset window text sanity inspection and aitviewer single-window inspection support.
+  - Implemented fast-path `RefineV2WindowDataset`, feature packing, strict alignment checks, DataLoader collate, and inspection CLI.
+  - Phase 4 is complete enough to move to the first trainable refiner framework.

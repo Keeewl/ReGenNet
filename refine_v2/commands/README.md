@@ -18,6 +18,9 @@ Files:
 - `06_build_action_type_stats.sh`: aggregate full-train contact/window stats by Inter-X action type.
 - `07_build_subset_manifest.sh`: build a contact-rich sequence-level subset manifest.
 - `08_rerun_selector_on_subset.sh`: rerun the frozen hand-time top-k selector on the main positive subset.
+- `09_vis_subset_windows.sh`: print/export a text sanity report for subset windows.
+- `10_view_subset_window_ait.sh`: open one chosen subset window interactively in aitviewer.
+- `11_inspect_refiner_data.sh`: inspect the fast window-level refiner dataset and export a small JSON summary.
 
 Default inputs and outputs embedded in the scripts:
 
@@ -49,4 +52,7 @@ bash refine_v2/commands/04_vis_windows_vs_gt.sh
 bash refine_v2/commands/06_build_action_type_stats.sh
 bash refine_v2/commands/07_build_subset_manifest.sh
 bash refine_v2/commands/08_rerun_selector_on_subset.sh
+bash refine_v2/commands/09_vis_subset_windows.sh
+bash refine_v2/commands/10_view_subset_window_ait.sh
+bash refine_v2/commands/11_inspect_refiner_data.sh
 ```
