@@ -10,7 +10,7 @@ corresponding `.sh` file before running.
 Files:
 
 - `00_build_contact_labels.sh`: build `contact_labels_gt.npz` from `reaction_data`.
-- `01_select_windows.sh`: build relaxed `selector_windows_v2_relaxed_tau010.npz` from coarse binary mesh contact.
+- `01_select_windows.sh`: build hand-time `selector_windows_v2_hand_time_tau010.npz` from coarse binary mesh contact.
 - `02_audit_windows.sh`: strict + relaxed audit against direct GT contact labels.
 - `03_vis_contact_labels.sh`: text inspection of one sample's GT contact labels.
 - `04_vis_windows_vs_gt.sh`: text inspection of one sample's predicted windows vs GT.

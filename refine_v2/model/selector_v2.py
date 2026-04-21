@@ -76,30 +76,173 @@ def windows_from_segment(segment: dict[str, Any], valid_len: int, *, window_size
     return out
 
 
-def _add_batch_index_to_segments(
-    segments: list[dict[str, Any]],
-    dataset_row_indices: list[int],
+def _hand_segments_from_mask(
+    mask_1d: np.ndarray,
+    *,
+    sample_index: int,
+    dataset_row_index: int,
+    dataset_key: str,
+    hand_side: str,
+    hand_side_id: int,
+    gap_merge: int,
+    raw_L_min: int,
 ) -> list[dict[str, Any]]:
-    row_to_batch = {int(row): idx for idx, row in enumerate(dataset_row_indices)}
+    mask_1d = np.asarray(mask_1d).astype(bool).reshape(-1)
+    runs: list[tuple[int, int]] = []
+    idx = 0
+    while idx < mask_1d.size:
+        if not mask_1d[idx]:
+            idx += 1
+            continue
+        start = idx
+        idx += 1
+        while idx < mask_1d.size and mask_1d[idx]:
+            idx += 1
+        runs.append((start, idx))
+
+    if not runs:
+        return []
+    merged = [runs[0]]
+    for start, end in runs[1:]:
+        prev_start, prev_end = merged[-1]
+        if start - prev_end <= int(gap_merge):
+            merged[-1] = (prev_start, end)
+        else:
+            merged.append((start, end))
+
     out = []
-    for segment in segments:
-        item = dict(segment)
-        item["batch_index"] = int(row_to_batch.get(int(item["dataset_row_index"]), -1))
-        out.append(item)
+    for start, end in merged:
+        raw_length = int(end - start)
+        if raw_length < int(raw_L_min):
+            continue
+        out.append(
+            {
+                "sample_index": int(sample_index),
+                "dataset_row_index": int(dataset_row_index),
+                "dataset_key": str(dataset_key),
+                "hand_side": str(hand_side),
+                "hand_side_id": int(hand_side_id),
+                "raw_start_frame": int(start),
+                "raw_end_frame": int(end),
+                "raw_length": int(raw_length),
+                "center_frame": int((start + end - 1) // 2),
+            }
+        )
     return out
 
 
-def _window_contact_ratio(window: dict[str, Any], pred_mask: np.ndarray) -> float:
+def _attribution_for_segment(
+    segment: dict[str, Any],
+    pred_mask: np.ndarray,
+    min_dist: np.ndarray,
+    *,
+    batch_index: int,
+) -> dict[str, Any]:
+    hand_id = int(segment["hand_side_id"])
+    start = int(segment["raw_start_frame"])
+    end = int(segment["raw_end_frame"])
+    score_table = []
+    for region_id, region_name in enumerate(TARGET_REGION_NAMES):
+        region_contact = np.asarray(pred_mask[batch_index, hand_id, region_id, start:end], dtype=bool)
+        region_dist = np.asarray(min_dist[batch_index, hand_id, region_id, start:end], dtype=np.float32)
+        mean_min_dist = float(np.mean(region_dist)) if region_dist.size else float("inf")
+        min_region_dist = float(np.min(region_dist)) if region_dist.size else float("inf")
+        score_table.append(
+            {
+                "target_region": str(region_name),
+                "target_region_id": int(region_id),
+                "num_contact_frames": int(region_contact.sum()),
+                "mean_min_dist": mean_min_dist,
+                "min_dist": min_region_dist,
+            }
+        )
+
+    ranked = sorted(
+        score_table,
+        key=lambda item: (
+            -int(item["num_contact_frames"]),
+            float(item["mean_min_dist"]),
+            float(item["min_dist"]),
+            int(item["target_region_id"]),
+        ),
+    )
+    primary = ranked[0]
+    secondary = ranked[1] if len(ranked) > 1 else ranked[0]
+    out = dict(segment)
+    out.update(
+        {
+            "proposal_type": "hand_time",
+            "primary_target_region": primary["target_region"],
+            "primary_target_region_id": int(primary["target_region_id"]),
+            "secondary_target_region": secondary["target_region"],
+            "secondary_target_region_id": int(secondary["target_region_id"]),
+            "region_score_table": score_table,
+            "target_region": primary["target_region"],
+            "target_region_id": int(primary["target_region_id"]),
+        }
+    )
+    return out
+
+
+def _build_hand_segments_for_batch(
+    pred_mask: np.ndarray,
+    min_dist: np.ndarray,
+    lengths: np.ndarray,
+    sample_indices: list[int],
+    dataset_row_indices: list[int],
+    dataset_keys: list[str],
+    *,
+    gap_merge: int,
+    raw_L_min: int,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    segments_pre_filter: list[dict[str, Any]] = []
+    segments_post_filter: list[dict[str, Any]] = []
+    hand_mask = np.asarray(pred_mask, dtype=bool).any(axis=2)
+    for batch_index in range(hand_mask.shape[0]):
+        valid_len = int(lengths[batch_index])
+        for hand_id, hand_side in enumerate(HAND_SIDE_NAMES):
+            common_kwargs = {
+                "sample_index": int(sample_indices[batch_index]),
+                "dataset_row_index": int(dataset_row_indices[batch_index]),
+                "dataset_key": str(dataset_keys[batch_index]),
+                "hand_side": str(hand_side),
+                "hand_side_id": int(hand_id),
+                "gap_merge": int(gap_merge),
+            }
+            pre = _hand_segments_from_mask(
+                hand_mask[batch_index, hand_id, :valid_len],
+                raw_L_min=1,
+                **common_kwargs,
+            )
+            post = _hand_segments_from_mask(
+                hand_mask[batch_index, hand_id, :valid_len],
+                raw_L_min=int(raw_L_min),
+                **common_kwargs,
+            )
+            segments_pre_filter.extend(
+                _attribution_for_segment(item, pred_mask, min_dist, batch_index=batch_index)
+                for item in pre
+            )
+            segments_post_filter.extend(
+                _attribution_for_segment(item, pred_mask, min_dist, batch_index=batch_index)
+                for item in post
+            )
+    return segments_pre_filter, segments_post_filter
+
+
+def _window_contact_ratios(window: dict[str, Any], pred_mask: np.ndarray) -> tuple[float, float]:
     batch_index = int(window["batch_index"])
     if batch_index < 0:
-        return 0.0
+        return 0.0, 0.0
     hand_id = int(window["hand_side_id"])
     region_id = int(window["target_region_id"])
     start = int(window["start_frame"])
     end = int(window["end_frame"])
     if end <= start:
-        return 0.0
-    return float(np.asarray(pred_mask[batch_index, hand_id, region_id, start:end], dtype=bool).mean())
+        return 0.0, 0.0
+    hand_mask = np.asarray(pred_mask[batch_index, hand_id, :, start:end], dtype=bool).any(axis=0)
+    region_mask = np.asarray(pred_mask[batch_index, hand_id, region_id, start:end], dtype=bool)
+    return float(hand_mask.mean()), float(region_mask.mean())
 
 
 def _limit_windows(
@@ -112,7 +255,7 @@ def _limit_windows(
     def sort_key(item: dict[str, Any]):
         return (
             -int(item.get("raw_length", 0)),
-            -float(item.get("contact_frame_ratio", 0.0)),
+            -float(item.get("hand_contact_frame_ratio", 0.0)),
             int(item.get("raw_start_frame", 0)),
             int(item.get("hand_side_id", 0)),
             int(item.get("target_region_id", 0)),
@@ -120,7 +263,10 @@ def _limit_windows(
         )
 
     for item in windows:
-        item["contact_frame_ratio"] = _window_contact_ratio(item, pred_mask)
+        hand_ratio, primary_ratio = _window_contact_ratios(item, pred_mask)
+        item["hand_contact_frame_ratio"] = hand_ratio
+        item["primary_region_contact_frame_ratio"] = primary_ratio
+        item["contact_frame_ratio"] = hand_ratio
 
     by_sample: dict[int, list[dict[str, Any]]] = {}
     for item in windows:
@@ -223,6 +369,8 @@ def build_windows_for_loader(
     body_forward = RestoredBodyModelForward(device=device_t)
     masks = []
     dists = []
+    hand_masks = []
+    hand_dists = []
     lengths_all: list[int] = []
     sample_indices_all: list[int] = []
     dataset_row_indices_all: list[int] = []
@@ -251,19 +399,29 @@ def build_windows_for_loader(
             target_chunk=target_chunk,
         )
         pred_mask = result["contact_mask"]
-        pre_filter_segments = _add_batch_index_to_segments(
-            result["segments_pre_filter"],
+        min_dist = result["min_region_dist"]
+        hand_mask = np.asarray(pred_mask, dtype=bool).any(axis=2).astype(np.uint8)
+        hand_min_dist = np.asarray(min_dist, dtype=np.float32).min(axis=2)
+        row_to_local = {int(row): idx for idx, row in enumerate(result["dataset_row_indices"])}
+        pre_filter_segments, batch_segments = _build_hand_segments_for_batch(
+            pred_mask,
+            min_dist,
+            result["lengths"],
+            result["sample_indices"],
             result["dataset_row_indices"],
-        )
-        batch_segments = _add_batch_index_to_segments(
-            result["segments"],
-            result["dataset_row_indices"],
+            result["dataset_keys"],
+            gap_merge=gap_merge,
+            raw_L_min=raw_L_min,
         )
         batch_windows_pre_cap: list[dict[str, Any]] = []
         for segment in batch_segments:
-            batch_index = int(segment["batch_index"])
+            batch_index = int(row_to_local.get(int(segment["dataset_row_index"]), -1))
+            segment["batch_index"] = batch_index
             valid_len = int(result["lengths"][batch_index]) if batch_index >= 0 else 0
             batch_windows_pre_cap.extend(windows_from_segment(segment, valid_len, window_size=window_size))
+        for segment in pre_filter_segments:
+            if "batch_index" not in segment:
+                segment["batch_index"] = int(row_to_local.get(int(segment["dataset_row_index"]), -1))
         batch_windows, cap_debug = _limit_windows(
             batch_windows_pre_cap,
             pred_mask,
@@ -281,7 +439,7 @@ def build_windows_for_loader(
         for local_index, row_index in enumerate(result["dataset_row_indices"]):
             row_index = int(row_index)
             valid_len = int(result["lengths"][local_index])
-            pred_contact_frames = int(pred_mask[local_index, :, :, :valid_len].sum())
+            pred_contact_frames = int(hand_mask[local_index, :, :valid_len].sum())
             pre_segments = pre_segments_by_row.get(row_index, [])
             post_segments = post_segments_by_row.get(row_index, [])
             cap_item = cap_by_row.get(
@@ -316,6 +474,8 @@ def build_windows_for_loader(
 
         masks.append(pred_mask)
         dists.append(result["min_region_dist"])
+        hand_masks.append(hand_mask)
+        hand_dists.append(hand_min_dist)
         lengths_all.extend(int(x) for x in result["lengths"].tolist())
         sample_indices_all.extend(result["sample_indices"])
         dataset_row_indices_all.extend(result["dataset_row_indices"])
@@ -325,6 +485,7 @@ def build_windows_for_loader(
         progress.update(len(result["lengths"]))
     progress.finish()
     selector_params = {
+        "proposal_type": "hand_time_with_region_attribution",
         "tau_contact": float(tau_contact),
         "gap_merge": int(gap_merge),
         "raw_L_min": int(raw_L_min),
@@ -345,11 +506,15 @@ def build_windows_for_loader(
         "target_region_names": TARGET_REGION_NAMES,
         "region_map_summary": region_map_summary(region_map),
         "interval_semantics": "[start_frame, end_frame)",
-        "ranking": "raw_length desc, contact_frame_ratio desc, raw_start_frame asc",
+        "ranking": "raw_length desc, hand_contact_frame_ratio desc, raw_start_frame asc",
+        "proposal_type": "hand_time_with_region_attribution",
+        "region_attribution": "rank by num_contact_frames desc, mean_min_dist asc, min_dist asc",
     }
     return {
         "pred_contact_mask": np.concatenate(masks, axis=0) if masks else np.zeros((0, 2, 6, 0), dtype=np.uint8),
         "pred_min_region_dist": np.concatenate(dists, axis=0) if dists else np.zeros((0, 2, 6, 0), dtype=np.float32),
+        "hand_contact_mask": np.concatenate(hand_masks, axis=0) if hand_masks else np.zeros((0, 2, 0), dtype=np.uint8),
+        "hand_min_dist": np.concatenate(hand_dists, axis=0) if hand_dists else np.zeros((0, 2, 0), dtype=np.float32),
         "lengths": np.asarray(lengths_all, dtype=np.int64),
         "sample_indices": np.asarray(sample_indices_all, dtype=np.int64),
         "dataset_row_indices": np.asarray(dataset_row_indices_all, dtype=np.int64),

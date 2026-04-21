@@ -103,6 +103,7 @@ def _diagnostic_summary(
     relaxed_metrics: dict[str, Any],
     region_error: dict[str, Any],
     selector_stats: dict[str, Any],
+    gt_sequence_stats: dict[str, Any],
 ) -> dict[str, Any]:
     reasons = []
     zero_ratio = float(strict_metrics.get("zero_window_sequence_ratio", 0.0))
@@ -145,6 +146,8 @@ def _diagnostic_summary(
     if not reasons:
         reasons.append("no_single_dominant_failure_layer")
 
+    gt_positive_zero_ratio = float(gt_sequence_stats.get("gt_positive_zero_window_ratio", 0.0))
+    gt_negative_nonzero_ratio = float(gt_sequence_stats.get("gt_negative_nonzero_window_ratio", 0.0))
     return {
         "likely_failure_layers": reasons,
         "selector_sequence_ratios": {
@@ -159,12 +162,24 @@ def _diagnostic_summary(
             "hand_only_minus_strict": float(hand_recall - strict_recall),
             "time_only_minus_hand_only": float(time_recall - hand_recall),
         },
+        "gt_sequence_interpretation": {
+            "gt_positive_zero_window_ratio": gt_positive_zero_ratio,
+            "gt_negative_nonzero_window_ratio": gt_negative_nonzero_ratio,
+            "gt_positive_zero_window_is_true_sequence_recall_miss": True,
+            "gt_negative_nonzero_window_is_sequence_false_positive": True,
+        },
         "summary_text": (
             "Use selector_stats_json to locate candidate loss before audit; "
             "large hand_only-strict gap indicates region mismatch, and large "
-            "time_only-hand_only gap indicates hand mismatch."
+            "time_only-hand_only gap indicates hand mismatch. GT+ / Pred0 is "
+            "the true zero-window recall miss bucket."
         ),
     }
+
+
+def _empty_region_confusion() -> dict[str, dict[str, int]]:
+    cols = list(TARGET_REGION_NAMES) + ["unmatched"]
+    return {str(row): {str(col): 0 for col in cols} for row in TARGET_REGION_NAMES}
 
 
 def audit_windows(
@@ -200,6 +215,32 @@ def audit_windows(
         windows_by_seq.setdefault(_seq_key(window), []).append(window)
         windows_by_hand.setdefault(_hand_key(window), []).append(window)
         windows_by_group.setdefault(_group_key(window), []).append(window)
+
+    pred_rows = {int(window["dataset_row_index"]) for window in pred_windows}
+    gt_positive_rows = set()
+    gt_negative_rows = set()
+    gt_pred_buckets = {
+        "gt_positive_pred_positive": 0,
+        "gt_positive_pred_zero": 0,
+        "gt_negative_pred_positive": 0,
+        "gt_negative_pred_zero": 0,
+    }
+    for row, mask_index in row_to_mask_index.items():
+        valid_len = int(lengths[mask_index])
+        is_gt_positive = bool(gt_mask[mask_index, :, :, :valid_len].astype(bool).any())
+        is_pred_positive = int(row) in pred_rows
+        if is_gt_positive:
+            gt_positive_rows.add(int(row))
+            if is_pred_positive:
+                gt_pred_buckets["gt_positive_pred_positive"] += 1
+            else:
+                gt_pred_buckets["gt_positive_pred_zero"] += 1
+        else:
+            gt_negative_rows.add(int(row))
+            if is_pred_positive:
+                gt_pred_buckets["gt_negative_pred_positive"] += 1
+            else:
+                gt_pred_buckets["gt_negative_pred_zero"] += 1
 
     recalled_gt = 0
     hand_only_recalled_gt = 0
@@ -263,6 +304,7 @@ def audit_windows(
     same_hand_time_overlap_window_count = 0
     wrong_hand_count = 0
     same_sample_time_overlap_window_count = 0
+    wrong_region_confusion = _empty_region_confusion()
     for window in pred_windows:
         best_gt, best_overlap = _best_gt_match(window, gt_by_group)
         best_hand_gt, best_hand_overlap = _best_gt_match_from_candidates(window, gt_by_hand.get(_hand_key(window), []))
@@ -302,6 +344,18 @@ def audit_windows(
             same_region = int(best_any_region["target_region_id"]) == int(window["target_region_id"])
             region_match_num += int(same_region)
             wrong_region_count += int(not same_region)
+            pred_region_name = str(window.get("primary_target_region", window.get("target_region", TARGET_REGION_NAMES[int(window["target_region_id"])])))
+            gt_region_name = str(best_any_region["target_region"])
+            if pred_region_name not in wrong_region_confusion:
+                wrong_region_confusion[pred_region_name] = {str(col): 0 for col in list(TARGET_REGION_NAMES) + ["unmatched"]}
+            if gt_region_name not in wrong_region_confusion[pred_region_name]:
+                wrong_region_confusion[pred_region_name][gt_region_name] = 0
+            wrong_region_confusion[pred_region_name][gt_region_name] += 1
+        else:
+            pred_region_name = str(window.get("primary_target_region", window.get("target_region", TARGET_REGION_NAMES[int(window["target_region_id"])])))
+            if pred_region_name not in wrong_region_confusion:
+                wrong_region_confusion[pred_region_name] = {str(col): 0 for col in list(TARGET_REGION_NAMES) + ["unmatched"]}
+            wrong_region_confusion[pred_region_name]["unmatched"] += 1
 
         if time_only_window_matched and best_time_gt is not None:
             same_sample_time_overlap_window_count += 1
@@ -362,9 +416,24 @@ def audit_windows(
         "same_sample_time_overlap_but_wrong_hand_count": int(wrong_hand_count),
         "same_sample_time_overlap_but_wrong_hand_ratio": float(wrong_hand_count / max(same_sample_time_overlap_window_count, 1)),
     }
+    gt_sequence_stats = {
+        "num_gt_positive_sequences": int(len(gt_positive_rows)),
+        "num_gt_negative_sequences": int(len(gt_negative_rows)),
+        "gt_positive_zero_window_count": int(gt_pred_buckets["gt_positive_pred_zero"]),
+        "gt_positive_zero_window_ratio": float(gt_pred_buckets["gt_positive_pred_zero"] / max(len(gt_positive_rows), 1)),
+        "gt_negative_zero_window_count": int(gt_pred_buckets["gt_negative_pred_zero"]),
+        "gt_negative_zero_window_ratio": float(gt_pred_buckets["gt_negative_pred_zero"] / max(len(gt_negative_rows), 1)),
+        "gt_negative_nonzero_window_count": int(gt_pred_buckets["gt_negative_pred_positive"]),
+        "gt_negative_nonzero_window_ratio": float(gt_pred_buckets["gt_negative_pred_positive"] / max(len(gt_negative_rows), 1)),
+        "gt_positive_pred_positive_count": int(gt_pred_buckets["gt_positive_pred_positive"]),
+        "gt_positive_pred_zero_count": int(gt_pred_buckets["gt_positive_pred_zero"]),
+        "gt_negative_pred_positive_count": int(gt_pred_buckets["gt_negative_pred_positive"]),
+        "gt_negative_pred_zero_count": int(gt_pred_buckets["gt_negative_pred_zero"]),
+    }
     metrics = dict(strict_metrics)
     metrics.update(relaxed_metrics)
     metrics.update(region_error_analysis)
+    metrics.update(gt_sequence_stats)
     selector_stats = _load_optional_json_scalar(windows_pack, "selector_stats_json")
     selector_params = _load_optional_json_scalar(windows_pack, "selector_params_json")
     diagnostic_summary = _diagnostic_summary(
@@ -372,6 +441,7 @@ def audit_windows(
         relaxed_metrics,
         region_error_analysis,
         selector_stats,
+        gt_sequence_stats,
     )
     progress.finish()
     return {
@@ -383,6 +453,8 @@ def audit_windows(
         "strict_metrics": strict_metrics,
         "relaxed_metrics": relaxed_metrics,
         "region_error_analysis": region_error_analysis,
+        "gt_sequence_stats": gt_sequence_stats,
+        "wrong_region_confusion_matrix": wrong_region_confusion,
         "metrics": metrics,
         "diagnostic_summary": diagnostic_summary,
         "zero_window_dataset_row_indices": zero_window_sequences,

@@ -1,11 +1,11 @@
 conda activate regennet5090
 
-####### refine_v2: select deterministic windows relaxed tau010 #######
+####### refine_v2: select hand-time windows tau010 #######
 export CUDA_VISIBLE_DEVICES=1
 python -m refine_v2.tools.select_windows \
   --reaction_data_path refine/dataset/train/reaction_data.npz \
   --contact_labels_path refine_v2/outputs/train/contact_labels_gt.npz \
-  --output_path refine_v2/outputs/train/selector_windows_v2_relaxed_tau010.npz \
+  --output_path refine_v2/outputs/train/selector_windows_v2_hand_time_tau010.npz \
   --region_map_path visualize/viewer/part_segm/6_parts/six_parts.pkl \
   --tau_contact 0.10 \
   --gap_merge 4 \
