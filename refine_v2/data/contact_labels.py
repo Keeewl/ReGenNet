@@ -7,7 +7,6 @@ from typing import Any
 import numpy as np
 import torch
 
-from .regions import region_map_summary
 from .schema import (
     DEFAULT_GAP_MERGE,
     DEFAULT_RAW_L_MIN,
@@ -20,7 +19,8 @@ from .schema import (
     dumps_metadata,
     records_to_object_array,
 )
-from .utils_restore import RestoredBodyModelForward, motions_to_vertices, restore_pair_if_needed
+from .restored_space import RestoredBodyModelForward, motions_to_vertices, restore_pair_if_needed
+from refine_v2.model.regions import region_map_summary
 
 
 def _to_numpy(value):

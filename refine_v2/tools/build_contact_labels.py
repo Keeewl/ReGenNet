@@ -5,10 +5,8 @@ from __future__ import annotations
 import argparse
 import os
 
-from .contact_labels import build_contact_labels_for_loader, save_contact_labels
-from .data import make_reaction_data_loader
-from .regions import DEFAULT_REGION_MAP_PATH, load_region_map
-from .schema import DEFAULT_GAP_MERGE, DEFAULT_RAW_L_MIN, DEFAULT_TAU_CONTACT
+from refine_v2.data.schema import DEFAULT_GAP_MERGE, DEFAULT_RAW_L_MIN, DEFAULT_TAU_CONTACT
+from refine_v2.model.regions import DEFAULT_REGION_MAP_PATH, load_region_map
 
 
 def build_parser():
@@ -29,6 +27,9 @@ def build_parser():
 
 def main(argv=None):
     args = build_parser().parse_args(argv)
+    from refine_v2.data.contact_labels import build_contact_labels_for_loader, save_contact_labels
+    from refine_v2.data.reaction_data import make_reaction_data_loader
+
     region_map = load_region_map(args.region_map_path or None)
     loader = make_reaction_data_loader(
         args.reaction_data_path,
@@ -57,4 +58,3 @@ def main(argv=None):
 
 if __name__ == "__main__":
     main()
-

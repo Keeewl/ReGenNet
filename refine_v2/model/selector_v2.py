@@ -7,9 +7,10 @@ from typing import Any
 import numpy as np
 import torch
 
-from .contact_labels import compute_contact_for_batch
 from .regions import region_map_summary
-from .schema import (
+from refine_v2.data.contact_labels import compute_contact_for_batch
+from refine_v2.data.restored_space import RestoredBodyModelForward
+from refine_v2.data.schema import (
     DEFAULT_GAP_MERGE,
     DEFAULT_PER_HAND_MAX_WINDOWS,
     DEFAULT_PER_SEQ_MAX_WINDOWS,
@@ -22,7 +23,6 @@ from .schema import (
     dumps_metadata,
     records_to_object_array,
 )
-from .utils_restore import RestoredBodyModelForward
 
 
 def _window_bounds(center: int, valid_len: int, window_size: int) -> tuple[int, int]:
@@ -236,4 +236,3 @@ def build_windows_for_loader(
 
 def save_selector_windows(path: str, artifact: dict[str, Any]):
     np.savez_compressed(path, **artifact)
-

@@ -162,6 +162,8 @@ body_models/
 commands/
 !refine/commands/
 !refine/commands/**
+!refine_v2/commands/
+!refine_v2/commands/**
 
 # Dataset
 dataset/

@@ -9,11 +9,11 @@ from pathlib import Path
 
 import numpy as np
 
-from .schema import HAND_SIDE_NAMES, TARGET_REGION_NAMES
+from refine_v2.data.schema import HAND_SIDE_NAMES, TARGET_REGION_NAMES
 
 
 DEFAULT_REGION_MAP_PATH = (
-    Path(__file__).resolve().parents[1]
+    Path(__file__).resolve().parents[2]
     / "visualize"
     / "viewer"
     / "part_segm"

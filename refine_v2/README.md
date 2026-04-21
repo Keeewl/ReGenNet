@@ -9,6 +9,14 @@ This is the first minimal Stage2 refine_v2 loop:
 
 Intervals use Python slicing semantics: `[start_frame, end_frame)`.
 
+Directory layout:
+
+- `data/`: reaction_data loading, restored-space handling, schema, GT contact labels.
+- `model/`: vertex region maps and deterministic selector v2.
+- `eval/`: strict GT contact-label audit.
+- `tools/`: `python3 -m` CLI entrypoints.
+- `commands/`: shell scripts for the standard module-1 runs.
+
 Default parameters:
 
 - `tau_contact = 0.05`
@@ -38,16 +46,16 @@ You can pass `--region_map_path` with `.json` or `.npz` using:
 Run:
 
 ```bash
-python3 -m refine_v2.cli_build_contact_labels \
+python3 -m refine_v2.tools.build_contact_labels \
   --reaction_data_path refine/dataset/train/reaction_data.npz \
   --output_path tmp/refine_v2/contact_labels_gt.npz
 
-python3 -m refine_v2.cli_select_windows \
+python3 -m refine_v2.tools.select_windows \
   --reaction_data_path refine/dataset/train/reaction_data.npz \
   --contact_labels_path tmp/refine_v2/contact_labels_gt.npz \
   --output_path tmp/refine_v2/selector_windows_v2.npz
 
-python3 -m refine_v2.cli_audit_windows \
+python3 -m refine_v2.tools.audit_windows \
   --contact_labels_path tmp/refine_v2/contact_labels_gt.npz \
   --selector_windows_path tmp/refine_v2/selector_windows_v2.npz \
   --output_json tmp/refine_v2/selector_audit_v2.json

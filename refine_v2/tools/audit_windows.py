@@ -5,7 +5,7 @@ from __future__ import annotations
 import argparse
 import os
 
-from .audit_v2 import audit_windows, save_audit_json
+from refine_v2.eval.audit_v2 import audit_windows, save_audit_json
 
 
 def build_parser():
@@ -30,4 +30,3 @@ def main(argv=None):
 
 if __name__ == "__main__":
     main()
-

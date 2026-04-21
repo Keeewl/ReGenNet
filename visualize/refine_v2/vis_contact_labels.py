@@ -8,7 +8,7 @@ import os
 
 import numpy as np
 
-from refine_v2.schema import (
+from refine_v2.data.schema import (
     HAND_SIDE_NAMES,
     TARGET_REGION_NAMES,
     object_array_to_records,

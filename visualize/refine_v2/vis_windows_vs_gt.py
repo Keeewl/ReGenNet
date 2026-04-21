@@ -8,7 +8,7 @@ import os
 
 import numpy as np
 
-from refine_v2.schema import object_array_to_records, to_jsonable
+from refine_v2.data.schema import object_array_to_records, to_jsonable
 
 
 def _load_npz(path: str):

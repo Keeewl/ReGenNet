@@ -5,9 +5,7 @@ from __future__ import annotations
 import argparse
 import os
 
-from .data import make_reaction_data_loader
-from .regions import DEFAULT_REGION_MAP_PATH, load_region_map
-from .schema import (
+from refine_v2.data.schema import (
     DEFAULT_GAP_MERGE,
     DEFAULT_PER_HAND_MAX_WINDOWS,
     DEFAULT_PER_SEQ_MAX_WINDOWS,
@@ -15,7 +13,7 @@ from .schema import (
     DEFAULT_TAU_CONTACT,
     DEFAULT_WINDOW_SIZE,
 )
-from .selector_v2 import build_windows_for_loader, save_selector_windows
+from refine_v2.model.regions import DEFAULT_REGION_MAP_PATH, load_region_map
 
 
 def build_parser():
@@ -40,6 +38,9 @@ def build_parser():
 
 def main(argv=None):
     args = build_parser().parse_args(argv)
+    from refine_v2.data.reaction_data import make_reaction_data_loader
+    from refine_v2.model.selector_v2 import build_windows_for_loader, save_selector_windows
+
     if not os.path.exists(args.contact_labels_path):
         raise FileNotFoundError(
             f"--contact_labels_path does not exist: {args.contact_labels_path}. "
@@ -77,4 +78,3 @@ def main(argv=None):
 
 if __name__ == "__main__":
     main()
-

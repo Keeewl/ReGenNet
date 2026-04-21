@@ -1,6 +1,6 @@
 """Stage2 refine_v2 module 1: contact labels, windows, and strict audit."""
 
-from .schema import (
+from .data.schema import (
     DEFAULT_GAP_MERGE,
     DEFAULT_PER_HAND_MAX_WINDOWS,
     DEFAULT_PER_SEQ_MAX_WINDOWS,

@@ -8,7 +8,7 @@ from typing import Any
 
 import numpy as np
 
-from .schema import (
+from refine_v2.data.schema import (
     HAND_SIDE_NAMES,
     TARGET_REGION_NAMES,
     object_array_to_records,
@@ -235,4 +235,3 @@ def audit_windows(contact_labels_path: str, selector_windows_path: str) -> dict[
 def save_audit_json(path: str, payload: dict[str, Any]):
     with open(path, "w", encoding="utf-8") as f:
         json.dump(to_jsonable(payload), f, indent=2, sort_keys=True)
-
