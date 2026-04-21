@@ -265,6 +265,7 @@ def audit_windows(
     contact_labels_path: str,
     selector_windows_path: str,
     *,
+    dataset_row_indices: list[int] | None = None,
     show_progress: bool = True,
 ) -> dict[str, Any]:
     labels = _load_npz(contact_labels_path)
@@ -275,6 +276,21 @@ def audit_windows(
     gt_mask = np.asarray(labels["gt_contact_mask"], dtype=np.uint8)
     lengths = np.asarray(labels["lengths"], dtype=np.int64).reshape(-1)
     label_rows = np.asarray(labels["dataset_row_indices"], dtype=np.int64).reshape(-1)
+    selected_row_set = None
+    if dataset_row_indices is not None:
+        selected_row_set = {int(row) for row in dataset_row_indices}
+        keep_indices = [idx for idx, row in enumerate(label_rows.tolist()) if int(row) in selected_row_set]
+        gt_mask = gt_mask[keep_indices]
+        lengths = lengths[keep_indices]
+        label_rows = label_rows[keep_indices]
+        gt_segments = [
+            item for item in gt_segments
+            if int(item["dataset_row_index"]) in selected_row_set
+        ]
+        pred_windows = [
+            item for item in pred_windows
+            if int(item["dataset_row_index"]) in selected_row_set
+        ]
     row_to_mask_index = _mask_index_by_row(label_rows)
     progress_total = len(gt_segments) + len(row_to_mask_index) + len(pred_windows)
     progress = ProgressBar("audit_windows", progress_total, unit="items", enabled=show_progress).start()
@@ -623,6 +639,7 @@ def audit_windows(
         "artifact": "selector_audit_v2",
         "contact_labels_path": contact_labels_path,
         "selector_windows_path": selector_windows_path,
+        "dataset_row_indices_filter": sorted(selected_row_set) if selected_row_set is not None else None,
         "selector_params": selector_params,
         "selector_stats_summary": selector_stats,
         "strict_metrics": strict_metrics,

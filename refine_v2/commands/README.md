@@ -15,6 +15,9 @@ Files:
 - `03_vis_contact_labels.sh`: text inspection of one sample's GT contact labels.
 - `04_vis_windows_vs_gt.sh`: text inspection of one sample's predicted windows vs GT.
 - `05_run_minimal_loop.sh`: runs steps 00, 01, and 02.
+- `06_build_action_type_stats.sh`: aggregate full-train contact/window stats by Inter-X action type.
+- `07_build_subset_manifest.sh`: build a contact-rich sequence-level subset manifest.
+- `08_rerun_selector_on_subset.sh`: rerun the frozen hand-time top-k selector on the main positive subset.
 
 Default inputs and outputs embedded in the scripts:
 
@@ -25,6 +28,7 @@ Default inputs and outputs embedded in the scripts:
 - caps stay unchanged: `per_hand_max_windows=2`, `per_seq_max_windows=3`
 - region attribution: `top_k_regions=3`
 - current script device settings: `CUDA_VISIBLE_DEVICES=1`, `DEVICE=cuda`, `BATCH_SIZE=64`
+- subset auto-selection defaults: `min_num_sequences=20`, `min_gt_positive_sequence_ratio=0.50`
 
 Progress:
 
@@ -41,4 +45,8 @@ bash refine_v2/commands/02_audit_windows.sh
 
 bash refine_v2/commands/03_vis_contact_labels.sh
 bash refine_v2/commands/04_vis_windows_vs_gt.sh
+
+bash refine_v2/commands/06_build_action_type_stats.sh
+bash refine_v2/commands/07_build_subset_manifest.sh
+bash refine_v2/commands/08_rerun_selector_on_subset.sh
 ```
