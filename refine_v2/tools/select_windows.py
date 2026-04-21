@@ -11,6 +11,7 @@ from refine_v2.data.schema import (
     DEFAULT_PER_SEQ_MAX_WINDOWS,
     DEFAULT_RAW_L_MIN,
     DEFAULT_TAU_CONTACT,
+    DEFAULT_TOP_K_REGIONS,
     DEFAULT_WINDOW_SIZE,
     loads_metadata,
 )
@@ -29,6 +30,7 @@ def build_parser():
     parser.add_argument("--window_size", default=DEFAULT_WINDOW_SIZE, type=int)
     parser.add_argument("--per_hand_max_windows", default=DEFAULT_PER_HAND_MAX_WINDOWS, type=int)
     parser.add_argument("--per_seq_max_windows", default=DEFAULT_PER_SEQ_MAX_WINDOWS, type=int)
+    parser.add_argument("--top_k_regions", default=DEFAULT_TOP_K_REGIONS, type=int)
     parser.add_argument("--batch_size", default=1, type=int)
     parser.add_argument("--num_workers", default=0, type=int)
     parser.add_argument("--device", default="cpu", type=str)
@@ -63,6 +65,7 @@ def main(argv=None):
         window_size=args.window_size,
         per_hand_max_windows=args.per_hand_max_windows,
         per_seq_max_windows=args.per_seq_max_windows,
+        top_k_regions=args.top_k_regions,
         device=args.device,
         frame_chunk=args.frame_chunk,
         target_chunk=args.target_chunk,

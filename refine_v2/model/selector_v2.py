@@ -16,6 +16,7 @@ from refine_v2.data.schema import (
     DEFAULT_PER_SEQ_MAX_WINDOWS,
     DEFAULT_RAW_L_MIN,
     DEFAULT_TAU_CONTACT,
+    DEFAULT_TOP_K_REGIONS,
     DEFAULT_WINDOW_SIZE,
     HAND_SIDE_NAMES,
     RESTORED_PAIR_SPACE,
@@ -137,6 +138,7 @@ def _attribution_for_segment(
     min_dist: np.ndarray,
     *,
     batch_index: int,
+    top_k_regions: int,
 ) -> dict[str, Any]:
     hand_id = int(segment["hand_side_id"])
     start = int(segment["raw_start_frame"])
@@ -168,6 +170,18 @@ def _attribution_for_segment(
     )
     primary = ranked[0]
     secondary = ranked[1] if len(ranked) > 1 else ranked[0]
+    top_k = max(1, min(int(top_k_regions), len(ranked)))
+    topk = ranked[:top_k]
+    topk_region_scores = [
+        {
+            "target_region": item["target_region"],
+            "target_region_id": int(item["target_region_id"]),
+            "num_contact_frames": int(item["num_contact_frames"]),
+            "mean_min_dist": float(item["mean_min_dist"]),
+            "min_dist": float(item["min_dist"]),
+        }
+        for item in topk
+    ]
     out = dict(segment)
     out.update(
         {
@@ -176,6 +190,9 @@ def _attribution_for_segment(
             "primary_target_region_id": int(primary["target_region_id"]),
             "secondary_target_region": secondary["target_region"],
             "secondary_target_region_id": int(secondary["target_region_id"]),
+            "topk_target_region_ids": [int(item["target_region_id"]) for item in topk],
+            "topk_target_regions": [str(item["target_region"]) for item in topk],
+            "topk_region_scores": topk_region_scores,
             "region_score_table": score_table,
             "target_region": primary["target_region"],
             "target_region_id": int(primary["target_region_id"]),
@@ -194,6 +211,7 @@ def _build_hand_segments_for_batch(
     *,
     gap_merge: int,
     raw_L_min: int,
+    top_k_regions: int,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     segments_pre_filter: list[dict[str, Any]] = []
     segments_post_filter: list[dict[str, Any]] = []
@@ -220,11 +238,23 @@ def _build_hand_segments_for_batch(
                 **common_kwargs,
             )
             segments_pre_filter.extend(
-                _attribution_for_segment(item, pred_mask, min_dist, batch_index=batch_index)
+                _attribution_for_segment(
+                    item,
+                    pred_mask,
+                    min_dist,
+                    batch_index=batch_index,
+                    top_k_regions=top_k_regions,
+                )
                 for item in pre
             )
             segments_post_filter.extend(
-                _attribution_for_segment(item, pred_mask, min_dist, batch_index=batch_index)
+                _attribution_for_segment(
+                    item,
+                    pred_mask,
+                    min_dist,
+                    batch_index=batch_index,
+                    top_k_regions=top_k_regions,
+                )
                 for item in post
             )
     return segments_pre_filter, segments_post_filter
@@ -360,6 +390,7 @@ def build_windows_for_loader(
     window_size: int = DEFAULT_WINDOW_SIZE,
     per_hand_max_windows: int = DEFAULT_PER_HAND_MAX_WINDOWS,
     per_seq_max_windows: int = DEFAULT_PER_SEQ_MAX_WINDOWS,
+    top_k_regions: int = DEFAULT_TOP_K_REGIONS,
     device: str = "cpu",
     frame_chunk: int = 1,
     target_chunk: int = 2048,
@@ -412,6 +443,7 @@ def build_windows_for_loader(
             result["dataset_keys"],
             gap_merge=gap_merge,
             raw_L_min=raw_L_min,
+            top_k_regions=top_k_regions,
         )
         batch_windows_pre_cap: list[dict[str, Any]] = []
         for segment in batch_segments:
@@ -492,6 +524,7 @@ def build_windows_for_loader(
         "window_size": int(window_size),
         "per_hand_max_windows": int(per_hand_max_windows),
         "per_seq_max_windows": int(per_seq_max_windows),
+        "top_k_regions": int(top_k_regions),
         "frame_chunk": int(frame_chunk),
         "target_chunk": int(target_chunk),
     }
@@ -509,6 +542,14 @@ def build_windows_for_loader(
         "ranking": "raw_length desc, hand_contact_frame_ratio desc, raw_start_frame asc",
         "proposal_type": "hand_time_with_region_attribution",
         "region_attribution": "rank by num_contact_frames desc, mean_min_dist asc, min_dist asc",
+        "top_k_region_attribution": {
+            "top_k_regions": int(top_k_regions),
+            "fields": [
+                "topk_target_region_ids",
+                "topk_target_regions",
+                "topk_region_scores",
+            ],
+        },
     }
     return {
         "pred_contact_mask": np.concatenate(masks, axis=0) if masks else np.zeros((0, 2, 6, 0), dtype=np.uint8),

@@ -85,6 +85,61 @@ def _best_window_match_from_candidates(gt: dict[str, Any], candidates: list[dict
     return best, best_overlap
 
 
+def _topk_region_ids(window: dict[str, Any]) -> set[int]:
+    value = window.get("topk_target_region_ids")
+    if value is None:
+        value = window.get("top_k_target_region_ids")
+    if value is None:
+        return {int(window["target_region_id"])}
+    if isinstance(value, np.ndarray):
+        value = value.reshape(-1).tolist()
+    if isinstance(value, (int, np.integer)):
+        return {int(value)}
+    try:
+        ids = {int(item) for item in value}
+    except TypeError:
+        ids = {int(window["target_region_id"])}
+    if not ids:
+        ids.add(int(window["target_region_id"]))
+    return ids
+
+
+def _topk_region_names(window: dict[str, Any]) -> list[str]:
+    value = window.get("topk_target_regions")
+    if value is None:
+        value = window.get("top_k_target_regions")
+    if value is None:
+        return [str(window.get("target_region", TARGET_REGION_NAMES[int(window["target_region_id"])]))]
+    if isinstance(value, np.ndarray):
+        value = value.reshape(-1).tolist()
+    if isinstance(value, str):
+        return [value]
+    try:
+        names = [str(item) for item in value]
+    except TypeError:
+        names = [str(window.get("target_region", TARGET_REGION_NAMES[int(window["target_region_id"])]))]
+    return names or [str(window.get("target_region", TARGET_REGION_NAMES[int(window["target_region_id"])]))]
+
+
+def _topk_best_window_match_from_candidates(gt: dict[str, Any], candidates: list[dict[str, Any]]):
+    gt_region_id = int(gt["target_region_id"])
+    best = None
+    best_overlap = 0
+    for window in candidates:
+        if gt_region_id not in _topk_region_ids(window):
+            continue
+        ov = _overlap(
+            window["start_frame"],
+            window["end_frame"],
+            gt["raw_start_frame"],
+            gt["raw_end_frame"],
+        )
+        if ov > best_overlap:
+            best = window
+            best_overlap = ov
+    return best, best_overlap
+
+
 def _mask_index_by_row(dataset_row_indices: np.ndarray) -> dict[int, int]:
     return {int(row): idx for idx, row in enumerate(np.asarray(dataset_row_indices).reshape(-1).tolist())}
 
@@ -177,6 +232,30 @@ def _diagnostic_summary(
     }
 
 
+def _diagnostic_summary_topk(
+    strict_metrics: dict[str, Any],
+    relaxed_metrics: dict[str, Any],
+    topk_metrics: dict[str, Any],
+) -> dict[str, Any]:
+    strict_recall = float(strict_metrics.get("gt_segment_recall", 0.0))
+    hand_recall = float(relaxed_metrics.get("hand_only_gt_segment_recall", 0.0))
+    topk_recall = float(topk_metrics.get("topk_gt_segment_recall", 0.0))
+    return {
+        "strict_recall": strict_recall,
+        "topk_gt_segment_recall": topk_recall,
+        "hand_only_gt_segment_recall": hand_recall,
+        "topk_minus_strict": float(topk_recall - strict_recall),
+        "hand_only_minus_topk": float(hand_recall - topk_recall),
+        "top1_miss_topk_hit_count": int(topk_metrics.get("top1_miss_topk_hit_count", 0)),
+        "top1_miss_topk_hit_ratio": float(topk_metrics.get("top1_miss_topk_hit_ratio", 0.0)),
+        "interpretation": (
+            "If top-k recall closes most of the gap between primary-region strict recall "
+            "and hand-only recall, the time proposal is likely adequate and single-primary "
+            "region credit is the main bottleneck."
+        ),
+    }
+
+
 def _empty_region_confusion() -> dict[str, dict[str, int]]:
     cols = list(TARGET_REGION_NAMES) + ["unmatched"]
     return {str(row): {str(col): 0 for col in cols} for row in TARGET_REGION_NAMES}
@@ -243,18 +322,32 @@ def audit_windows(
                 gt_pred_buckets["gt_negative_pred_zero"] += 1
 
     recalled_gt = 0
+    topk_recalled_gt = 0
+    top1_miss_topk_hit_count = 0
+    top1_miss_topk_hit_by_region = {str(name): 0 for name in TARGET_REGION_NAMES}
     hand_only_recalled_gt = 0
     time_only_recalled_gt = 0
     gt_debug = []
     center_distances = []
     for gt in gt_segments:
         best_window, best_overlap = _best_window_match_from_candidates(gt, windows_by_group.get(_group_key(gt), []))
+        topk_best_window, topk_best_overlap = _topk_best_window_match_from_candidates(
+            gt,
+            windows_by_hand.get(_hand_key(gt), []),
+        )
         best_hand_window, best_hand_overlap = _best_window_match_from_candidates(gt, windows_by_hand.get(_hand_key(gt), []))
         best_time_window, best_time_overlap = _best_window_match_from_candidates(gt, windows_by_seq.get(_seq_key(gt), []))
         matched = best_window is not None
+        topk_matched = topk_best_window is not None and topk_best_overlap > 0
         hand_only_matched = best_hand_window is not None and best_hand_overlap > 0
         time_only_matched = best_time_window is not None and best_time_overlap > 0
         recalled_gt += int(matched)
+        topk_recalled_gt += int(topk_matched)
+        if not matched and topk_matched:
+            top1_miss_topk_hit_count += 1
+            top1_miss_topk_hit_by_region[str(gt["target_region"])] = (
+                int(top1_miss_topk_hit_by_region.get(str(gt["target_region"]), 0)) + 1
+            )
         hand_only_recalled_gt += int(hand_only_matched)
         time_only_recalled_gt += int(time_only_matched)
         gt_debug.append(
@@ -263,6 +356,9 @@ def audit_windows(
                 "matched": bool(matched),
                 "best_overlap": int(best_overlap),
                 "best_window": best_window,
+                "topk_matched": bool(topk_matched),
+                "topk_best_overlap": int(topk_best_overlap),
+                "topk_best_window": topk_best_window,
                 "hand_only_matched": bool(hand_only_matched),
                 "hand_only_best_overlap": int(best_hand_overlap),
                 "hand_only_best_window": best_hand_window,
@@ -305,6 +401,17 @@ def audit_windows(
     wrong_hand_count = 0
     same_sample_time_overlap_window_count = 0
     wrong_region_confusion = _empty_region_confusion()
+    topk_window_match_count = 0
+    topk_region_match_den = 0
+    topk_region_match_num = 0
+    strict_miss_hand_hit_topk_total = 0
+    strict_miss_hand_hit_topk_hit = 0
+    strict_miss_hand_hit_topk_by_pred_region = {
+        str(name): {"total": 0, "best_gt_region_in_topk": 0} for name in TARGET_REGION_NAMES
+    }
+    strict_miss_hand_hit_topk_by_gt_region = {
+        str(name): {"total": 0, "best_gt_region_in_topk": 0} for name in TARGET_REGION_NAMES
+    }
     for window in pred_windows:
         best_gt, best_overlap = _best_gt_match(window, gt_by_group)
         best_hand_gt, best_hand_overlap = _best_gt_match_from_candidates(window, gt_by_hand.get(_hand_key(window), []))
@@ -312,10 +419,29 @@ def audit_windows(
         matched = best_gt is not None and best_overlap > 0
         hand_only_window_matched = best_hand_gt is not None and best_hand_overlap > 0
         time_only_window_matched = best_time_gt is not None and best_time_overlap > 0
+        topk_region_ids = _topk_region_ids(window)
+        topk_region_names = _topk_region_names(window)
+        topk_window_matched = False
+        topk_best_gt = None
+        topk_best_overlap = 0
+        for gt in gt_by_hand.get(_hand_key(window), []):
+            if int(gt["target_region_id"]) not in topk_region_ids:
+                continue
+            ov = _overlap(
+                window["start_frame"],
+                window["end_frame"],
+                gt["raw_start_frame"],
+                gt["raw_end_frame"],
+            )
+            if ov > topk_best_overlap:
+                topk_best_gt = gt
+                topk_best_overlap = ov
+        topk_window_matched = topk_best_gt is not None and topk_best_overlap > 0
         matched_window_count += int(matched)
         false_positive_count += int(not matched)
         hand_only_window_match_count += int(hand_only_window_matched)
         time_only_window_match_count += int(time_only_window_matched)
+        topk_window_match_count += int(topk_window_matched)
         if matched:
             center_distances.append(abs(int(window["center_frame"]) - int(best_gt["center_frame"])))
 
@@ -340,9 +466,12 @@ def audit_windows(
         best_any_region_overlap = best_hand_overlap
         if any_same_hand_overlap and best_any_region is not None:
             region_match_den += 1
+            topk_region_match_den += 1
             same_hand_time_overlap_window_count += 1
             same_region = int(best_any_region["target_region_id"]) == int(window["target_region_id"])
+            topk_same_region = int(best_any_region["target_region_id"]) in topk_region_ids
             region_match_num += int(same_region)
+            topk_region_match_num += int(topk_same_region)
             wrong_region_count += int(not same_region)
             pred_region_name = str(window.get("primary_target_region", window.get("target_region", TARGET_REGION_NAMES[int(window["target_region_id"])])))
             gt_region_name = str(best_any_region["target_region"])
@@ -351,6 +480,24 @@ def audit_windows(
             if gt_region_name not in wrong_region_confusion[pred_region_name]:
                 wrong_region_confusion[pred_region_name][gt_region_name] = 0
             wrong_region_confusion[pred_region_name][gt_region_name] += 1
+            if not matched:
+                strict_miss_hand_hit_topk_total += 1
+                if pred_region_name not in strict_miss_hand_hit_topk_by_pred_region:
+                    strict_miss_hand_hit_topk_by_pred_region[pred_region_name] = {
+                        "total": 0,
+                        "best_gt_region_in_topk": 0,
+                    }
+                if gt_region_name not in strict_miss_hand_hit_topk_by_gt_region:
+                    strict_miss_hand_hit_topk_by_gt_region[gt_region_name] = {
+                        "total": 0,
+                        "best_gt_region_in_topk": 0,
+                    }
+                strict_miss_hand_hit_topk_by_pred_region[pred_region_name]["total"] += 1
+                strict_miss_hand_hit_topk_by_gt_region[gt_region_name]["total"] += 1
+                if topk_same_region:
+                    strict_miss_hand_hit_topk_hit += 1
+                    strict_miss_hand_hit_topk_by_pred_region[pred_region_name]["best_gt_region_in_topk"] += 1
+                    strict_miss_hand_hit_topk_by_gt_region[gt_region_name]["best_gt_region_in_topk"] += 1
         else:
             pred_region_name = str(window.get("primary_target_region", window.get("target_region", TARGET_REGION_NAMES[int(window["target_region_id"])])))
             if pred_region_name not in wrong_region_confusion:
@@ -369,6 +516,11 @@ def audit_windows(
                 "best_overlap": int(best_overlap),
                 "is_false_positive": bool(not matched),
                 "window_contact_purity": float(purity),
+                "topk_target_region_ids": sorted(int(item) for item in topk_region_ids),
+                "topk_target_regions": topk_region_names,
+                "topk_matched": bool(topk_window_matched),
+                "topk_best_overlap": int(topk_best_overlap),
+                "topk_best_gt_segment": topk_best_gt,
                 "best_same_hand_any_region_gt": best_any_region,
                 "best_same_hand_any_region_overlap": int(best_any_region_overlap),
                 "hand_only_matched": bool(hand_only_window_matched),
@@ -408,6 +560,18 @@ def audit_windows(
         "time_only_gt_segment_recall": float(time_only_recalled_gt / max(len(gt_segments), 1)),
         "time_only_window_match_ratio": float(time_only_window_match_count / max(len(pred_windows), 1)),
     }
+    strict_miss_count = max(len(gt_segments) - recalled_gt, 0)
+    topk_metrics = {
+        "topk_gt_segment_recall": float(topk_recalled_gt / max(len(gt_segments), 1)),
+        "topk_window_match_ratio": float(topk_window_match_count / max(len(pred_windows), 1)),
+        "topk_region_match_ratio": float(topk_region_match_num / max(topk_region_match_den, 1)),
+        "top1_miss_topk_hit_count": int(top1_miss_topk_hit_count),
+        "top1_miss_topk_hit_ratio": float(top1_miss_topk_hit_count / max(strict_miss_count, 1)),
+        "top1_miss_topk_hit_ratio_over_all_gt": float(top1_miss_topk_hit_count / max(len(gt_segments), 1)),
+        "top1_miss_topk_hit_by_region": top1_miss_topk_hit_by_region,
+        "topk_recalled_gt_count": int(topk_recalled_gt),
+        "strict_missed_gt_count": int(strict_miss_count),
+    }
     region_error_analysis = {
         "same_hand_time_overlap_window_count": int(same_hand_time_overlap_window_count),
         "same_hand_time_overlap_but_wrong_region_count": int(wrong_region_count),
@@ -415,6 +579,15 @@ def audit_windows(
         "same_sample_time_overlap_window_count": int(same_sample_time_overlap_window_count),
         "same_sample_time_overlap_but_wrong_hand_count": int(wrong_hand_count),
         "same_sample_time_overlap_but_wrong_hand_ratio": float(wrong_hand_count / max(same_sample_time_overlap_window_count, 1)),
+    }
+    topk_wrong_region_recovery = {
+        "strict_miss_hand_only_hit_window_count": int(strict_miss_hand_hit_topk_total),
+        "strict_miss_hand_only_hit_topk_region_count": int(strict_miss_hand_hit_topk_hit),
+        "strict_miss_hand_only_hit_topk_region_ratio": float(
+            strict_miss_hand_hit_topk_hit / max(strict_miss_hand_hit_topk_total, 1)
+        ),
+        "by_pred_primary_region": strict_miss_hand_hit_topk_by_pred_region,
+        "by_best_gt_region": strict_miss_hand_hit_topk_by_gt_region,
     }
     gt_sequence_stats = {
         "num_gt_positive_sequences": int(len(gt_positive_rows)),
@@ -432,6 +605,7 @@ def audit_windows(
     }
     metrics = dict(strict_metrics)
     metrics.update(relaxed_metrics)
+    metrics.update(topk_metrics)
     metrics.update(region_error_analysis)
     metrics.update(gt_sequence_stats)
     selector_stats = _load_optional_json_scalar(windows_pack, "selector_stats_json")
@@ -443,6 +617,7 @@ def audit_windows(
         selector_stats,
         gt_sequence_stats,
     )
+    diagnostic_summary_topk = _diagnostic_summary_topk(strict_metrics, relaxed_metrics, topk_metrics)
     progress.finish()
     return {
         "artifact": "selector_audit_v2",
@@ -452,17 +627,21 @@ def audit_windows(
         "selector_stats_summary": selector_stats,
         "strict_metrics": strict_metrics,
         "relaxed_metrics": relaxed_metrics,
+        "topk_metrics": topk_metrics,
         "region_error_analysis": region_error_analysis,
         "gt_sequence_stats": gt_sequence_stats,
         "wrong_region_confusion_matrix": wrong_region_confusion,
+        "topk_wrong_region_recovery": topk_wrong_region_recovery,
         "metrics": metrics,
         "diagnostic_summary": diagnostic_summary,
+        "diagnostic_summary_topk": diagnostic_summary_topk,
         "zero_window_dataset_row_indices": zero_window_sequences,
         "per_gt_segment": gt_debug,
         "per_window": per_window_debug,
         "notes": {
             "gt_source": "direct binary GT contact labels from contact_labels.py",
             "matching": "sample/dataset_row_index + hand + region, max temporal overlap, no Hungarian matching",
+            "topk_matching": "sample/dataset_row_index + hand + temporal overlap, with GT region contained in pred window top-k attributed regions",
             "interval_semantics": "[start_frame, end_frame)",
         },
     }

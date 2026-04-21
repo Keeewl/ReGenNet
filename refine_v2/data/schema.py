@@ -16,6 +16,7 @@ DEFAULT_RAW_L_MIN = 4
 DEFAULT_WINDOW_SIZE = 30
 DEFAULT_PER_HAND_MAX_WINDOWS = 2
 DEFAULT_PER_SEQ_MAX_WINDOWS = 3
+DEFAULT_TOP_K_REGIONS = 3
 
 HAND_SIDE_NAMES = ("left", "right")
 HAND_SIDE_IDS = {name: idx for idx, name in enumerate(HAND_SIDE_NAMES)}
@@ -85,4 +86,3 @@ def object_array_to_records(value: Any) -> list[dict[str, Any]]:
         item = arr.item()
         return [] if item is None else [dict(item)]
     return [dict(item) for item in arr.tolist()]
-

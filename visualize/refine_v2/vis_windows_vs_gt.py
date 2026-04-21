@@ -56,7 +56,9 @@ def _timeline(length: int, gt_segments: list[dict], windows: list[dict], width: 
             if 0 <= pos < width:
                 chars[pos] = "W"
         flag = "FP" if item.get("is_false_positive") else "OK"
-        lines.append(f"WIN {item['hand_side']}->{item['target_region']:<11} {''.join(chars)} [{item['start_frame']},{item['end_frame']}) {flag}")
+        topk = ",".join(str(x) for x in item.get("topk_target_regions", [])[:3])
+        topk_text = f" topk={topk}" if topk else ""
+        lines.append(f"WIN {item['hand_side']}->{item['target_region']:<11} {''.join(chars)} [{item['start_frame']},{item['end_frame']}) {flag}{topk_text}")
     return lines
 
 
@@ -113,6 +115,8 @@ def inspect_windows_vs_gt(
         item["best_overlap"] = int(debug.get("best_overlap", 0))
         item["window_contact_purity"] = float(debug.get("window_contact_purity", 0.0))
         item["matched_gt_segment"] = debug.get("matched_gt_segment")
+        item["topk_matched"] = bool(debug.get("topk_matched", False))
+        item["topk_best_overlap"] = int(debug.get("topk_best_overlap", 0))
         enriched_windows.append(item)
 
     overlaps = []
@@ -159,11 +163,15 @@ def _print_report(report):
         print("  -")
     for item in report["predicted_windows"]:
         flag = "FP" if item["is_false_positive"] else "OK"
+        topk = ",".join(str(x) for x in item.get("topk_target_regions", [])[:3])
+        topk_text = f" topk=[{topk}]" if topk else ""
+        topk_flag = " topkOK" if item.get("topk_matched") else ""
         print(
             f"  {item['hand_side']}->{item['target_region']} "
             f"raw=[{item['raw_start_frame']},{item['raw_end_frame']}) "
             f"win=[{item['start_frame']},{item['end_frame']}) "
-            f"purity={item['window_contact_purity']:.3f} overlap={item['best_overlap']} {flag}"
+            f"purity={item['window_contact_purity']:.3f} overlap={item['best_overlap']} "
+            f"topk_overlap={item.get('topk_best_overlap', 0)} {flag}{topk_flag}{topk_text}"
         )
     print("\ntimeline:")
     for line in report["timeline"]:
