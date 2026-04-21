@@ -1,7 +1,7 @@
 conda activate regennet5090
 
 ####### refine_v2: select deterministic windows #######
-export CUDA_VISIBLE_DEVICES=7
+export CUDA_VISIBLE_DEVICES=1
 python -m refine_v2.tools.select_windows \
   --reaction_data_path refine/dataset/train/reaction_data.npz \
   --contact_labels_path refine_v2/outputs/train/contact_labels_gt.npz \
