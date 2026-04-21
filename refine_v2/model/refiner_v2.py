@@ -1,0 +1,172 @@
+"""First trainable window-level residual refiner for refine_v2."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+
+import torch
+from torch import nn
+
+from refine_v2.model.condition_encoder import RefineV2ConditionEncoder, RefineV2ConditionEncoderConfig
+
+
+@dataclass
+class RefineV2WindowRefinerConfig:
+    motion_num_joints: int
+    motion_num_channels: int
+    hidden_dim: int = 256
+    num_heads: int = 4
+    num_layers: int = 4
+    dropout: float = 0.1
+    mlp_ratio: float = 4.0
+    max_window_size: int = 256
+    num_hands: int = 2
+    num_regions: int = 6
+    top_k_regions: int = 3
+    delta_scale: float = 1.0
+
+
+class RefineV2RefinerBlock(nn.Module):
+    def __init__(self, hidden_dim: int, num_heads: int, dropout: float, mlp_ratio: float):
+        super().__init__()
+        self.norm_self = nn.LayerNorm(hidden_dim)
+        self.self_attn = nn.MultiheadAttention(hidden_dim, num_heads, dropout=dropout, batch_first=True)
+        self.norm_cross = nn.LayerNorm(hidden_dim)
+        self.cross_attn = nn.MultiheadAttention(hidden_dim, num_heads, dropout=dropout, batch_first=True)
+        self.norm_cond = nn.LayerNorm(hidden_dim)
+        self.cond_mod = nn.Linear(hidden_dim, hidden_dim * 2)
+        nn.init.zeros_(self.cond_mod.weight)
+        nn.init.zeros_(self.cond_mod.bias)
+        self.norm_ffn = nn.LayerNorm(hidden_dim)
+        ffn_dim = int(round(hidden_dim * float(mlp_ratio)))
+        self.ffn = nn.Sequential(
+            nn.Linear(hidden_dim, ffn_dim),
+            nn.GELU(),
+            nn.Dropout(dropout),
+            nn.Linear(ffn_dim, hidden_dim),
+            nn.Dropout(dropout),
+        )
+
+    def forward(
+        self,
+        x: torch.Tensor,
+        actor_tokens: torch.Tensor,
+        global_condition: torch.Tensor,
+        per_frame_condition: torch.Tensor,
+        *,
+        key_padding_mask: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        y, _ = self.self_attn(
+            self.norm_self(x),
+            self.norm_self(x),
+            self.norm_self(x),
+            key_padding_mask=key_padding_mask,
+            need_weights=False,
+        )
+        x = x + y
+        y, _ = self.cross_attn(
+            self.norm_cross(x),
+            actor_tokens,
+            actor_tokens,
+            key_padding_mask=key_padding_mask,
+            need_weights=False,
+        )
+        x = x + y
+        scale, shift = self.cond_mod(global_condition).chunk(2, dim=-1)
+        cond = self.norm_cond(x + per_frame_condition)
+        x = x + cond * scale.unsqueeze(1) + shift.unsqueeze(1) + per_frame_condition
+        x = x + self.ffn(self.norm_ffn(x))
+        return x
+
+
+class RefineV2WindowRefiner(nn.Module):
+    """Temporal residual refiner with actor and mesh-aware conditioning."""
+
+    def __init__(self, config: RefineV2WindowRefinerConfig):
+        super().__init__()
+        self.config = config
+        self.motion_dim = int(config.motion_num_joints) * int(config.motion_num_channels)
+        d = int(config.hidden_dim)
+        self.coarse_motion_proj = nn.Linear(self.motion_dim, d)
+        self.actor_motion_proj = nn.Linear(self.motion_dim, d)
+        self.position_embedding = nn.Parameter(torch.zeros(1, int(config.max_window_size), d))
+        nn.init.trunc_normal_(self.position_embedding, std=0.02)
+        self.condition_encoder = RefineV2ConditionEncoder(
+            RefineV2ConditionEncoderConfig(
+                hidden_dim=d,
+                num_hands=int(config.num_hands),
+                num_regions=int(config.num_regions),
+                top_k_regions=int(config.top_k_regions),
+                dropout=float(config.dropout),
+            )
+        )
+        self.blocks = nn.ModuleList(
+            [
+                RefineV2RefinerBlock(
+                    hidden_dim=d,
+                    num_heads=int(config.num_heads),
+                    dropout=float(config.dropout),
+                    mlp_ratio=float(config.mlp_ratio),
+                )
+                for _ in range(int(config.num_layers))
+            ]
+        )
+        self.output_norm = nn.LayerNorm(d)
+        self.output_head = nn.Linear(d, self.motion_dim)
+        nn.init.zeros_(self.output_head.weight)
+        nn.init.zeros_(self.output_head.bias)
+
+    def _motion_to_tokens(self, value: torch.Tensor, proj: nn.Linear) -> torch.Tensor:
+        if value.ndim != 4:
+            raise ValueError(f"motion tensor must be [B,J,F,T], got shape={tuple(value.shape)}")
+        b, j, f, t = value.shape
+        if j != self.config.motion_num_joints or f != self.config.motion_num_channels:
+            raise ValueError(
+                "motion shape does not match model config: "
+                f"got J={j}, F={f}, expected J={self.config.motion_num_joints}, F={self.config.motion_num_channels}"
+            )
+        return proj(value.permute(0, 3, 1, 2).reshape(b, t, j * f).float())
+
+    def forward(self, batch: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
+        coarse_motion = batch["coarse_motion_window"].float()
+        actor_motion = batch["actor_motion_window"].float()
+        b, j, f, t = coarse_motion.shape
+        if t > self.position_embedding.shape[1]:
+            raise ValueError(f"window length {t} exceeds max_window_size={self.position_embedding.shape[1]}")
+
+        coarse_tokens = self._motion_to_tokens(coarse_motion, self.coarse_motion_proj)
+        actor_tokens = self._motion_to_tokens(actor_motion, self.actor_motion_proj)
+        x = coarse_tokens + self.position_embedding[:, :t, :]
+        actor_tokens = actor_tokens + self.position_embedding[:, :t, :]
+
+        cond = self.condition_encoder(
+            hand_side_id=batch["hand_side_id"],
+            primary_target_region_id=batch["primary_target_region_id"],
+            topk_target_region_ids=batch["topk_target_region_ids"],
+            topk_region_scores_numeric=batch["topk_region_scores_numeric"],
+            coarse_region_contact_mask_window=batch["coarse_region_contact_mask_window"],
+            coarse_min_region_dist_window=batch["coarse_min_region_dist_window"],
+        )
+
+        valid_mask = batch.get("valid_mask")
+        key_padding_mask = None
+        if valid_mask is not None:
+            key_padding_mask = ~valid_mask.bool()
+
+        for block in self.blocks:
+            x = block(
+                x,
+                actor_tokens,
+                cond["global_condition"],
+                cond["per_frame_condition"],
+                key_padding_mask=key_padding_mask,
+            )
+
+        delta_tokens = self.output_head(self.output_norm(x)) * float(self.config.delta_scale)
+        pred_delta = delta_tokens.reshape(b, t, j, f).permute(0, 2, 3, 1).contiguous()
+        pred_motion = coarse_motion + pred_delta
+        return {
+            "pred_delta_motion_window": pred_delta,
+            "pred_motion_window": pred_motion,
+            "coarse_motion_window": coarse_motion,
+        }
