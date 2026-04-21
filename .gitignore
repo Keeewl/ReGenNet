@@ -164,6 +164,8 @@ commands/
 !refine/commands/**
 !refine_v2/commands/
 !refine_v2/commands/**
+!visualize/commands/
+!visualize/commands/**
 
 # Dataset
 dataset/

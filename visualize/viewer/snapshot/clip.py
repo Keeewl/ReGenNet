@@ -169,7 +169,7 @@ def load_interaction_order(path: str | None) -> dict:
         return pickle.load(handle)
 
 
-def _resolve_roles(clip: ClipData, order_dict: dict | None = None) -> tuple[str, str]:
+def resolve_person_roles(clip: ClipData, order_dict: dict | None = None) -> tuple[str, str]:
     order_dict = order_dict or {}
     role_p1 = str(_meta_value(clip.p1.params, "source_role", "") or "")
     role_p2 = str(_meta_value(clip.p2.params, "source_role", "") or "")
@@ -185,7 +185,7 @@ def _resolve_roles(clip: ClipData, order_dict: dict | None = None) -> tuple[str,
 
 
 def resolve_person_colors(clip: ClipData, order_dict: dict | None = None):
-    role_p1, role_p2 = _resolve_roles(clip, order_dict=order_dict)
+    role_p1, role_p2 = resolve_person_roles(clip, order_dict=order_dict)
     p1_color = ACTOR_COLOR if role_p1 == "actor" else REACTOR_COLOR
     p2_color = ACTOR_COLOR if role_p2 == "actor" else REACTOR_COLOR
     return p1_color, p2_color

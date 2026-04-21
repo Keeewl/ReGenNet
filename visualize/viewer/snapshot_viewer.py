@@ -19,6 +19,7 @@ from snapshot.clip import (
     load_interaction_order,
     resolve_clip_dir,
     resolve_person_colors,
+    resolve_person_roles,
     validate_frame_ids,
 )
 from snapshot.layout import build_snapshot_specs
@@ -101,6 +102,24 @@ def build_part_vertex_colors(smplx_layer, segm_path, colors_path):
     return vertex_colors
 
 
+def build_highlight_vertex_colors(smplx_layer, segm_path, base_color, highlight_part, highlight_color):
+    segm = load_part_segm(segm_path)
+    if highlight_part not in segm:
+        raise ValueError(
+            f"highlight_part={highlight_part} not found in {segm_path}; available parts: {sorted(segm.keys())}"
+        )
+
+    num_verts = get_num_verts_from_layer(smplx_layer)
+    if num_verts is None:
+        num_verts = max(max(indices) for indices in segm.values()) + 1
+
+    vertex_colors = np.tile(np.asarray(base_color, dtype=np.float32), (num_verts, 1))
+    vertex_colors[np.asarray(segm[highlight_part], dtype=np.int64)] = np.asarray(
+        highlight_color, dtype=np.float32
+    )
+    return vertex_colors.astype(np.float32)
+
+
 def tint_vertex_colors_towards_white(vertex_colors, white_mix: float):
     tinted = np.asarray(vertex_colors, dtype=np.float32).copy()
     white_mix = float(np.clip(white_mix, 0.0, 1.0))
@@ -156,6 +175,25 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--part_segm", help="Path to parts segmentation .pkl")
     parser.add_argument("--part_colors", help="Path to JSON colors file")
     parser.add_argument(
+        "--highlight_part",
+        choices=["torso_head", "lower_body", "arms", "hands"],
+        help="Highlight one 4-part region in red while keeping the selected role's base color",
+    )
+    parser.add_argument(
+        "--highlight_role",
+        choices=["actor", "reactor", "p1", "p2"],
+        default="actor",
+        help="Which person to part-highlight when --highlight_part is set",
+    )
+    parser.add_argument(
+        "--highlight_color",
+        nargs=4,
+        type=float,
+        default=(0.95, 0.08, 0.04, 1.0),
+        metavar=("R", "G", "B", "A"),
+        help="RGBA color used for --highlight_part; defaults to red",
+    )
+    parser.add_argument(
         "--interaction_order",
         help="Optional interaction_order.pkl used to infer actor/reactor colors for raw Inter-X clips",
     )
@@ -197,6 +235,7 @@ def main() -> None:
 
     order_path = infer_interaction_order_path(args.dataset, args.interaction_order)
     order_dict = load_interaction_order(order_path)
+    role_p1, role_p2 = resolve_person_roles(clip, order_dict=order_dict)
     p1_color, p2_color = resolve_person_colors(clip, order_dict=order_dict)
 
     viewer = SnapshotViewer(title=args.title or f"Snapshot: {clip.clip_name}")
@@ -207,8 +246,24 @@ def main() -> None:
     smplx_layer_p1 = SMPLLayer(model_type="smplx", gender=clip.p1.gender, num_betas=10, device=C.device)
     smplx_layer_p2 = SMPLLayer(model_type="smplx", gender=clip.p2.gender, num_betas=10, device=C.device)
 
+    if args.highlight_part and not args.part_segm:
+        raise ValueError("--highlight_part requires --part_segm, e.g. part_segm/4_parts/four_parts.pkl")
+
     part_vertex_colors = None
-    if args.part_segm:
+    highlight_vertex_colors_p1 = None
+    highlight_vertex_colors_p2 = None
+    if args.highlight_part:
+        highlight_p1 = args.highlight_role == "p1" or args.highlight_role == role_p1
+        highlight_p2 = args.highlight_role == "p2" or args.highlight_role == role_p2
+        if highlight_p1:
+            highlight_vertex_colors_p1 = build_highlight_vertex_colors(
+                smplx_layer_p1, args.part_segm, p1_color, args.highlight_part, args.highlight_color
+            )
+        if highlight_p2:
+            highlight_vertex_colors_p2 = build_highlight_vertex_colors(
+                smplx_layer_p2, args.part_segm, p2_color, args.highlight_part, args.highlight_color
+            )
+    elif args.part_segm:
         part_vertex_colors = build_part_vertex_colors(smplx_layer_p1, args.part_segm, args.part_colors)
     time_gradient_mixes = compute_time_gradient_mixes(snapshot_specs) if args.time_gradient else {}
 
@@ -216,13 +271,15 @@ def main() -> None:
         white_mix = time_gradient_mixes.get(spec.index, 0.0)
         spec_p1_color = blend_rgb_towards_white(p1_color, white_mix)
         spec_p2_color = blend_rgb_towards_white(p2_color, white_mix)
+        use_p1_vertex_colors = highlight_vertex_colors_p1 is not None or part_vertex_colors is not None
+        use_p2_vertex_colors = highlight_vertex_colors_p2 is not None or part_vertex_colors is not None
         seq_kwargs_p1 = build_frame_sequence_kwargs(
             clip.p1,
             frame_id=spec.frame_id,
             offset=spec.offset,
             smpl_layer=smplx_layer_p1,
             device=C.device,
-            color=(1.0, 1.0, 1.0, 1.0) if part_vertex_colors is not None else spec_p1_color,
+            color=(1.0, 1.0, 1.0, 1.0) if use_p1_vertex_colors else spec_p1_color,
         )
         seq_kwargs_p2 = build_frame_sequence_kwargs(
             clip.p2,
@@ -230,7 +287,7 @@ def main() -> None:
             offset=spec.offset,
             smpl_layer=smplx_layer_p2,
             device=C.device,
-            color=(1.0, 1.0, 1.0, 1.0) if part_vertex_colors is not None else spec_p2_color,
+            color=(1.0, 1.0, 1.0, 1.0) if use_p2_vertex_colors else spec_p2_color,
         )
 
         smplx_seq_p1 = SMPLSequence(**seq_kwargs_p1)
@@ -238,13 +295,34 @@ def main() -> None:
         smplx_seq_p1.name = f"P1_frame_{spec.frame_id}"
         smplx_seq_p2.name = f"P2_frame_{spec.frame_id}"
 
-        if part_vertex_colors is not None:
+        if highlight_vertex_colors_p1 is not None:
+            p1_vertex_colors = (
+                tint_vertex_colors_towards_white(highlight_vertex_colors_p1, white_mix)
+                if args.time_gradient
+                else highlight_vertex_colors_p1
+            )
+            apply_vertex_colors(smplx_seq_p1, p1_vertex_colors)
+        elif part_vertex_colors is not None:
             spec_vertex_colors = (
                 tint_vertex_colors_towards_white(part_vertex_colors, white_mix)
                 if args.time_gradient
                 else part_vertex_colors
             )
             apply_vertex_colors(smplx_seq_p1, spec_vertex_colors)
+
+        if highlight_vertex_colors_p2 is not None:
+            p2_vertex_colors = (
+                tint_vertex_colors_towards_white(highlight_vertex_colors_p2, white_mix)
+                if args.time_gradient
+                else highlight_vertex_colors_p2
+            )
+            apply_vertex_colors(smplx_seq_p2, p2_vertex_colors)
+        elif part_vertex_colors is not None:
+            spec_vertex_colors = (
+                tint_vertex_colors_towards_white(part_vertex_colors, white_mix)
+                if args.time_gradient
+                else part_vertex_colors
+            )
             apply_vertex_colors(smplx_seq_p2, spec_vertex_colors)
 
         viewer.scene.add(smplx_seq_p1)

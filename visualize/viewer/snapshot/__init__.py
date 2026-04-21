@@ -9,6 +9,7 @@ from .clip import (
     load_interaction_order,
     resolve_clip_dir,
     resolve_person_colors,
+    resolve_person_roles,
     validate_frame_ids,
 )
 from .layout import SnapshotSpec, build_snapshot_specs, normalize_offset_dir
@@ -25,5 +26,6 @@ __all__ = [
     "normalize_offset_dir",
     "resolve_clip_dir",
     "resolve_person_colors",
+    "resolve_person_roles",
     "validate_frame_ids",
 ]
