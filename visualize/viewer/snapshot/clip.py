@@ -9,7 +9,10 @@ import numpy as np
 
 ACTOR_COLOR = (0.10, 0.47, 0.78, 1.0)
 REACTOR_COLOR = (0.88, 0.30, 0.20, 1.0)
-TIME_GRADIENT_LIGHTEST_MIX = 0.20
+
+# 这个值越大，最早那个 snapshot 越白，看起来就越像“透明”
+TIME_GRADIENT_LIGHTEST_MIX = 0.30
+# TIME_GRADIENT_LIGHTEST_MIX = 0.15
 
 
 def _meta_value(params: dict, key: str, default=None):
@@ -195,6 +198,7 @@ def blend_rgb_towards_white(color, white_mix: float):
     return tuple(float(value) for value in rgba)
 
 
+# 
 def compute_time_gradient_mixes(snapshot_specs, lightest_mix: float = TIME_GRADIENT_LIGHTEST_MIX) -> dict[int, float]:
     specs = list(snapshot_specs)
     if not specs:

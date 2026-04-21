@@ -36,10 +36,11 @@ Manual snapshot / teaser layout for one raw clip:
 python visualize/viewer/snapshot_viewer.py \
   --dataset interx \
   --data_dir visualize/viewer/interx_data \
-  --clip_name G024T006A021R006 \
-  --frame_ids 5 18 32 47 \
+  --clip_name G001T000A001R005 \
+  --frame_ids 47 87 141 247 \
   --offset_dir 1 0 1 \
-  --spacing 0.8
+  --spacing 0 \
+  --time_gradient
 ```
 
 Add `--time_gradient` if you want earlier snapshots lighter and later snapshots darker:

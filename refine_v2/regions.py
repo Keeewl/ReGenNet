@@ -13,7 +13,7 @@ from .schema import HAND_SIDE_NAMES, TARGET_REGION_NAMES
 
 
 DEFAULT_REGION_MAP_PATH = (
-    Path(__file__).resolve().parents[2]
+    Path(__file__).resolve().parents[1]
     / "visualize"
     / "viewer"
     / "part_segm"
@@ -95,4 +95,3 @@ def load_region_map(region_map_path: str | os.PathLike[str] | None = None) -> di
 
 def region_map_summary(region_map: dict[str, np.ndarray]) -> dict[str, int]:
     return {name: int(np.asarray(ids).size) for name, ids in region_map.items()}
-

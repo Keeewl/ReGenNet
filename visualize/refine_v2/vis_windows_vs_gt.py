@@ -8,7 +8,7 @@ import os
 
 import numpy as np
 
-from regennet.refine_v2.schema import object_array_to_records, to_jsonable
+from refine_v2.schema import object_array_to_records, to_jsonable
 
 
 def _load_npz(path: str):
@@ -203,4 +203,3 @@ def main(argv=None):
 
 if __name__ == "__main__":
     main()
-
