@@ -13,9 +13,9 @@ python -m refine_v2.tools.select_windows \
   --window_size 30 \
   --per_hand_max_windows 2 \
   --per_seq_max_windows 3 \
-  --batch_size 1 \
-  --num_workers 0 \
-  --device cuda:0 \
+  --batch_size 64 \
+  --num_workers 4 \
+  --device cuda \
   --frame_chunk 1 \
   --target_chunk 2048
 
