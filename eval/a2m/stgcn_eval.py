@@ -319,12 +319,14 @@ def evaluate(args, model, diffusion, data, rec_model_path, setting, acc_only, au
             gtLoaders2 = {key: new_data_loader(mode="gt", dataiterator=dataiterator[key][0])
                           for key in ["train", "test"]}
 
-        if setting == 'cmdm':
+        if setting in ['cmdm', 'cnet_v1', 'cnet_v2', 'cnet_v3', 'cnet_v4', 'cnet_v5']:
             genLoaders = {key: new_data_loader(mode="gen", dataiterator=dataiterator_con[key][0])
                         for key in ["train", "test"]}
         elif setting == 'mdm':
             genLoaders = {key: new_data_loader(mode="gen", dataiterator=dataiterator[key][0])
                         for key in ["train", "test"]}
+        else:
+            raise NotImplementedError(f"Unsupported evaluation setting: {setting}")
 
         loaders = {"gen": genLoaders,
                    "gt": gtLoaders}
