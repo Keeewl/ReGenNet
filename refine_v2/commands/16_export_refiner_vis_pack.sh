@@ -1,7 +1,7 @@
 conda activate regennet5090
 
 ####### refine_v2: export small refiner visualization pack #######
-export CUDA_VISIBLE_DEVICES=0
+export CUDA_VISIBLE_DEVICES=7
 python -m refine_v2.cli_export_refiner_vis_pack \
   --checkpoint refine_v2/outputs/train/refiner_v2_exp2_large/model_best.pt \
   --reaction_data_path refine/dataset/train/reaction_data.npz \
@@ -11,6 +11,7 @@ python -m refine_v2.cli_export_refiner_vis_pack \
   --contact_eval_json refine_v2/outputs/train/refiner_v2_exp2_large/contact_eval_window/eval_contact_refiner.json \
   --output_dir refine_v2/outputs/train/refiner_v2_exp2_large/vis_pack_random20 \
   --include_buckets "GT+ / Pred+" \
+  --selected_action_types "Handshake" "High-five" \
   --max_sequences 20 \
   --sort_by random \
   --seed 1234 \
