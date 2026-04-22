@@ -25,6 +25,8 @@ Files:
 - `12_train_refiner.sh`: train the first mesh-aware residual refiner on the contact-rich subset.
 - `12_train_refiner_large_overnight.sh`: train a larger 8-layer/512-dim refiner for an overnight run.
 - `13_eval_refiner.sh`: run window-level eval for a trained refine_v2 refiner checkpoint.
+- `14_selector_window_report.sh`: build a standalone selector/window sampling report.
+- `15_eval_contact_refiner.sh`: run window-level contact-quality eval for a trained refiner checkpoint.
 
 Default inputs and outputs embedded in the scripts:
 
@@ -63,4 +65,19 @@ bash refine_v2/commands/12_train_refiner_overfit.sh
 bash refine_v2/commands/12_train_refiner.sh
 bash refine_v2/commands/12_train_refiner_large_overnight.sh
 bash refine_v2/commands/13_eval_refiner.sh
+bash refine_v2/commands/14_selector_window_report.sh
+bash refine_v2/commands/15_eval_contact_refiner.sh
 ```
+
+Report split:
+
+- selector/window reports describe the frozen sampler: parameters, layered
+  stats, caps, window counts, action/hand/region distributions, and selector
+  audit fields.
+- refiner contact eval reports describe checkpoint quality on selected windows:
+  coarse-vs-refined contact distance, binary contact precision/recall/F1,
+  duration/frequency/jitter errors, and `surrogate_penetration_*`.
+
+`surrogate_penetration_*` is an unsigned-distance warning metric using
+`penetration_margin=0.015` by default, matching the old v1 contact-eval style.
+It is not a signed mesh penetration or interpenetration volume metric.

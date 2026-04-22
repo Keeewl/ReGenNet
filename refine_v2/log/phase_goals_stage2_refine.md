@@ -394,35 +394,152 @@ Dynamic SMPL-X xyz debug should be added only after the fast motion/contact
 dataset and first refiner are stable.
 ```
 
-## Phase 5: Refiner Feature / Network / Loss
+## Phase 5: First Refiner Training Framework
 
-Status: next
+Status: completed for first baseline
 
 Goal:
 
 Implement the first trainable refiner after subset/data loader are stable.
 
-This phase is intentionally deferred until subset quality is audited.
+Completed baseline:
 
-Next first-scope requirements:
-
-- model input packing from `RefineV2WindowDataset`
-- minimal residual refiner architecture
+- `RefineV2WindowRefiner`
+- mesh-aware condition encoder
 - residual output over `coarse_motion_window`
-- supervised target from `gt_motion_window`
-- contact-aware auxiliary losses from GT mesh-region labels
-- valid-mask-aware loss computation
-- train/eval split protocol on the 15-action subset
-- minimal checkpointing and metric logging
-- one-batch and small-overfit tests before full subset training
+- contact-weighted motion loss
+- temporal residual smoothness loss
+- sequence-level train/val split
+- checkpoint / resume / logging
+- window-level coarse-vs-refined eval
+- small overfit test
+
+Current result:
+
+```text
+64-window overfit passed.
+Large exp2 best heldout val checkpoint at step 4000 improved over coarse.
+Long 80k training overfit, so early stopping / regularization is needed.
+```
+
+Decision:
+
+```text
+The training scaffold is valid, but motion reconstruction eval is not sufficient
+as the Stage2 refine success criterion.
+```
+
+## Phase 6: Contact-Centric Eval And Visualization
+
+Status: next
+
+Goal:
+
+Add a Stage2-specific evaluation layer that directly measures whether the
+refiner improves reactor hand physical/contact quality.
+
+Rationale:
+
+Stage2 refine is not only a motion-reconstruction task. The main target is:
+
+```text
+improve reactor hand motion physical/contact quality
+```
+
+Therefore, the main iteration loop should be:
+
+```text
+0. freeze selector/window/subset
+1. update refiner feature/model/loss
+2. evaluate with eval_contact + visualization
+3. use contact diagnostics to update step 1
+```
+
+This avoids optimizing only `pred_motion_error` while missing the real contact
+quality objective.
+
+Recommended first `eval_contact` metrics:
+
+- hand-region min-distance error:
+  - `abs(pred_min_dist - gt_min_dist)`
+  - compare against `abs(coarse_min_dist - gt_min_dist)`
+- GT contact-frame distance improvement:
+  - `coarse_dist - pred_dist`
+- binary contact precision / recall / F1:
+  - using the existing GT contact labels
+  - start with `tau_contact = 0.05`
+- top-k region contact improvement:
+  - evaluate only window top-k regions as a focused diagnostic
+- contact frequency / duration error:
+  - predicted contact frame count
+  - predicted contact segment duration
+- contact jitter / flicker:
+  - number of contact mask transitions
+
+Recommended breakdowns:
+
+- action type
+- hand side
+- primary region
+- top-k region
+- window vs full selected sequence
+
+Visualization requirements:
+
+- timeline view for one whole sequence:
+  - selected windows
+  - GT/coarse/refined contact masks
+  - min-distance curves
+  - hand side and top-k region labels
+- single-window aitviewer inspection:
+  - coarse vs refined vs GT
+  - window start/end annotation
+  - hand / primary / top-k region annotation
+
+Important implementation rule:
+
+```text
+Implement contact eval and visualization first as offline evaluation.
+Do not immediately put dynamic SMPL-X geometry forward into the training loop.
+```
+
+This keeps training fast while allowing direct contact-quality validation.
+
+## Phase 7: Refiner Feature / Model / Loss Iteration
+
+Status: pending after Phase 6 contact eval
+
+Goal:
+
+Use `eval_contact` and visualization diagnostics to improve the refiner.
+
+Next likely feature/model/loss updates:
+
+- add distance trend features:
+  - `dist[t] - dist[t-1]`
+- strengthen coarse min-distance/contact encoding
+- add window-relative time embedding
+- add selected-hand / contact-side joint weighting
+- add residual magnitude regularization
+- add non-contact preservation loss:
+  - keep `pred` close to `coarse` outside GT contact frames
+- consider hard-negative `GT0 / Pred+` only after positive subset behavior is stable
+- add optional slow geometry loss only after offline `eval_contact` proves the metric is meaningful
+
+Training recommendations:
+
+- do not keep increasing model size blindly
+- prefer shorter runs with early stopping
+- use heldout sequence-level val as the model-selection signal
+- use contact eval as the Stage2 success signal
 
 Open design questions:
 
 - whether top-k regions are used as conditioning, supervision candidates, or both
-- whether to train on one primary region target or multi-region contact targets
-- whether to include hard-negative windows from `GT0 / Pred+`
 - whether refiner predicts full pose deltas, hand deltas, or contact-region corrections
-- whether motion loss should initially be full-body MSE or weighted toward reactor hands/contact frames
+- whether motion loss should initially be full-body or weighted toward reactor hands/contact frames
+- which contact metric should be the primary model-selection criterion
+- whether geometry loss should be enabled during training or kept as eval-only
 
 ## Current Recommendation
 
@@ -432,10 +549,10 @@ data interface for now.
 Next concrete task:
 
 ```text
-minimal residual refiner + train loop + loss + eval framework
+offline eval_contact_refiner + sequence/window contact visualization
 ```
 
-The first refiner should be developed on the subset rerun outputs rather than on full train.
+Then use those contact metrics to update feature/model/loss.
 
 ## Update Log
 
@@ -454,3 +571,23 @@ The first refiner should be developed on the subset rerun outputs rather than on
   - Added subset window text sanity inspection and aitviewer single-window inspection support.
   - Implemented fast-path `RefineV2WindowDataset`, feature packing, strict alignment checks, DataLoader collate, and inspection CLI.
   - Phase 4 is complete enough to move to the first trainable refiner framework.
+  - Implemented the first trainable refine_v2 residual refiner framework.
+  - A 64-window overfit test passed (`loss_total` decreased from `0.01390` to `0.00812`).
+  - Large exp2 training validated the refiner direction but overfit after early steps:
+    - best heldout val checkpoint at step 4000
+    - best val `pred_motion_error = 0.01547` vs coarse `0.01652`
+    - final step 80000 overfit and became worse than coarse on heldout val
+  - Next training priority is shorter, better-regularized runs plus early stopping / patience.
+- 2026-04-22:
+  - Updated the phase plan around the real Stage2 objective:
+    - freeze selector/window/subset
+    - iterate feature/model/loss
+    - validate with contact-centric metrics and visualization
+  - Added Phase 6 as the next priority:
+    - offline `eval_contact_refiner`
+    - sequence/window contact timeline visualization
+    - coarse/refined/GT contact-quality comparison
+  - Added Phase 7 as the follow-up:
+    - improve refiner features/losses based on `eval_contact` diagnostics
+    - avoid blind model-size increases
+    - add geometry loss only after offline contact eval is trustworthy
