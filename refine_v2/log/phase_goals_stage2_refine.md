@@ -591,3 +591,34 @@ Then use those contact metrics to update feature/model/loss.
     - improve refiner features/losses based on `eval_contact` diagnostics
     - avoid blind model-size increases
     - add geometry loss only after offline contact eval is trustworthy
+  - Boundary translation loss experiment:
+    - exp3 used `lambda_boundary_trans=2.0`, `boundary_trans_frames=2`
+    - motion eval improved slightly versus exp2, and window-local boundary
+      transl jump stayed close to coarse
+    - contact geometry improvement dropped clearly versus exp2:
+      - exp3 `refined_contact_f1 = 0.8187`
+      - exp3 `topk_refined_contact_f1 = 0.8264`
+      - exp3 `gt_contact_contact_dist_improvement = 0.00236`
+    - conclusion: boundary transl anchor is directionally useful, but
+      `lambda_boundary_trans=2.0` is too conservative for contact improvement
+  - Next run:
+    - exp4 uses `lambda_boundary_trans=1.0`
+    - keeps `boundary_trans_frames=2`
+    - default training length is reduced to `num_steps=10000`
+    - save path moves to `refine_v2/save/train/refiner_v2_exp4_boundary_lam1_10k`
+  - Command organization rule from now on:
+    - new training commands go under `refine_v2/commands/train/`
+    - new eval commands go under `refine_v2/commands/eval/`
+    - new visualization commands go under `refine_v2/commands/visual/`
+    - new training/eval/visual experiment outputs go under `refine_v2/save/`
+    - old flat `commands/*.sh` files are kept untouched for reproducibility
+  - Stage1/Stage2 responsibility clarification:
+    - Stage1 is responsible for producing the coarse reactor motion, including
+      broad global translation quality
+    - Stage2's target is contact refinement, mainly hand/arm/contact quality
+      with controlled full-body residuals
+    - large reactor translation errors are fundamentally a Stage1 issue
+    - Stage1 is frozen for now, so Stage2 will keep using boundary/regularized
+      constraints to avoid making transl discontinuity worse
+    - if time allows later, Stage1 should be revisited for coarse transl and
+      global interaction alignment quality

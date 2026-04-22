@@ -7,6 +7,15 @@ The scripts intentionally follow the same simple command-record style as
 `python -m ...` command. Edit paths and numeric parameters directly in the
 corresponding `.sh` file before running.
 
+New commands from 2026-04-22 onward are grouped by function:
+
+- `commands/train/`: training runs. New training artifacts should go under
+  `refine_v2/save/`, not `refine_v2/outputs/`.
+- `commands/eval/`: eval commands for trained checkpoints.
+- `commands/visual/`: visualization pack export and local aitviewer commands.
+
+Older flat commands are kept for reproducibility and are not moved.
+
 Files:
 
 - `00_build_contact_labels.sh`: build `contact_labels_gt.npz` from `reaction_data`.
