@@ -27,6 +27,8 @@ Files:
 - `13_eval_refiner.sh`: run window-level eval for a trained refine_v2 refiner checkpoint.
 - `14_selector_window_report.sh`: build a standalone selector/window sampling report.
 - `15_eval_contact_refiner.sh`: run window-level contact-quality eval for a trained refiner checkpoint.
+- `16_export_refiner_vis_pack.sh`: export a small full-sequence actor/coarse/refined/GT visualization pack.
+- `17_view_refiner_vis_pack_ait.sh`: open an exported visualization pack in aitviewer.
 
 Default inputs and outputs embedded in the scripts:
 
@@ -67,6 +69,8 @@ bash refine_v2/commands/12_train_refiner_large_overnight.sh
 bash refine_v2/commands/13_eval_refiner.sh
 bash refine_v2/commands/14_selector_window_report.sh
 bash refine_v2/commands/15_eval_contact_refiner.sh
+bash refine_v2/commands/16_export_refiner_vis_pack.sh
+bash refine_v2/commands/17_view_refiner_vis_pack_ait.sh
 ```
 
 Report split:
@@ -81,3 +85,18 @@ Report split:
 `surrogate_penetration_*` is an unsigned-distance warning metric using
 `penetration_margin=0.015` by default, matching the old v1 contact-eval style.
 It is not a signed mesh penetration or interpenetration volume metric.
+
+Visualization pack workflow:
+
+- Run `16_export_refiner_vis_pack.sh` on the GPU/training machine. It runs the
+  trained checkpoint on a selected subset of full sequences, stitches refined
+  windows back into each sequence with average blending in overlaps, and writes
+  `refiner_vis_pack.npz` plus manifest/summary files.
+- Download that small output directory locally, then run
+  `17_view_refiner_vis_pack_ait.sh`. The viewer reads the pack only; it does not
+  rerun selector or refiner inference.
+- The aitviewer layout is side-by-side by default:
+  `coarse` on the left, `refined` in the center, and `GT` on the right. Each
+  panel includes the actor and reactor. The selected window's actor target
+  region is highlighted with primary/top-k colors, and the reactor hand side is
+  highlighted.
