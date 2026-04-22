@@ -125,3 +125,25 @@ def validate_feature_sample(sample: dict[str, Any]):
         raise ValueError(f"valid_mask expected shape {(window_length,)}, got {valid.shape}.")
     if valid.dtype != np.bool_:
         raise ValueError(f"valid_mask must be bool, got {valid.dtype}.")
+    if "primary_relative_vector_window" in sample:
+        vector = np.asarray(sample["primary_relative_vector_window"])
+        if vector.shape != (3, window_length):
+            raise ValueError(f"primary_relative_vector_window expected shape {(3, window_length)}, got {vector.shape}.")
+    if "primary_relative_dist_window" in sample:
+        dist = np.asarray(sample["primary_relative_dist_window"])
+        if dist.shape != (window_length,):
+            raise ValueError(f"primary_relative_dist_window expected shape {(window_length,)}, got {dist.shape}.")
+    if "topk_relative_vectors_window" in sample:
+        vectors = np.asarray(sample["topk_relative_vectors_window"])
+        if vectors.ndim != 3 or vectors.shape[1:] != (3, window_length):
+            raise ValueError(
+                "topk_relative_vectors_window expected shape [K,3,T], "
+                f"got {vectors.shape} for T={window_length}."
+            )
+    if "topk_relative_dists_window" in sample:
+        dists = np.asarray(sample["topk_relative_dists_window"])
+        if dists.ndim != 2 or dists.shape[-1] != window_length:
+            raise ValueError(
+                "topk_relative_dists_window expected shape [K,T], "
+                f"got {dists.shape} for T={window_length}."
+            )

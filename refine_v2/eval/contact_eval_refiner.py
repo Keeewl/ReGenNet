@@ -327,6 +327,7 @@ def evaluate_contact_refiner(
     selector_windows_path: str,
     region_map_path: str,
     include_buckets: list[str],
+    geometry_feature_cache_path: str = "",
     selected_action_types: list[str] | None = None,
     batch_size: int = 8,
     num_workers: int = 0,
@@ -341,12 +342,18 @@ def evaluate_contact_refiner(
     from torch.utils.data import DataLoader
 
     dev = torch.device(device if torch.cuda.is_available() or device == "cpu" else "cpu")
+    state = torch.load(checkpoint_path, map_location=dev)
+    train_cfg = state.get("config", {})
+    resolved_geometry_cache = geometry_feature_cache_path or str(train_cfg.get("geometry_feature_cache_path", ""))
+    if bool(state.get("model_config", {}).get("use_geometry_features", False)) and not resolved_geometry_cache:
+        raise ValueError("Checkpoint uses geometry features; pass geometry_feature_cache_path.")
     dataset = RefineV2WindowDataset(
         reaction_data_path,
         contact_labels_path,
         subset_manifest_path,
         selector_windows_path,
         include_buckets=include_buckets,
+        geometry_feature_cache_path=resolved_geometry_cache,
         selected_action_types=selected_action_types,
         strict_checks=True,
     )
@@ -358,7 +365,6 @@ def evaluate_contact_refiner(
         pin_memory=dev.type == "cuda",
         collate_fn=collate_refine_v2_window_batch,
     )
-    state = torch.load(checkpoint_path, map_location=dev)
     model = RefineV2WindowRefiner(RefineV2WindowRefinerConfig(**state["model_config"])).to(dev)
     model.load_state_dict(state["model"], strict=True)
     model.eval()
@@ -458,6 +464,7 @@ def evaluate_contact_refiner(
             "contact_labels_path": contact_labels_path,
             "subset_manifest_path": subset_manifest_path,
             "selector_windows_path": selector_windows_path,
+            "geometry_feature_cache_path": resolved_geometry_cache,
             "region_map_path": region_map_path,
         },
         "params": {

@@ -622,3 +622,71 @@ Then use those contact metrics to update feature/model/loss.
       constraints to avoid making transl discontinuity worse
     - if time allows later, Stage1 should be revisited for coarse transl and
       global interaction alignment quality
+  - exp3 vs exp4 boundary baseline selection:
+    - exp2 is no longer considered a good practical baseline because
+      visualization showed obvious reactor translation discontinuity, even
+      though its contact metrics are strongest
+    - exp3:
+      - `lambda_boundary_trans = 2.0`
+      - `boundary_trans_frames = 2`
+      - `all_valid_dist_l1_improvement = 0.00239`
+      - `gt_contact_contact_dist_improvement = 0.00236`
+      - `refined_contact_f1 = 0.8187`
+      - `topk_refined_contact_f1 = 0.8264`
+      - `surrogate_penetration_depth_improvement = -0.000052`
+      - window-local boundary jump stayed close to coarse
+    - exp4:
+      - `lambda_boundary_trans = 1.0`
+      - `boundary_trans_frames = 2`
+      - `num_steps = 10000`
+      - `all_valid_dist_l1_improvement = 0.00201`
+      - `gt_contact_contact_dist_improvement = 0.00202`
+      - `refined_contact_f1 = 0.8155`
+      - `topk_refined_contact_f1 = 0.8232`
+      - `surrogate_penetration_depth_improvement = -0.000049`
+    - conclusion:
+      - lowering boundary loss from `2.0` to `1.0` did not recover contact
+        quality
+      - exp4 is slightly safer on surrogate penetration but slightly worse on
+        contact recall/F1/distance
+      - among the boundary-constrained candidates, exp3 is the better current
+        stable baseline because it gives stronger contact improvement while
+        still controlling translation discontinuity
+      - exp4 remains useful as a conservative reference, not as the main
+        baseline
+  - Next refiner design direction:
+    - stop spending main effort on scalar boundary-loss tuning
+    - move to model/loss scope control:
+      - hand/arm residual should have high freedom
+      - root/transl should have low freedom and boundary/continuity anchors
+      - lower body should mostly preserve coarse motion
+    - next implementation phase should focus on:
+      - joint-group gated residual
+      - group-weighted motion/preservation losses
+      - window phase and boundary indicators as features
+      - scope eval metrics: hand/arm/torso/lower-body/transl delta norms
+      - full-sequence continuity eval after stitching
+  - refine_v2_v1 scope-geometry implementation completed:
+    - added offline relative geometry feature cache
+    - added optional dataset/cache alignment validation
+    - added geometry-conditioned per-frame condition encoder
+    - added fixed joint-group gated residual scaling
+    - added group-weighted motion loss and hand/arm contact-frame loss
+    - added joint-group delta-norm eval metrics
+    - added grouped commands under:
+      - `refine_v2/commands/features/`
+      - `refine_v2/commands/train/`
+      - `refine_v2/commands/eval/`
+      - `refine_v2/commands/visual/`
+    - new exp5 paths:
+      - feature cache: `refine_v2/save/features/scope_geom_train/geometry_feature_cache.npz`
+      - train output: `refine_v2/save/train/refiner_v2_exp5_scope_geom_10k`
+    - validation completed:
+      - py_compile passed
+      - all relevant CLI `--help` checks passed
+      - geometry-enabled model/loss smoke test passed
+      - legacy no-geometry model forward smoke test passed
+  - Next concrete run:
+    - build geometry cache
+    - train `refiner_v2_exp5_scope_geom_10k`
+    - compare against exp3 using window eval, contact eval, and aitviewer visual pack

@@ -15,6 +15,7 @@ class RefineV2ConditionEncoderConfig:
     num_regions: int = 6
     top_k_regions: int = 3
     dropout: float = 0.0
+    use_geometry_features: bool = False
 
 
 class RefineV2ConditionEncoder(nn.Module):
@@ -43,6 +44,15 @@ class RefineV2ConditionEncoder(nn.Module):
             nn.SiLU(),
             nn.Linear(d, d),
         )
+        self.geometry_mlp = None
+        if bool(config.use_geometry_features):
+            geom_dim = 4 + int(config.top_k_regions) * 4
+            self.geometry_mlp = nn.Sequential(
+                nn.Linear(geom_dim, d),
+                nn.SiLU(),
+                nn.Dropout(float(config.dropout)),
+                nn.Linear(d, d),
+            )
         self.frame_fuse = nn.Sequential(
             nn.LayerNorm(d * 2),
             nn.Linear(d * 2, d),
@@ -60,6 +70,10 @@ class RefineV2ConditionEncoder(nn.Module):
         topk_region_scores_numeric: torch.Tensor,
         coarse_region_contact_mask_window: torch.Tensor,
         coarse_min_region_dist_window: torch.Tensor,
+        primary_relative_vector_window: torch.Tensor | None = None,
+        primary_relative_dist_window: torch.Tensor | None = None,
+        topk_relative_vectors_window: torch.Tensor | None = None,
+        topk_relative_dists_window: torch.Tensor | None = None,
     ) -> dict[str, torch.Tensor]:
         hand_side_id = hand_side_id.long().clamp(0, self.config.num_hands - 1)
         primary_target_region_id = primary_target_region_id.long().clamp(0, self.config.num_regions - 1)
@@ -82,6 +96,25 @@ class RefineV2ConditionEncoder(nn.Module):
         dist = coarse_min_region_dist_window.float().transpose(1, 2)
         dist = torch.nan_to_num(dist, nan=0.0, posinf=10.0, neginf=0.0).clamp(0.0, 10.0)
         frame_contact = self.frame_contact_mlp(torch.cat([contact, dist], dim=-1))
+        if self.geometry_mlp is not None:
+            if (
+                primary_relative_vector_window is None
+                or primary_relative_dist_window is None
+                or topk_relative_vectors_window is None
+                or topk_relative_dists_window is None
+            ):
+                raise KeyError(
+                    "use_geometry_features=True requires geometry cache fields in the batch: "
+                    "primary_relative_vector_window, primary_relative_dist_window, "
+                    "topk_relative_vectors_window, topk_relative_dists_window."
+                )
+            primary_vec = primary_relative_vector_window.float().transpose(1, 2)
+            primary_dist = primary_relative_dist_window.float().unsqueeze(-1)
+            topk_vec = topk_relative_vectors_window.float().permute(0, 3, 1, 2).flatten(2)
+            topk_dist = topk_relative_dists_window.float().transpose(1, 2)
+            geom = torch.cat([primary_vec, primary_dist, topk_vec, topk_dist], dim=-1)
+            geom = torch.nan_to_num(geom, nan=0.0, posinf=10.0, neginf=-10.0).clamp(-10.0, 10.0)
+            frame_contact = frame_contact + self.geometry_mlp(geom)
         per_frame_condition = self.frame_fuse(
             torch.cat([frame_contact, global_condition.unsqueeze(1).expand_as(frame_contact)], dim=-1)
         )

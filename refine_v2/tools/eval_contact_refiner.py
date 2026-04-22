@@ -43,6 +43,7 @@ def build_parser():
     parser.add_argument("--region_map_path", required=True)
     parser.add_argument("--output_dir", required=True)
     parser.add_argument("--include_buckets", nargs="+", default=["GT+ / Pred+"])
+    parser.add_argument("--geometry_feature_cache_path", default="")
     parser.add_argument("--selected_action_types", nargs="*", default=None)
     parser.add_argument("--batch_size", type=int, default=4)
     parser.add_argument("--num_workers", type=int, default=0)
@@ -69,6 +70,7 @@ def main(argv=None):
         selector_windows_path=args.selector_windows_path,
         region_map_path=args.region_map_path,
         include_buckets=args.include_buckets,
+        geometry_feature_cache_path=args.geometry_feature_cache_path,
         selected_action_types=args.selected_action_types,
         batch_size=args.batch_size,
         num_workers=args.num_workers,

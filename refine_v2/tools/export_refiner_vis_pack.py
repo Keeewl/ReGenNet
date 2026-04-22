@@ -207,6 +207,7 @@ def export_refiner_vis_pack(
     num_workers: int = 0,
     device: str = "cuda",
     contact_eval_json: str = "",
+    geometry_feature_cache_path: str = "",
 ) -> dict[str, Any]:
     import torch
     from torch.utils.data import DataLoader, Subset
@@ -218,6 +219,11 @@ def export_refiner_vis_pack(
 
     os.makedirs(output_dir, exist_ok=True)
     dev = torch.device(device if torch.cuda.is_available() or device == "cpu" else "cpu")
+    state = torch.load(checkpoint, map_location=dev)
+    train_cfg = state.get("config", {})
+    resolved_geometry_cache = geometry_feature_cache_path or str(train_cfg.get("geometry_feature_cache_path", ""))
+    if bool(state.get("model_config", {}).get("use_geometry_features", False)) and not resolved_geometry_cache:
+        raise ValueError("Checkpoint uses geometry features; pass --geometry_feature_cache_path.")
     dataset = RefineV2WindowDataset(
         reaction_data_path,
         contact_labels_path,
@@ -225,6 +231,7 @@ def export_refiner_vis_pack(
         selector_windows_path,
         include_buckets=include_buckets,
         selected_action_types=selected_action_types,
+        geometry_feature_cache_path=resolved_geometry_cache,
         strict_checks=True,
     )
     rows, selected_original_windows = _select_rows(
@@ -244,7 +251,6 @@ def export_refiner_vis_pack(
     if not selected_dataset_indices:
         raise ValueError("No windows selected for visualization export.")
 
-    state = torch.load(checkpoint, map_location=dev)
     model = RefineV2WindowRefiner(RefineV2WindowRefinerConfig(**state["model_config"])).to(dev)
     model.load_state_dict(state["model"], strict=True)
     model.eval()
@@ -344,6 +350,7 @@ def export_refiner_vis_pack(
             "subset_manifest_path": subset_manifest_path,
             "selector_windows_path": selector_windows_path,
             "contact_eval_json": contact_eval_json,
+            "geometry_feature_cache_path": resolved_geometry_cache,
         },
         "params": {
             "include_buckets": list(include_buckets),
@@ -433,6 +440,7 @@ def build_parser():
     parser.add_argument("--num_workers", type=int, default=0)
     parser.add_argument("--device", default="cuda")
     parser.add_argument("--contact_eval_json", default="")
+    parser.add_argument("--geometry_feature_cache_path", default="")
     return parser
 
 
@@ -457,6 +465,7 @@ def main(argv=None):
         num_workers=args.num_workers,
         device=args.device,
         contact_eval_json=args.contact_eval_json,
+        geometry_feature_cache_path=args.geometry_feature_cache_path,
     )
     print(f"saved refiner vis pack: {result['pack_path']}")
     print(f"saved manifest: {result['manifest_path']}")

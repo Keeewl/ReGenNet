@@ -44,6 +44,7 @@ def make_refine_v2_window_loader(
     include_buckets: list[str] | None = None,
     selected_action_types: list[str] | None = None,
     include_xyz: bool = False,
+    geometry_feature_cache_path: str = "",
     strict_checks: bool = True,
     batch_size: int = 32,
     shuffle: bool = False,
@@ -59,6 +60,7 @@ def make_refine_v2_window_loader(
         include_buckets=include_buckets,
         selected_action_types=selected_action_types,
         include_xyz=include_xyz,
+        geometry_feature_cache_path=geometry_feature_cache_path,
         strict_checks=strict_checks,
     )
     return DataLoader(

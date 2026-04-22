@@ -7,6 +7,8 @@ from typing import Any
 
 import torch
 
+from refine_v2.model.joint_groups import delta_group_norms
+
 
 def batch_to_device(batch: dict[str, Any], device: torch.device) -> dict[str, Any]:
     out: dict[str, Any] = {}
@@ -77,6 +79,11 @@ def eval_batch_metrics(outputs: dict[str, torch.Tensor], batch: dict[str, torch.
     pred_contact_err = _contact_l1_per_sample(pred, gt, contact_frame)
     coarse_boundary_jump = _boundary_jump_metrics(coarse, valid, batch["start_frame"], batch["end_frame"])
     pred_boundary_jump = _boundary_jump_metrics(pred, valid, batch["start_frame"], batch["end_frame"])
+    delta_norm = delta_group_norms(
+        outputs["pred_delta_motion_window"].float(),
+        valid,
+        batch["hand_side_id"],
+    )
     return {
         "coarse_motion_error": coarse_err,
         "pred_motion_error": pred_err,
@@ -88,6 +95,7 @@ def eval_batch_metrics(outputs: dict[str, torch.Tensor], batch: dict[str, torch.
         "coarse_boundary_trans_jump": coarse_boundary_jump,
         "pred_boundary_trans_jump": pred_boundary_jump,
         "boundary_trans_jump_excess": pred_boundary_jump - coarse_boundary_jump,
+        **delta_norm,
     }
 
 
@@ -159,6 +167,16 @@ def evaluate_model(
                 "pred_boundary_trans_jump": float(per_sample_cpu["pred_boundary_trans_jump"][i]),
                 "boundary_trans_jump_excess": float(per_sample_cpu["boundary_trans_jump_excess"][i]),
             }
+            for metric_name in (
+                "delta_norm_selected_hand",
+                "delta_norm_same_side_arm",
+                "delta_norm_other_hand_arm",
+                "delta_norm_torso_root",
+                "delta_norm_lower_body",
+                "delta_norm_transl",
+            ):
+                if metric_name in per_sample_cpu:
+                    item_metrics[metric_name] = float(per_sample_cpu[metric_name][i])
             for group_name in breakdown:
                 value = str(batch[group_name][i]) if group_name in batch else ""
                 for metric_name, metric_value in item_metrics.items():

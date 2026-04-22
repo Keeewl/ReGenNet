@@ -15,6 +15,7 @@ def build_parser():
     parser.add_argument("--subset_manifest_path", required=True)
     parser.add_argument("--selector_windows_path", required=True)
     parser.add_argument("--include_buckets", nargs="+", default=["GT+ / Pred+"])
+    parser.add_argument("--geometry_feature_cache_path", default="")
     parser.add_argument("--selected_action_types", nargs="*", default=None)
     parser.add_argument("--batch_size", type=int, default=32)
     parser.add_argument("--num_workers", type=int, default=4)
@@ -38,12 +39,17 @@ def main(argv=None):
 
     device = torch.device(args.device if torch.cuda.is_available() or args.device == "cpu" else "cpu")
     state = torch.load(args.checkpoint, map_location=device)
+    train_cfg = state.get("config", {})
+    geometry_feature_cache_path = args.geometry_feature_cache_path or str(train_cfg.get("geometry_feature_cache_path", ""))
+    if bool(state.get("model_config", {}).get("use_geometry_features", False)) and not geometry_feature_cache_path:
+        raise ValueError("Checkpoint uses geometry features; pass --geometry_feature_cache_path.")
     dataset = RefineV2WindowDataset(
         args.reaction_data_path,
         args.contact_labels_path,
         args.subset_manifest_path,
         args.selector_windows_path,
         include_buckets=args.include_buckets,
+        geometry_feature_cache_path=geometry_feature_cache_path,
         selected_action_types=args.selected_action_types,
         strict_checks=True,
     )
@@ -58,7 +64,6 @@ def main(argv=None):
     model_cfg = RefineV2WindowRefinerConfig(**state["model_config"])
     model = RefineV2WindowRefiner(model_cfg).to(device)
     model.load_state_dict(state["model"], strict=True)
-    train_cfg = state.get("config", {})
     loss_fn = RefineV2Loss(
         RefineV2LossConfig(
             lambda_motion=float(train_cfg.get("lambda_motion", 1.0)),
@@ -69,6 +74,18 @@ def main(argv=None):
             boundary_trans_frames=int(train_cfg.get("boundary_trans_frames", 2)),
             contact_frame_weight=float(train_cfg.get("contact_frame_weight", 2.0)),
             smooth_l1_beta=float(train_cfg.get("smooth_l1_beta", 0.05)),
+            use_group_weighted_loss=bool(train_cfg.get("use_group_weighted_loss", False)),
+            selected_hand_motion_weight=float(train_cfg.get("selected_hand_motion_weight", 3.0)),
+            same_side_arm_motion_weight=float(train_cfg.get("same_side_arm_motion_weight", 2.0)),
+            other_hand_arm_motion_weight=float(train_cfg.get("other_hand_arm_motion_weight", 1.0)),
+            torso_root_motion_weight=float(train_cfg.get("torso_root_motion_weight", 0.75)),
+            lower_body_motion_weight=float(train_cfg.get("lower_body_motion_weight", 0.25)),
+            transl_motion_weight=float(train_cfg.get("transl_motion_weight", 0.25)),
+            use_hand_arm_contact_loss=bool(train_cfg.get("use_hand_arm_contact_loss", False)),
+            selected_hand_contact_weight=float(train_cfg.get("selected_hand_contact_weight", 4.0)),
+            same_side_arm_contact_weight=float(train_cfg.get("same_side_arm_contact_weight", 3.0)),
+            other_upper_contact_weight=float(train_cfg.get("other_upper_contact_weight", 1.0)),
+            body_contact_weight=float(train_cfg.get("body_contact_weight", 0.5)),
         )
     ).to(device)
     result = evaluate_model(model, loader, loss_fn, device=device, max_batches=int(args.max_batches))

@@ -8,6 +8,7 @@ import torch
 from torch import nn
 
 from refine_v2.model.condition_encoder import RefineV2ConditionEncoder, RefineV2ConditionEncoderConfig
+from refine_v2.model.joint_groups import ResidualGroupScales, residual_scale_tensor
 
 
 @dataclass
@@ -24,6 +25,14 @@ class RefineV2WindowRefinerConfig:
     num_regions: int = 6
     top_k_regions: int = 3
     delta_scale: float = 1.0
+    use_geometry_features: bool = False
+    use_group_gated_residual: bool = False
+    hand_delta_scale: float = 1.0
+    arm_delta_scale: float = 1.0
+    torso_delta_scale: float = 0.5
+    root_delta_scale: float = 0.2
+    transl_delta_scale: float = 0.2
+    lower_body_delta_scale: float = 0.1
 
 
 class RefineV2RefinerBlock(nn.Module):
@@ -98,6 +107,7 @@ class RefineV2WindowRefiner(nn.Module):
                 num_regions=int(config.num_regions),
                 top_k_regions=int(config.top_k_regions),
                 dropout=float(config.dropout),
+                use_geometry_features=bool(config.use_geometry_features),
             )
         )
         self.blocks = nn.ModuleList(
@@ -146,6 +156,10 @@ class RefineV2WindowRefiner(nn.Module):
             topk_region_scores_numeric=batch["topk_region_scores_numeric"],
             coarse_region_contact_mask_window=batch["coarse_region_contact_mask_window"],
             coarse_min_region_dist_window=batch["coarse_min_region_dist_window"],
+            primary_relative_vector_window=batch.get("primary_relative_vector_window"),
+            primary_relative_dist_window=batch.get("primary_relative_dist_window"),
+            topk_relative_vectors_window=batch.get("topk_relative_vectors_window"),
+            topk_relative_dists_window=batch.get("topk_relative_dists_window"),
         )
 
         valid_mask = batch.get("valid_mask")
@@ -164,6 +178,22 @@ class RefineV2WindowRefiner(nn.Module):
 
         delta_tokens = self.output_head(self.output_norm(x)) * float(self.config.delta_scale)
         pred_delta = delta_tokens.reshape(b, t, j, f).permute(0, 2, 3, 1).contiguous()
+        if bool(self.config.use_group_gated_residual):
+            scales = residual_scale_tensor(
+                num_joints=j,
+                num_channels=f,
+                device=pred_delta.device,
+                dtype=pred_delta.dtype,
+                scales=ResidualGroupScales(
+                    hand=float(self.config.hand_delta_scale),
+                    arm=float(self.config.arm_delta_scale),
+                    torso=float(self.config.torso_delta_scale),
+                    root=float(self.config.root_delta_scale),
+                    transl=float(self.config.transl_delta_scale),
+                    lower_body=float(self.config.lower_body_delta_scale),
+                ),
+            )
+            pred_delta = pred_delta * scales
         pred_motion = coarse_motion + pred_delta
         return {
             "pred_delta_motion_window": pred_delta,

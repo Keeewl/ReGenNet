@@ -14,6 +14,10 @@ TENSOR_KEYS = (
     "valid_mask",
     "topk_target_region_ids",
     "topk_region_scores_numeric",
+    "primary_relative_vector_window",
+    "primary_relative_dist_window",
+    "topk_relative_vectors_window",
+    "topk_relative_dists_window",
 )
 
 INT_TENSOR_KEYS = (

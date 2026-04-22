@@ -173,6 +173,7 @@ def build_parser():
     parser.add_argument("--subset_manifest_path", required=True, type=str)
     parser.add_argument("--selector_windows_path", required=True, type=str)
     parser.add_argument("--include_buckets", nargs="*", default=["GT+ / Pred+"])
+    parser.add_argument("--geometry_feature_cache_path", default="", type=str)
     parser.add_argument("--selected_action_types", nargs="*", default=None)
     parser.add_argument("--window_index", default=None, type=int)
     parser.add_argument("--dataset_row_index", default=None, type=int)
@@ -195,6 +196,7 @@ def main(argv=None):
         include_buckets=args.include_buckets,
         selected_action_types=args.selected_action_types,
         include_xyz=args.include_xyz,
+        geometry_feature_cache_path=args.geometry_feature_cache_path,
         strict_checks=not args.no_strict_checks,
     )
     if args.summary_only:

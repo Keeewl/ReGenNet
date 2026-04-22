@@ -8,6 +8,8 @@ import torch
 from torch import nn
 import torch.nn.functional as F
 
+from refine_v2.model.joint_groups import ContactGroupWeights, MotionGroupWeights, contact_group_weight_tensor, group_weight_tensor
+
 
 @dataclass
 class RefineV2LossConfig:
@@ -19,6 +21,18 @@ class RefineV2LossConfig:
     boundary_trans_frames: int = 2
     contact_frame_weight: float = 2.0
     smooth_l1_beta: float = 0.05
+    use_group_weighted_loss: bool = False
+    selected_hand_motion_weight: float = 3.0
+    same_side_arm_motion_weight: float = 2.0
+    other_hand_arm_motion_weight: float = 1.0
+    torso_root_motion_weight: float = 0.75
+    lower_body_motion_weight: float = 0.25
+    transl_motion_weight: float = 0.25
+    use_hand_arm_contact_loss: bool = False
+    selected_hand_contact_weight: float = 4.0
+    same_side_arm_contact_weight: float = 3.0
+    other_upper_contact_weight: float = 1.0
+    body_contact_weight: float = 0.5
 
 
 def _valid_frame_weights(valid_mask: torch.Tensor, motion: torch.Tensor) -> torch.Tensor:
@@ -75,12 +89,48 @@ class RefineV2Loss(nn.Module):
 
         pred_err = _smooth_l1_none(pred, gt, self.config.smooth_l1_beta)
         coarse_err = _smooth_l1_none(coarse, gt, self.config.smooth_l1_beta)
-        loss_motion = _masked_mean(pred_err, valid_weights)
+        if bool(self.config.use_group_weighted_loss):
+            motion_group_weights = group_weight_tensor(
+                hand_side_id=batch["hand_side_id"],
+                num_joints=pred.shape[1],
+                num_channels=pred.shape[2],
+                num_frames=pred.shape[-1],
+                device=pred.device,
+                dtype=pred.dtype,
+                weights=MotionGroupWeights(
+                    selected_hand=float(self.config.selected_hand_motion_weight),
+                    same_side_arm=float(self.config.same_side_arm_motion_weight),
+                    other_hand_arm=float(self.config.other_hand_arm_motion_weight),
+                    torso_root=float(self.config.torso_root_motion_weight),
+                    lower_body=float(self.config.lower_body_motion_weight),
+                    transl=float(self.config.transl_motion_weight),
+                ),
+            )
+            loss_motion = _masked_mean(pred_err, valid_weights * motion_group_weights)
+        else:
+            loss_motion = _masked_mean(pred_err, valid_weights)
 
         contact_frame = self._contact_frame_mask(batch) & valid_mask
-        contact_weights = (1.0 + float(self.config.contact_frame_weight) * contact_frame.float()).view(
-            pred.shape[0], 1, 1, pred.shape[-1]
-        )
+        if bool(self.config.use_hand_arm_contact_loss):
+            contact_group_weights = contact_group_weight_tensor(
+                hand_side_id=batch["hand_side_id"],
+                num_joints=pred.shape[1],
+                num_channels=pred.shape[2],
+                num_frames=pred.shape[-1],
+                device=pred.device,
+                dtype=pred.dtype,
+                weights=ContactGroupWeights(
+                    selected_hand=float(self.config.selected_hand_contact_weight),
+                    same_side_arm=float(self.config.same_side_arm_contact_weight),
+                    other_upper=float(self.config.other_upper_contact_weight),
+                    body=float(self.config.body_contact_weight),
+                ),
+            )
+            contact_weights = 1.0 + contact_frame.float().view(pred.shape[0], 1, 1, pred.shape[-1]) * contact_group_weights
+        else:
+            contact_weights = (1.0 + float(self.config.contact_frame_weight) * contact_frame.float()).view(
+                pred.shape[0], 1, 1, pred.shape[-1]
+            )
         loss_contact_weighted = _masked_mean(pred_err, valid_weights * contact_weights)
 
         if delta.shape[-1] > 1:

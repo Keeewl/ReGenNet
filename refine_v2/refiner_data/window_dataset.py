@@ -18,6 +18,7 @@ from refine_v2.refiner_data.sanity_checks import (
     optional_metadata_space,
     require_keys,
     require_restored_pair_space,
+    validate_feature_sample,
     validate_topk_fields,
 )
 
@@ -74,6 +75,7 @@ class RefineV2WindowDataset:
         include_buckets: list[str] | None = None,
         selected_action_types: list[str] | None = None,
         include_xyz: bool = False,
+        geometry_feature_cache_path: str = "",
         strict_checks: bool = True,
     ):
         if include_xyz:
@@ -88,6 +90,7 @@ class RefineV2WindowDataset:
         self.include_buckets = list(include_buckets or ["GT+ / Pred+"])
         self.selected_action_types = list(selected_action_types or [])
         self.include_xyz = bool(include_xyz)
+        self.geometry_feature_cache_path = str(geometry_feature_cache_path or "")
         self.strict_checks = bool(strict_checks)
 
         self.reaction = _load_npz(reaction_data_path, context="reaction_data")
@@ -100,6 +103,7 @@ class RefineV2WindowDataset:
         self._cache_core_arrays()
         self._build_mappings()
         self.window_records = self._build_window_records()
+        self.geometry_arrays = self._load_geometry_feature_cache()
 
     def _validate_artifact_fields(self):
         require_keys(
@@ -229,6 +233,64 @@ class RefineV2WindowDataset:
             )
         return out
 
+    def _load_geometry_feature_cache(self) -> dict[str, np.ndarray] | None:
+        if not self.geometry_feature_cache_path:
+            return None
+        cache = _load_npz(self.geometry_feature_cache_path, context="geometry_feature_cache")
+        required = (
+            "primary_relative_vector_window",
+            "primary_relative_dist_window",
+            "topk_relative_vectors_window",
+            "topk_relative_dists_window",
+            "dataset_row_indices",
+            "window_indices",
+            "start_frames",
+            "end_frames",
+            "hand_side_ids",
+            "primary_target_region_ids",
+            "topk_target_region_ids",
+            "space_definition",
+        )
+        require_keys(cache, required, context="geometry_feature_cache")
+        require_restored_pair_space(cache["space_definition"], context="geometry_feature_cache")
+        arrays = {key: np.asarray(cache[key]) for key in required if key != "space_definition"}
+        n = int(arrays["dataset_row_indices"].shape[0])
+        if n != len(self.window_records):
+            raise ValueError(
+                "geometry_feature_cache window count mismatch: "
+                f"cache={n}, dataset={len(self.window_records)}. Build the cache with the same "
+                "reaction/contact/subset/selector inputs and filters."
+            )
+        for idx, window in enumerate(self.window_records):
+            checks = {
+                "dataset_row_indices": int(window["dataset_row_index"]),
+                "window_indices": int(window["window_index"]),
+                "start_frames": int(window["start_frame"]),
+                "end_frames": int(window["end_frame"]),
+                "hand_side_ids": int(window["hand_side_id"]),
+                "primary_target_region_ids": int(window["primary_target_region_id"]),
+            }
+            for key, expected in checks.items():
+                actual = int(np.asarray(arrays[key][idx]).reshape(-1)[0])
+                if actual != expected:
+                    raise ValueError(
+                        f"geometry_feature_cache alignment mismatch at dataset window {idx}: "
+                        f"{key} cache={actual}, dataset={expected}."
+                    )
+            cache_topk = np.asarray(arrays["topk_target_region_ids"][idx], dtype=np.int64).reshape(-1).tolist()
+            window_topk = [int(x) for x in window.get("topk_target_region_ids", [])]
+            if cache_topk != window_topk:
+                raise ValueError(
+                    f"geometry_feature_cache top-k region mismatch at dataset window {idx}: "
+                    f"cache={cache_topk}, dataset={window_topk}."
+                )
+        return {
+            "primary_relative_vector_window": np.asarray(cache["primary_relative_vector_window"], dtype=np.float32),
+            "primary_relative_dist_window": np.asarray(cache["primary_relative_dist_window"], dtype=np.float32),
+            "topk_relative_vectors_window": np.asarray(cache["topk_relative_vectors_window"], dtype=np.float32),
+            "topk_relative_dists_window": np.asarray(cache["topk_relative_dists_window"], dtype=np.float32),
+        }
+
     def _validate_window_row(self, window: dict[str, Any]):
         row = int(window["dataset_row_index"])
         selector_idx = self.selector_row_to_index[row]
@@ -251,7 +313,7 @@ class RefineV2WindowDataset:
     def __getitem__(self, index: int) -> dict[str, Any]:
         window = self.window_records[int(index)]
         row = int(window["dataset_row_index"])
-        return build_window_feature_sample(
+        sample = build_window_feature_sample(
             window=window,
             manifest_record=self.manifest_row_to_record[row],
             reaction_pack=self.reaction_arrays,
@@ -263,6 +325,13 @@ class RefineV2WindowDataset:
             pred_min_region_dist=self.pred_min_region_dist,
             strict_checks=self.strict_checks,
         )
+        if self.geometry_arrays is not None:
+            idx = int(index)
+            for key, value in self.geometry_arrays.items():
+                sample[key] = np.asarray(value[idx], dtype=np.float32)
+            if self.strict_checks:
+                validate_feature_sample(sample)
+        return sample
 
     def find_window_index(
         self,
@@ -303,6 +372,7 @@ class RefineV2WindowDataset:
             "contact_labels_path": self.contact_labels_path,
             "subset_manifest_path": self.subset_manifest_path,
             "selector_windows_path": self.selector_windows_path,
+            "geometry_feature_cache_path": self.geometry_feature_cache_path,
             "space_definition": RESTORED_PAIR_SPACE,
             "include_buckets": self.include_buckets,
             "selected_action_types": self.selected_action_types,
@@ -327,6 +397,16 @@ class RefineV2WindowDataset:
             "gt_supervision_shapes": {
                 "gt_region_contact_mask_window": list(sample["gt_region_contact_mask_window"].shape),
                 "gt_min_region_dist_window": list(sample["gt_min_region_dist_window"].shape),
+            },
+            "geometry_feature_shapes": {
+                key: list(sample[key].shape)
+                for key in (
+                    "primary_relative_vector_window",
+                    "primary_relative_dist_window",
+                    "topk_relative_vectors_window",
+                    "topk_relative_dists_window",
+                )
+                if key in sample
             },
             "target_region_names": list(TARGET_REGION_NAMES),
         }

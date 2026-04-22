@@ -29,6 +29,7 @@ class RefineV2TrainerConfig:
     selector_windows_path: str
     save_dir: str
     include_buckets: list[str]
+    geometry_feature_cache_path: str = ""
     selected_action_types: list[str] | None = None
     device: str = "cuda"
     seed: int = 1234
@@ -55,6 +56,14 @@ class RefineV2TrainerConfig:
     mlp_ratio: float = 4.0
     max_window_size: int = 256
     delta_scale: float = 1.0
+    use_geometry_features: bool = False
+    use_group_gated_residual: bool = False
+    hand_delta_scale: float = 1.0
+    arm_delta_scale: float = 1.0
+    torso_delta_scale: float = 0.5
+    root_delta_scale: float = 0.2
+    transl_delta_scale: float = 0.2
+    lower_body_delta_scale: float = 0.1
     lambda_motion: float = 1.0
     lambda_contact: float = 1.0
     lambda_smooth: float = 0.05
@@ -63,6 +72,18 @@ class RefineV2TrainerConfig:
     boundary_trans_frames: int = 2
     contact_frame_weight: float = 2.0
     smooth_l1_beta: float = 0.05
+    use_group_weighted_loss: bool = False
+    selected_hand_motion_weight: float = 3.0
+    same_side_arm_motion_weight: float = 2.0
+    other_hand_arm_motion_weight: float = 1.0
+    torso_root_motion_weight: float = 0.75
+    lower_body_motion_weight: float = 0.25
+    transl_motion_weight: float = 0.25
+    use_hand_arm_contact_loss: bool = False
+    selected_hand_contact_weight: float = 4.0
+    same_side_arm_contact_weight: float = 3.0
+    other_upper_contact_weight: float = 1.0
+    body_contact_weight: float = 0.5
 
 
 def _now() -> str:
@@ -136,6 +157,8 @@ class RefineV2Trainer:
         self.metrics_path = os.path.join(config.save_dir, "metrics.jsonl")
         self.log_fp = open(self.log_path, "a", encoding="utf-8", buffering=1)
         _seed_all(config.seed)
+        if bool(config.use_geometry_features) and not str(config.geometry_feature_cache_path or ""):
+            raise ValueError("--use_geometry_features requires --geometry_feature_cache_path.")
         self._build()
         self._resume_if_needed()
 
@@ -158,6 +181,7 @@ class RefineV2Trainer:
             self.config.selector_windows_path,
             include_buckets=self.config.include_buckets,
             selected_action_types=self.config.selected_action_types,
+            geometry_feature_cache_path=self.config.geometry_feature_cache_path,
             strict_checks=True,
         )
         sample = self.dataset[0]
@@ -173,6 +197,14 @@ class RefineV2Trainer:
             max_window_size=int(self.config.max_window_size),
             top_k_regions=int(sample["topk_target_region_ids"].shape[0]),
             delta_scale=float(self.config.delta_scale),
+            use_geometry_features=bool(self.config.use_geometry_features),
+            use_group_gated_residual=bool(self.config.use_group_gated_residual),
+            hand_delta_scale=float(self.config.hand_delta_scale),
+            arm_delta_scale=float(self.config.arm_delta_scale),
+            torso_delta_scale=float(self.config.torso_delta_scale),
+            root_delta_scale=float(self.config.root_delta_scale),
+            transl_delta_scale=float(self.config.transl_delta_scale),
+            lower_body_delta_scale=float(self.config.lower_body_delta_scale),
         )
         self.model = RefineV2WindowRefiner(self.model_config).to(self.device)
         self.loss_fn = RefineV2Loss(
@@ -185,6 +217,18 @@ class RefineV2Trainer:
                 boundary_trans_frames=int(self.config.boundary_trans_frames),
                 contact_frame_weight=float(self.config.contact_frame_weight),
                 smooth_l1_beta=float(self.config.smooth_l1_beta),
+                use_group_weighted_loss=bool(self.config.use_group_weighted_loss),
+                selected_hand_motion_weight=float(self.config.selected_hand_motion_weight),
+                same_side_arm_motion_weight=float(self.config.same_side_arm_motion_weight),
+                other_hand_arm_motion_weight=float(self.config.other_hand_arm_motion_weight),
+                torso_root_motion_weight=float(self.config.torso_root_motion_weight),
+                lower_body_motion_weight=float(self.config.lower_body_motion_weight),
+                transl_motion_weight=float(self.config.transl_motion_weight),
+                use_hand_arm_contact_loss=bool(self.config.use_hand_arm_contact_loss),
+                selected_hand_contact_weight=float(self.config.selected_hand_contact_weight),
+                same_side_arm_contact_weight=float(self.config.same_side_arm_contact_weight),
+                other_upper_contact_weight=float(self.config.other_upper_contact_weight),
+                body_contact_weight=float(self.config.body_contact_weight),
             )
         ).to(self.device)
         self.optimizer = torch.optim.AdamW(
