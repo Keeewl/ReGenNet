@@ -43,6 +43,8 @@ def build_parser():
     parser.add_argument("--lambda_contact", type=float, default=1.0)
     parser.add_argument("--lambda_smooth", type=float, default=0.05)
     parser.add_argument("--lambda_region_dist", type=float, default=0.0)
+    parser.add_argument("--lambda_boundary_trans", type=float, default=0.0)
+    parser.add_argument("--boundary_trans_frames", type=int, default=2)
     parser.add_argument("--contact_frame_weight", type=float, default=2.0)
     parser.add_argument("--smooth_l1_beta", type=float, default=0.05)
     return parser

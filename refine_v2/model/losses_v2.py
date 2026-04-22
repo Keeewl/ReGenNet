@@ -15,6 +15,8 @@ class RefineV2LossConfig:
     lambda_contact: float = 1.0
     lambda_smooth: float = 0.05
     lambda_region_dist: float = 0.0
+    lambda_boundary_trans: float = 0.0
+    boundary_trans_frames: int = 2
     contact_frame_weight: float = 2.0
     smooth_l1_beta: float = 0.05
 
@@ -30,6 +32,19 @@ def _masked_mean(value: torch.Tensor, weights: torch.Tensor, eps: float = 1e-8) 
 
 def _smooth_l1_none(pred: torch.Tensor, target: torch.Tensor, beta: float) -> torch.Tensor:
     return F.smooth_l1_loss(pred, target, reduction="none", beta=float(beta))
+
+
+def _boundary_frame_mask(valid_mask: torch.Tensor, num_frames: int, k: int) -> torch.Tensor:
+    k = max(0, int(k))
+    mask = torch.zeros_like(valid_mask, dtype=torch.bool)
+    if k <= 0 or num_frames <= 0:
+        return mask
+    k = min(k, int(num_frames))
+    arange = torch.arange(num_frames, device=valid_mask.device).view(1, -1)
+    lengths = valid_mask.long().sum(dim=1).clamp_min(1).view(-1, 1)
+    start_mask = arange < k
+    end_mask = arange >= (lengths - k).clamp_min(0)
+    return (start_mask | end_mask) & valid_mask.bool()
 
 
 class RefineV2Loss(nn.Module):
@@ -76,11 +91,30 @@ class RefineV2Loss(nn.Module):
             loss_smooth = delta.sum() * 0.0
 
         loss_region_dist = pred.sum() * 0.0
+        if (
+            float(self.config.lambda_boundary_trans) != 0.0
+            and pred.shape[0] > 0
+            and pred.shape[1] > 55
+            and pred.shape[2] >= 3
+        ):
+            boundary_mask = _boundary_frame_mask(
+                valid_mask,
+                int(pred.shape[-1]),
+                int(self.config.boundary_trans_frames),
+            )
+            boundary_weights = boundary_mask.float().view(pred.shape[0], 1, 1, pred.shape[-1])
+            pred_trans = pred[:, 55:56, :3, :]
+            coarse_trans = coarse[:, 55:56, :3, :]
+            boundary_err = _smooth_l1_none(pred_trans, coarse_trans, self.config.smooth_l1_beta)
+            loss_boundary_trans = _masked_mean(boundary_err, boundary_weights.expand_as(boundary_err))
+        else:
+            loss_boundary_trans = pred.sum() * 0.0
         loss_total = (
             float(self.config.lambda_motion) * loss_motion
             + float(self.config.lambda_contact) * loss_contact_weighted
             + float(self.config.lambda_smooth) * loss_smooth
             + float(self.config.lambda_region_dist) * loss_region_dist
+            + float(self.config.lambda_boundary_trans) * loss_boundary_trans
         )
 
         contact_weights_plain = contact_frame.float().view(pred.shape[0], 1, 1, pred.shape[-1]).expand_as(pred)
@@ -101,6 +135,7 @@ class RefineV2Loss(nn.Module):
             "loss_contact_weighted": loss_contact_weighted,
             "loss_smooth": loss_smooth,
             "loss_region_dist": loss_region_dist,
+            "loss_boundary_trans": loss_boundary_trans,
             "coarse_motion_error": coarse_motion_error,
             "pred_motion_error": pred_motion_error,
             "motion_improvement": coarse_motion_error - pred_motion_error,

@@ -65,6 +65,8 @@ def main(argv=None):
             lambda_contact=float(train_cfg.get("lambda_contact", 1.0)),
             lambda_smooth=float(train_cfg.get("lambda_smooth", 0.05)),
             lambda_region_dist=0.0,
+            lambda_boundary_trans=float(train_cfg.get("lambda_boundary_trans", 0.0)),
+            boundary_trans_frames=int(train_cfg.get("boundary_trans_frames", 2)),
             contact_frame_weight=float(train_cfg.get("contact_frame_weight", 2.0)),
             smooth_l1_beta=float(train_cfg.get("smooth_l1_beta", 0.05)),
         )

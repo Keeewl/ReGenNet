@@ -59,6 +59,8 @@ class RefineV2TrainerConfig:
     lambda_contact: float = 1.0
     lambda_smooth: float = 0.05
     lambda_region_dist: float = 0.0
+    lambda_boundary_trans: float = 0.0
+    boundary_trans_frames: int = 2
     contact_frame_weight: float = 2.0
     smooth_l1_beta: float = 0.05
 
@@ -179,6 +181,8 @@ class RefineV2Trainer:
                 lambda_contact=float(self.config.lambda_contact),
                 lambda_smooth=float(self.config.lambda_smooth),
                 lambda_region_dist=float(self.config.lambda_region_dist),
+                lambda_boundary_trans=float(self.config.lambda_boundary_trans),
+                boundary_trans_frames=int(self.config.boundary_trans_frames),
                 contact_frame_weight=float(self.config.contact_frame_weight),
                 smooth_l1_beta=float(self.config.smooth_l1_beta),
             )

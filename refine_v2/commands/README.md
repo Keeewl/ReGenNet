@@ -29,6 +29,7 @@ Files:
 - `15_eval_contact_refiner.sh`: run window-level contact-quality eval for a trained refiner checkpoint.
 - `16_export_refiner_vis_pack.sh`: export a small full-sequence actor/coarse/refined/GT visualization pack.
 - `17_view_refiner_vis_pack_ait.sh`: open an exported visualization pack in aitviewer.
+- `18_train_refiner_boundary_large.sh`: train the large refiner with boundary translation anchor loss.
 
 Default inputs and outputs embedded in the scripts:
 
@@ -71,6 +72,7 @@ bash refine_v2/commands/14_selector_window_report.sh
 bash refine_v2/commands/15_eval_contact_refiner.sh
 bash refine_v2/commands/16_export_refiner_vis_pack.sh
 bash refine_v2/commands/17_view_refiner_vis_pack_ait.sh
+bash refine_v2/commands/18_train_refiner_boundary_large.sh
 ```
 
 Report split:
@@ -97,6 +99,22 @@ Visualization pack workflow:
   rerun selector or refiner inference.
 - The aitviewer layout is side-by-side by default:
   `coarse` on the left, `refined` in the center, and `GT` on the right. Each
-  panel includes the actor and reactor. The selected window's actor target
-  region is highlighted with primary/top-k colors, and the reactor hand side is
-  highlighted.
+  panel includes the actor and reactor. Actor is always blue and reactor is
+  always orange across all panels.
+- Region highlighting is off by default. Pass `--part_segm_path ...` only when
+  you explicitly want actor target / reactor hand highlighting.
+- Keyboard shortcuts in the viewer: `N`/right for next sequence, `P`/left for
+  previous sequence, `J`/down for next window, `K`/up for previous window, and
+  `R` to jump back to the current window start frame. The GUI control panel also
+  has previous/next buttons and index jump fields.
+
+Boundary translation loss:
+
+- `18_train_refiner_boundary_large.sh` keeps the exp2 large architecture but
+  adds `lambda_boundary_trans=2.0` and `boundary_trans_frames=2`.
+- The loss anchors only reactor translation `motion[55, :3, t]` at the first
+  and last two valid frames of each window to the coarse input. It is intended
+  to reduce visible transl jumps when independent refined windows are stitched
+  back into a full sequence.
+- Velocity/sequence-context losses are intentionally deferred to keep this
+  iteration focused.

@@ -267,14 +267,15 @@ def _make_sequence(
 ):
     from aitviewer.renderables.smpl import SMPLSequence
 
+    num_frames = int(np.asarray(params["pose_body"]).shape[0])
     seq = SMPLSequence(
-        poses_body=params["pose_body"],
+        poses_body=np.asarray(params["pose_body"], dtype=np.float32).reshape(num_frames, -1),
         smpl_layer=smpl_layer,
-        poses_root=params["root_orient"],
+        poses_root=np.asarray(params["root_orient"], dtype=np.float32).reshape(num_frames, -1),
         betas=params["betas"],
         trans=params["trans"],
-        poses_left_hand=params["pose_lhand"],
-        poses_right_hand=params["pose_rhand"],
+        poses_left_hand=np.asarray(params["pose_lhand"], dtype=np.float32).reshape(num_frames, -1),
+        poses_right_hand=np.asarray(params["pose_rhand"], dtype=np.float32).reshape(num_frames, -1),
         color=color,
         device=device,
     )

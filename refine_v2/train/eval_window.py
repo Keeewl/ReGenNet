@@ -40,6 +40,31 @@ def _contact_l1_per_sample(pred: torch.Tensor, target: torch.Tensor, contact_fra
     return (err * weights).sum(dim=(1, 2, 3)) / weights.sum(dim=(1, 2, 3)).clamp_min(1e-8)
 
 
+def _boundary_jump_metrics(motion: torch.Tensor, valid_mask: torch.Tensor, starts: torch.Tensor, ends: torch.Tensor) -> torch.Tensor:
+    if motion.shape[1] <= 55 or motion.shape[2] < 3:
+        return motion.new_zeros((motion.shape[0],))
+    bsz = int(motion.shape[0])
+    trans = motion[:, 55, :3, :]
+    jumps = []
+    for i in range(bsz):
+        valid_len = int(valid_mask[i].long().sum().detach().cpu().item())
+        if valid_len <= 1:
+            jumps.append(trans.new_tensor(0.0))
+            continue
+        local_frames = [
+            0,
+            max(0, min(valid_len - 1, int(ends[i].detach().cpu().item()) - int(starts[i].detach().cpu().item()) - 1)),
+        ]
+        vals = []
+        for frame in local_frames:
+            if frame > 0:
+                vals.append(torch.linalg.norm(trans[i, :, frame] - trans[i, :, frame - 1], dim=0))
+            if frame + 1 < valid_len:
+                vals.append(torch.linalg.norm(trans[i, :, frame + 1] - trans[i, :, frame], dim=0))
+        jumps.append(torch.stack(vals).mean() if vals else trans.new_tensor(0.0))
+    return torch.stack(jumps)
+
+
 def eval_batch_metrics(outputs: dict[str, torch.Tensor], batch: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
     pred = outputs["pred_motion_window"].float()
     coarse = batch["coarse_motion_window"].float()
@@ -50,6 +75,8 @@ def eval_batch_metrics(outputs: dict[str, torch.Tensor], batch: dict[str, torch.
     pred_err = _masked_l1_per_sample(pred, gt, valid)
     coarse_contact_err = _contact_l1_per_sample(coarse, gt, contact_frame)
     pred_contact_err = _contact_l1_per_sample(pred, gt, contact_frame)
+    coarse_boundary_jump = _boundary_jump_metrics(coarse, valid, batch["start_frame"], batch["end_frame"])
+    pred_boundary_jump = _boundary_jump_metrics(pred, valid, batch["start_frame"], batch["end_frame"])
     return {
         "coarse_motion_error": coarse_err,
         "pred_motion_error": pred_err,
@@ -58,6 +85,9 @@ def eval_batch_metrics(outputs: dict[str, torch.Tensor], batch: dict[str, torch.
         "pred_contact_motion_error": pred_contact_err,
         "contact_motion_improvement": coarse_contact_err - pred_contact_err,
         "has_contact_frame": contact_frame.any(dim=1).float(),
+        "coarse_boundary_trans_jump": coarse_boundary_jump,
+        "pred_boundary_trans_jump": pred_boundary_jump,
+        "boundary_trans_jump_excess": pred_boundary_jump - coarse_boundary_jump,
     }
 
 
@@ -125,6 +155,9 @@ def evaluate_model(
                 "coarse_contact_motion_error": float(per_sample_cpu["coarse_contact_motion_error"][i]),
                 "pred_contact_motion_error": float(per_sample_cpu["pred_contact_motion_error"][i]),
                 "contact_motion_improvement": float(per_sample_cpu["contact_motion_improvement"][i]),
+                "coarse_boundary_trans_jump": float(per_sample_cpu["coarse_boundary_trans_jump"][i]),
+                "pred_boundary_trans_jump": float(per_sample_cpu["pred_boundary_trans_jump"][i]),
+                "boundary_trans_jump_excess": float(per_sample_cpu["boundary_trans_jump_excess"][i]),
             }
             for group_name in breakdown:
                 value = str(batch[group_name][i]) if group_name in batch else ""

@@ -22,6 +22,9 @@ from visualize.refine_v2.view_subset_window_ait import (
     _motion_to_smpl_params,
 )
 
+ACTOR_COLOR = (0.10, 0.47, 0.78, 1.0)
+REACTOR_COLOR = (0.88, 0.30, 0.20, 1.0)
+
 
 def _load_pack(path: str) -> tuple[dict[str, Any], dict[str, Any]]:
     data = np.load(path, allow_pickle=True)
@@ -115,9 +118,10 @@ def _make_panel(
         _params_with_offset(actor_params, offset),
         smpl_layer=actor_layer,
         device=device,
-        color=(0.10, 0.47, 0.78, 0.65),
+        color=ACTOR_COLOR,
         name=f"{panel_name}_actor",
     )
+    _disable_internal_skeleton(actor_seq)
     _apply_vertex_colors(actor_seq, actor_vertex_colors)
     viewer.scene.add(actor_seq)
 
@@ -128,8 +132,43 @@ def _make_panel(
         color=reactor_color,
         name=f"{panel_name}_reactor",
     )
+    _disable_internal_skeleton(reactor_seq)
     _apply_vertex_colors(reactor_seq, reactor_vertex_colors)
     viewer.scene.add(reactor_seq)
+    return [actor_seq, reactor_seq]
+
+
+def _disable_internal_skeleton(renderable):
+    """Best-effort hide aitviewer joint/skeleton helpers across versions."""
+    for attr in (
+        "skeleton_seq",
+        "skeleton",
+        "joints_seq",
+        "joints",
+        "joint_seq",
+        "joint_angles_seq",
+    ):
+        obj = getattr(renderable, attr, None)
+        if obj is None:
+            continue
+        for flag in ("enabled", "visible", "show", "is_visible"):
+            if hasattr(obj, flag):
+                try:
+                    setattr(obj, flag, False)
+                except Exception:
+                    pass
+    for flag in (
+        "show_skeleton",
+        "show_joints",
+        "show_joint_angles",
+        "draw_skeleton",
+        "draw_joints",
+    ):
+        if hasattr(renderable, flag):
+            try:
+                setattr(renderable, flag, False)
+            except Exception:
+                pass
 
 
 def open_refiner_vis_pack_viewer(
@@ -148,6 +187,7 @@ def open_refiner_vis_pack_viewer(
     panel_spacing: float = 2.8,
 ):
     import glfw
+    import imgui
     from aitviewer.configuration import CONFIG as C
     from aitviewer.models.smpl import SMPLLayer
     from aitviewer.renderables.plane import Plane
@@ -156,144 +196,278 @@ def open_refiner_vis_pack_viewer(
     class RefinerVisPackViewer(Viewer):
         title = "refine_v2 refiner visualization pack"
 
+        def __init__(self, *, pack, manifest, initial_sequence_index: int, initial_window_selector: dict[str, Any], **kwargs):
+            super().__init__(**kwargs)
+            self.pack = pack
+            self.manifest = manifest
+            self.sequences = [dict(item) for item in manifest.get("sequences", [])]
+            self.sequence_index = int(initial_sequence_index)
+            self.window_selector = dict(initial_window_selector)
+            self.window_index_in_sequence = 0
+            self.render_nodes = []
+            self.goto_sequence_text = str(self.sequence_index)
+            self.goto_window_text = "0"
+            self.gui_controls.update({"refine_v2": self.gui_refine_v2})
+            keys = self.wnd.keys
+            self._next_sequence_keys = [x for x in (getattr(keys, "N", None), getattr(keys, "RIGHT", None)) if x is not None]
+            self._prev_sequence_keys = [x for x in (getattr(keys, "P", None), getattr(keys, "LEFT", None)) if x is not None]
+            self._next_window_keys = [x for x in (getattr(keys, "J", None), getattr(keys, "DOWN", None)) if x is not None]
+            self._prev_window_keys = [x for x in (getattr(keys, "K", None), getattr(keys, "UP", None)) if x is not None]
+            self._reset_frame_keys = [x for x in (getattr(keys, "R", None),) if x is not None]
+
         def on_render(self, time: float, frame_time: float):
             self.render(time, frame_time)
 
+        def key_event(self, key, action, modifiers):
+            if action == self.wnd.keys.ACTION_PRESS:
+                if key in self._next_sequence_keys:
+                    self.set_sequence(self.sequence_index + 1)
+                    return
+                if key in self._prev_sequence_keys:
+                    self.set_sequence(self.sequence_index - 1)
+                    return
+                if key in self._next_window_keys:
+                    self.set_window(self.window_index_in_sequence + 1)
+                    return
+                if key in self._prev_window_keys:
+                    self.set_window(self.window_index_in_sequence - 1)
+                    return
+                if key in self._reset_frame_keys:
+                    self.reset_to_window_start()
+                    return
+            return super().key_event(key, action, modifiers)
+
+        def clear_sequence(self):
+            for node in list(self.render_nodes):
+                try:
+                    self.scene.remove(node)
+                except Exception:
+                    pass
+            self.render_nodes = []
+
+        def set_sequence(self, idx: int):
+            self.sequence_index = int(idx) % max(1, len(self.sequences))
+            self.window_index_in_sequence = 0
+            self.goto_sequence_text = str(self.sequence_index)
+            self.load_sequence()
+
+        def set_window(self, idx: int):
+            sequence = self.current_sequence()
+            windows = list(sequence.get("windows", []))
+            if not windows:
+                self.window_index_in_sequence = 0
+                return
+            self.window_index_in_sequence = int(idx) % len(windows)
+            self.goto_window_text = str(self.window_index_in_sequence)
+            self.reset_to_window_start()
+            self.print_current_info()
+
+        def current_sequence(self) -> dict[str, Any]:
+            return dict(self.sequences[self.sequence_index])
+
+        def current_window(self) -> dict[str, Any] | None:
+            windows = [dict(item) for item in self.current_sequence().get("windows", [])]
+            if not windows:
+                return None
+            self.window_index_in_sequence = int(self.window_index_in_sequence) % len(windows)
+            return dict(windows[self.window_index_in_sequence])
+
+        def reset_to_window_start(self):
+            window = self.current_window()
+            sequence = self.current_sequence()
+            length = int(sequence.get("length", np.asarray(self.pack["lengths"])[self.sequence_index]))
+            frame = int(window.get("start_frame", 0)) if window else 0
+            self.scene.current_frame_id = max(0, min(frame, max(0, length - 1)))
+
+        def sequence_params(self, field: str, seq_idx: int, length: int, betas_key: str, gender_key: str):
+            return _motion_to_smpl_params(
+                np.asarray(self.pack[field][seq_idx], dtype=np.float32),
+                start=0,
+                end=length,
+                betas=_betas_from_pack(self.pack, betas_key, seq_idx),
+                gender=_gender_from_pack(self.pack, gender_key, seq_idx),
+            )
+
+        def load_sequence(self):
+            self.clear_sequence()
+            seq_idx = int(self.sequence_index)
+            sequence = self.current_sequence()
+            length = int(sequence.get("length", np.asarray(self.pack["lengths"])[seq_idx]))
+            actor_params = self.sequence_params("actor_motion", seq_idx, length, "actor_betas", "actor_gender_id")
+            coarse_params = self.sequence_params("reactor_coarse_motion", seq_idx, length, "reactor_betas", "reactor_gender_id")
+            refined_params = self.sequence_params("reactor_refined_motion", seq_idx, length, "reactor_betas", "reactor_gender_id")
+            gt_params = self.sequence_params("reactor_gt_motion", seq_idx, length, "reactor_betas", "reactor_gender_id")
+
+            actor_layer = SMPLLayer(model_type="smplx", gender=actor_params["gender"], num_betas=10, device=C.device)
+            reactor_layer = SMPLLayer(model_type="smplx", gender=gt_params["gender"], num_betas=10, device=C.device)
+            window = self.current_window()
+            primary = str(window.get("primary_target_region", "")) if window and part_segm_path else ""
+            topk = [str(x) for x in window.get("topk_target_regions", [])] if window and part_segm_path else []
+            hand_side = str(window.get("hand_side", "")) if window and part_segm_path else ""
+            actor_vertex_colors = _build_highlight_vertex_colors(
+                actor_layer,
+                part_segm_path,
+                base_color=ACTOR_COLOR,
+                primary_region=primary,
+                topk_regions=topk,
+            )
+            reactor_vertex_colors = _build_highlight_vertex_colors(
+                reactor_layer,
+                part_segm_path,
+                base_color=REACTOR_COLOR,
+                primary_region=f"{hand_side}_hand" if hand_side else "",
+                topk_regions=[],
+            )
+
+            if mode == "coarse_refined_gt":
+                panels = [
+                    ("coarse", coarse_params, (-float(panel_spacing), 0.0, 0.0)),
+                    ("refined", refined_params, (0.0, 0.0, 0.0)),
+                    ("gt", gt_params, (float(panel_spacing), 0.0, 0.0)),
+                ]
+            elif mode == "coarse":
+                panels = [("coarse", coarse_params, (0.0, 0.0, 0.0))]
+            elif mode == "refined":
+                panels = [("refined", refined_params, (0.0, 0.0, 0.0))]
+            else:
+                panels = [("gt", gt_params, (0.0, 0.0, 0.0))]
+
+            for panel_name, params, offset in panels:
+                self.render_nodes.extend(
+                    _make_panel(
+                        self,
+                        actor_params=actor_params,
+                        reactor_params=params,
+                        actor_layer=actor_layer,
+                        reactor_layer=reactor_layer,
+                        device=C.device,
+                        panel_name=panel_name,
+                        offset=offset,
+                        actor_vertex_colors=actor_vertex_colors,
+                        reactor_vertex_colors=reactor_vertex_colors,
+                        reactor_color=REACTOR_COLOR,
+                    )
+                )
+            self.reset_to_window_start()
+            self.print_current_info()
+
+        def info_lines(self) -> list[str]:
+            sequence = self.current_sequence()
+            window = self.current_window()
+            lines = [
+                f"sequence: {self.sequence_index + 1}/{len(self.sequences)}",
+                f"dataset_row_index: {sequence.get('dataset_row_index')}",
+                f"dataset_key: {sequence.get('dataset_key')}",
+                f"action_type: {sequence.get('action_type')}",
+                f"length: {sequence.get('length')}",
+                f"mode: {mode}",
+                "keys: N/right next seq, P/left prev seq, J/down next window, K/up prev window, R reset frame",
+            ]
+            if window:
+                lines.extend(
+                    [
+                        f"window: {self.window_index_in_sequence + 1}/{len(sequence.get('windows', []))}",
+                        f"window_index: {window.get('window_index')}",
+                        f"range: [{window.get('start_frame')},{window.get('end_frame')})",
+                        f"hand: {window.get('hand_side')}",
+                        f"primary: {window.get('primary_target_region')}",
+                        f"topk: {window.get('topk_target_regions')}",
+                    ]
+                )
+            return lines
+
+        def print_current_info(self):
+            print("\n".join(["", "refine_v2 vis pack"] + self.info_lines()), flush=True)
+
+        def gui_refine_v2(self):
+            imgui.set_next_window_position(self.window_size[0] * 0.62, self.window_size[1] * 0.08, imgui.FIRST_USE_EVER)
+            imgui.set_next_window_size(self.window_size[0] * 0.34, self.window_size[1] * 0.42, imgui.FIRST_USE_EVER)
+            expanded, _ = imgui.begin("refine_v2 controls", None)
+            if expanded:
+                if imgui.button("Prev Seq"):
+                    self.set_sequence(self.sequence_index - 1)
+                imgui.same_line()
+                if imgui.button("Next Seq"):
+                    self.set_sequence(self.sequence_index + 1)
+                imgui.same_line()
+                if imgui.button("Reset Frame"):
+                    self.reset_to_window_start()
+
+                if imgui.button("Prev Window"):
+                    self.set_window(self.window_index_in_sequence - 1)
+                imgui.same_line()
+                if imgui.button("Next Window"):
+                    self.set_window(self.window_index_in_sequence + 1)
+
+                imgui.text("Go to sequence index")
+                imgui.set_next_item_width(imgui.get_window_width() * 0.35)
+                _, self.goto_sequence_text = imgui.input_text("##goto_seq", self.goto_sequence_text)
+                imgui.same_line()
+                if imgui.button("Go Seq"):
+                    try:
+                        self.set_sequence(int(self.goto_sequence_text))
+                    except Exception:
+                        pass
+
+                imgui.text("Go to window-in-sequence index")
+                imgui.set_next_item_width(imgui.get_window_width() * 0.35)
+                _, self.goto_window_text = imgui.input_text("##goto_window", self.goto_window_text)
+                imgui.same_line()
+                if imgui.button("Go Window"):
+                    try:
+                        self.set_window(int(self.goto_window_text))
+                    except Exception:
+                        pass
+
+                imgui.separator()
+                for line in self.info_lines():
+                    imgui.text_wrapped(str(line))
+            imgui.end()
+
+    _configure_aitviewer(C, glfw, window_scale=window_scale)
     pack, manifest = _load_pack(vis_pack_path)
-    seq_idx, sequence = _select_sequence(
+    seq_idx, _ = _select_sequence(
         manifest,
         sequence_index=sequence_index,
         dataset_row_index=dataset_row_index,
     )
-    window = _select_window(
-        sequence,
+    initial_sequence = dict(manifest.get("sequences", [])[seq_idx])
+    initial_window = _select_window(
+        initial_sequence,
         window_index=window_index,
         sequence_window_index=sequence_window_index,
         start_frame=start_frame,
     )
-    length = int(sequence.get("length", np.asarray(pack["lengths"])[seq_idx]))
-    start = 0
-    end = length
-
-    actor_params = _motion_to_smpl_params(
-        np.asarray(pack["actor_motion"][seq_idx], dtype=np.float32),
-        start=start,
-        end=end,
-        betas=_betas_from_pack(pack, "actor_betas", seq_idx),
-        gender=_gender_from_pack(pack, "actor_gender_id", seq_idx),
-    )
-    coarse_params = _motion_to_smpl_params(
-        np.asarray(pack["reactor_coarse_motion"][seq_idx], dtype=np.float32),
-        start=start,
-        end=end,
-        betas=_betas_from_pack(pack, "reactor_betas", seq_idx),
-        gender=_gender_from_pack(pack, "reactor_gender_id", seq_idx),
-    )
-    refined_params = _motion_to_smpl_params(
-        np.asarray(pack["reactor_refined_motion"][seq_idx], dtype=np.float32),
-        start=start,
-        end=end,
-        betas=_betas_from_pack(pack, "reactor_betas", seq_idx),
-        gender=_gender_from_pack(pack, "reactor_gender_id", seq_idx),
-    )
-    gt_params = _motion_to_smpl_params(
-        np.asarray(pack["reactor_gt_motion"][seq_idx], dtype=np.float32),
-        start=start,
-        end=end,
-        betas=_betas_from_pack(pack, "reactor_betas", seq_idx),
-        gender=_gender_from_pack(pack, "reactor_gender_id", seq_idx),
-    )
-
-    _configure_aitviewer(C, glfw, window_scale=window_scale)
+    initial_window_index = 0
+    if initial_window is not None:
+        for i, item in enumerate(initial_sequence.get("windows", [])):
+            if dict(item) == initial_window:
+                initial_window_index = i
+                break
     viewer_title = title or (
-        f"refine_v2 row={sequence.get('dataset_row_index')} "
-        f"{sequence.get('action_type', '')} seq={seq_idx}"
+        f"refine_v2 row={initial_sequence.get('dataset_row_index')} "
+        f"{initial_sequence.get('action_type', '')} seq={seq_idx}"
     )
-    viewer = RefinerVisPackViewer(title=viewer_title)
+    viewer = RefinerVisPackViewer(
+        title=viewer_title,
+        pack=pack,
+        manifest=manifest,
+        initial_sequence_index=seq_idx,
+        initial_window_selector={
+            "window_index": window_index,
+            "sequence_window_index": sequence_window_index,
+            "start_frame": start_frame,
+        },
+    )
     viewer.scene.fps = int(fps)
     viewer.playback_fps = int(fps)
-
-    current_frame = int(window.get("start_frame", 0)) if window else int(start_frame or 0)
-    viewer.scene.current_frame_id = max(0, min(current_frame, length - 1))
-
-    actor_layer = SMPLLayer(model_type="smplx", gender=actor_params["gender"], num_betas=10, device=C.device)
-    reactor_layer = SMPLLayer(model_type="smplx", gender=gt_params["gender"], num_betas=10, device=C.device)
-
-    primary = str(window.get("primary_target_region", "")) if window else ""
-    topk = [str(x) for x in window.get("topk_target_regions", [])] if window else []
-    hand_side = str(window.get("hand_side", "")) if window else ""
-    actor_vertex_colors = _build_highlight_vertex_colors(
-        actor_layer,
-        part_segm_path,
-        base_color=(0.10, 0.47, 0.78, 0.65),
-        primary_region=primary,
-        topk_regions=topk,
-    )
-    reactor_vertex_colors = _build_highlight_vertex_colors(
-        reactor_layer,
-        part_segm_path,
-        base_color=(0.88, 0.30, 0.20, 0.82),
-        primary_region=f"{hand_side}_hand" if hand_side else "",
-        topk_regions=[],
-    )
-
-    if mode == "coarse_refined_gt":
-        panels = [
-            ("coarse", coarse_params, (-float(panel_spacing), 0.0, 0.0), (0.90, 0.32, 0.18, 0.82)),
-            ("refined", refined_params, (0.0, 0.0, 0.0), (0.25, 0.75, 0.35, 0.82)),
-            ("gt", gt_params, (float(panel_spacing), 0.0, 0.0), (0.15, 0.72, 0.90, 0.82)),
-        ]
-    elif mode == "coarse":
-        panels = [("coarse", coarse_params, (0.0, 0.0, 0.0), (0.90, 0.32, 0.18, 0.82))]
-    elif mode == "refined":
-        panels = [("refined", refined_params, (0.0, 0.0, 0.0), (0.25, 0.75, 0.35, 0.82))]
-    else:
-        panels = [("gt", gt_params, (0.0, 0.0, 0.0), (0.15, 0.72, 0.90, 0.82))]
-
-    for panel_name, params, offset, color in panels:
-        _make_panel(
-            viewer,
-            actor_params=actor_params,
-            reactor_params=params,
-            actor_layer=actor_layer,
-            reactor_layer=reactor_layer,
-            device=C.device,
-            panel_name=panel_name,
-            offset=offset,
-            actor_vertex_colors=actor_vertex_colors,
-            reactor_vertex_colors=reactor_vertex_colors,
-            reactor_color=color,
-        )
 
     try:
         viewer.scene.add(Plane(color=(0.45, 0.45, 0.45, 0.35)))
     except Exception:
         pass
-
-    print("opening refine_v2 refiner vis pack")
-    print(f"vis_pack_path: {vis_pack_path}")
-    print(f"sequence_index: {seq_idx}")
-    print(f"dataset_row_index: {sequence.get('dataset_row_index')}")
-    print(f"dataset_key: {sequence.get('dataset_key')}")
-    print(f"action_type: {sequence.get('action_type')}")
-    print(f"length: {length}")
-    print(f"mode: {mode}")
-    if window:
-        print("selected window:")
-        print(f"  window_index: {window.get('window_index')}")
-        print(f"  sequence_window_index: {window.get('sequence_window_index')}")
-        print(f"  range: [{window.get('start_frame')},{window.get('end_frame')})")
-        print(f"  hand_side: {window.get('hand_side')}")
-        print(f"  primary_target_region: {primary}")
-        print(f"  topk_target_regions: {topk}")
-    print("all windows in sequence:")
-    for item in sequence.get("windows", []):
-        print(
-            f"  idx={item.get('window_index')} seq_win={item.get('sequence_window_index')} "
-            f"[{item.get('start_frame')},{item.get('end_frame')}) "
-            f"hand={item.get('hand_side')} primary={item.get('primary_target_region')} "
-            f"topk={item.get('topk_target_regions')}"
-        )
+    viewer.window_index_in_sequence = int(initial_window_index)
+    viewer.load_sequence()
     viewer.run()
 
 
