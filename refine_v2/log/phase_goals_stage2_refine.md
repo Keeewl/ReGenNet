@@ -759,3 +759,136 @@ Then use those contact metrics to update feature/model/loss.
       anti-penetration regularizer
     - if weak action types remain poor, extend geometry features beyond simple
       selected-hand to target-region centroid features
+  - exp5 vs exp2 visual comparison:
+    - user visual inspection shows exp5 is still less close than exp2 on direct
+      hand contact
+    - this matches the quantitative relationship:
+      - contact closeness: `exp2 > exp5 > exp3 > exp4`
+      - translation stability: `exp5 ~= exp3 > exp4 >> exp2`
+    - conclusion:
+      - exp5 is a stronger/stabler practical baseline than exp3
+      - exp2 remains a useful contact upper reference but is not acceptable as
+        the practical baseline because of translation/window discontinuity
+      - the next optimization target is to make hand/arm correction more
+        aggressive while keeping transl suppressed
+  - Proposed next experiment:
+    - `refiner_v2_exp6_handstrong_10k`
+    - keep exp5 framework and frozen selector/subset/cache
+    - do not loosen translation
+    - increase hand-specific correction:
+      - `hand_delta_scale = 1.5`
+      - `arm_delta_scale = 1.0`
+      - `transl_delta_scale = 0.2`
+      - `lower_body_delta_scale = 0.1`
+      - `selected_hand_motion_weight = 4.0`
+      - `selected_hand_contact_weight = 6.0`
+      - `same_side_arm_contact_weight = 3.0`
+      - `lambda_boundary_trans = 2.0`
+      - `boundary_trans_frames = 2`
+    - success criteria:
+      - contact visually closer than exp5
+      - contact eval better than exp5
+      - boundary transl remains stable
+      - `delta_norm_transl` remains tiny
+      - no obvious hand-hand or hand-arm penetration
+    - if exp6 is still conservative, add explicit lightweight contact-distance
+      or centroid-distance training loss
+    - if exp6 over-closes, add anti-overclose / anti-penetration regularization
+  - vis-pack transl-vs-hand diagnosis on exp5 Handshake/High-five random20:
+    - `num_windows = 39`
+    - `refined_topk_gap_to_gt = 0.0136182967`
+    - `topk_dist_improvement_coarse_to_refined = 0.0122072778`
+    - `refined_transl_error = 0.0456994699`
+    - `refined_local_hand_error = 0.0447672709`
+    - `diagnosis_ratio_already_good = 0.7435897436`
+    - `diagnosis_ratio_hand_pose_issue = 0.0256410256`
+    - `diagnosis_ratio_transl_issue = 0.0769230769`
+    - `diagnosis_ratio_mixed_issue = 0.0769230769`
+    - `diagnosis_ratio_metric_or_region_issue = 0.0769230769`
+    - interpretation:
+      - most inspected windows are already close enough to GT
+      - pure hand-pose issue is rare in this pack
+      - transl/global placement and mixed transl+hand issues are more frequent
+        than pure hand-only failures
+      - remaining visual contact gap is about `1.36 cm` to GT after already
+        improving coarse by about `1.22 cm`
+  - Update to exp6 planning:
+    - do not jump directly to aggressive handstrong
+    - previous aggressive proposal (`hand_delta_scale=1.5`,
+      `selected_hand_contact_weight=6.0`) may be too hand-only given the
+      diagnosis
+    - preferred next experiment if small Stage2 transl/root correction is
+      acceptable:
+      - `refiner_v2_exp6_balanced_smallroot_10k`
+      - `hand_delta_scale = 1.2`
+      - `arm_delta_scale = 1.0`
+      - `root_delta_scale = 0.25`
+      - `transl_delta_scale = 0.25` or `0.30`
+      - `lower_body_delta_scale = 0.1`
+      - `selected_hand_motion_weight = 3.5`
+      - `selected_hand_contact_weight = 5.0`
+      - `same_side_arm_contact_weight = 3.0`
+      - `lambda_boundary_trans = 2.0`
+      - `boundary_trans_frames = 2`
+    - alternative if Stage2 must keep translation nearly frozen:
+      - `refiner_v2_exp6_mild_handstrong_10k`
+      - `hand_delta_scale = 1.2`
+      - `root_delta_scale = 0.2`
+      - `transl_delta_scale = 0.2`
+      - `selected_hand_motion_weight = 3.5`
+      - `selected_hand_contact_weight = 5.0`
+    - exp6 validation must include:
+      - window eval
+      - contact eval
+      - aitviewer visual pack
+      - vis-pack transl-vs-hand diagnosis
+  - exp6 design updated to phase-smallroot:
+    - planned experiment: `refiner_v2_exp6_phase_smallroot_10k`
+    - core idea:
+      - add window-phase-aware preserve loss
+      - allow root/transl more correction near window center
+      - preserve root/transl near window boundaries
+      - keep hand/arm mostly free for contact refinement
+    - new loss:
+      - `lambda_phase_preserve = 0.5`
+      - `phase_preserve_power = 2.0`
+      - `phase_preserve_transl_weight = 2.0`
+      - `phase_preserve_root_weight = 1.0`
+      - `phase_preserve_lower_body_weight = 0.5`
+      - `phase_preserve_torso_weight = 0.3`
+      - `phase_preserve_arm_weight = 0.1`
+      - `phase_preserve_hand_weight = 0.05`
+    - model scope changes vs exp5:
+      - `hand_delta_scale = 1.2`
+      - `root_delta_scale = 0.25`
+      - `transl_delta_scale = 0.30`
+      - keep `arm_delta_scale = 1.0`
+      - keep `lower_body_delta_scale = 0.1`
+    - loss-weight changes vs exp5:
+      - `selected_hand_motion_weight = 3.5`
+      - `selected_hand_contact_weight = 5.0`
+    - boundary transl:
+      - reduce `lambda_boundary_trans` from `2.0` to `1.0`
+      - keep `boundary_trans_frames = 2`
+      - phase preserve should provide smoother full-window boundary protection
+    - outputs should go under:
+      - `refine_v2/save/train/refiner_v2_exp6_phase_smallroot_10k`
+    - success target:
+      - improve exp5 contact metrics
+      - reduce `refined_topk_gap_to_gt`
+      - keep `boundary_trans_jump_excess` close to zero
+      - allow only modest `delta_norm_transl` increase
+      - no exp2-like visual window discontinuity
+  - exp6 phase-smallroot implementation completed:
+    - added `loss_phase_preserve`
+    - added phase preserve group weights for hand/arm/torso/root/transl/lower-body
+    - added CLI/config args for all phase preserve parameters
+    - eval reuses checkpoint phase preserve config
+    - added train/eval/contact-eval/visual/diagnosis commands for exp6
+    - output path:
+      - `refine_v2/save/train/refiner_v2_exp6_phase_smallroot_10k`
+    - validation passed:
+      - py_compile
+      - train/eval CLI help
+      - geometry-enabled model/loss smoke test
+      - direct nonzero phase-preserve loss test

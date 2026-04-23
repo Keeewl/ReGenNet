@@ -8,7 +8,14 @@ import torch
 from torch import nn
 import torch.nn.functional as F
 
-from refine_v2.model.joint_groups import ContactGroupWeights, MotionGroupWeights, contact_group_weight_tensor, group_weight_tensor
+from refine_v2.model.joint_groups import (
+    ContactGroupWeights,
+    MotionGroupWeights,
+    PhasePreserveGroupWeights,
+    contact_group_weight_tensor,
+    group_weight_tensor,
+    phase_preserve_group_weight_tensor,
+)
 
 
 @dataclass
@@ -18,7 +25,15 @@ class RefineV2LossConfig:
     lambda_smooth: float = 0.05
     lambda_region_dist: float = 0.0
     lambda_boundary_trans: float = 0.0
+    lambda_phase_preserve: float = 0.0
     boundary_trans_frames: int = 2
+    phase_preserve_power: float = 2.0
+    phase_preserve_transl_weight: float = 2.0
+    phase_preserve_root_weight: float = 1.0
+    phase_preserve_lower_body_weight: float = 0.5
+    phase_preserve_torso_weight: float = 0.3
+    phase_preserve_arm_weight: float = 0.1
+    phase_preserve_hand_weight: float = 0.05
     contact_frame_weight: float = 2.0
     smooth_l1_beta: float = 0.05
     use_group_weighted_loss: bool = False
@@ -59,6 +74,20 @@ def _boundary_frame_mask(valid_mask: torch.Tensor, num_frames: int, k: int) -> t
     start_mask = arange < k
     end_mask = arange >= (lengths - k).clamp_min(0)
     return (start_mask | end_mask) & valid_mask.bool()
+
+
+def _phase_preserve_weights(valid_mask: torch.Tensor, motion: torch.Tensor, power: float) -> torch.Tensor:
+    num_frames = int(motion.shape[-1])
+    if num_frames <= 1:
+        phase = torch.ones((1, num_frames), device=motion.device, dtype=motion.dtype)
+    else:
+        frame = torch.arange(num_frames, device=motion.device, dtype=motion.dtype)
+        center = (float(num_frames) - 1.0) / 2.0
+        denom = max(center, 1e-6)
+        phase = torch.abs(frame - center) / denom
+        phase = phase.clamp(0.0, 1.0).pow(float(power)).view(1, num_frames)
+    weights = phase * valid_mask.to(device=motion.device, dtype=motion.dtype)
+    return weights.view(valid_mask.shape[0], 1, 1, num_frames).expand_as(motion)
 
 
 class RefineV2Loss(nn.Module):
@@ -141,6 +170,27 @@ class RefineV2Loss(nn.Module):
             loss_smooth = delta.sum() * 0.0
 
         loss_region_dist = pred.sum() * 0.0
+        if float(self.config.lambda_phase_preserve) != 0.0:
+            phase_weights = _phase_preserve_weights(valid_mask, pred, float(self.config.phase_preserve_power))
+            group_weights = phase_preserve_group_weight_tensor(
+                num_joints=pred.shape[1],
+                num_channels=pred.shape[2],
+                num_frames=pred.shape[-1],
+                device=pred.device,
+                dtype=pred.dtype,
+                weights=PhasePreserveGroupWeights(
+                    hand=float(self.config.phase_preserve_hand_weight),
+                    arm=float(self.config.phase_preserve_arm_weight),
+                    torso=float(self.config.phase_preserve_torso_weight),
+                    root=float(self.config.phase_preserve_root_weight),
+                    transl=float(self.config.phase_preserve_transl_weight),
+                    lower_body=float(self.config.phase_preserve_lower_body_weight),
+                ),
+            )
+            preserve_err = _smooth_l1_none(pred, coarse, self.config.smooth_l1_beta)
+            loss_phase_preserve = _masked_mean(preserve_err, phase_weights * group_weights)
+        else:
+            loss_phase_preserve = pred.sum() * 0.0
         if (
             float(self.config.lambda_boundary_trans) != 0.0
             and pred.shape[0] > 0
@@ -165,6 +215,7 @@ class RefineV2Loss(nn.Module):
             + float(self.config.lambda_smooth) * loss_smooth
             + float(self.config.lambda_region_dist) * loss_region_dist
             + float(self.config.lambda_boundary_trans) * loss_boundary_trans
+            + float(self.config.lambda_phase_preserve) * loss_phase_preserve
         )
 
         contact_weights_plain = contact_frame.float().view(pred.shape[0], 1, 1, pred.shape[-1]).expand_as(pred)
@@ -186,6 +237,7 @@ class RefineV2Loss(nn.Module):
             "loss_smooth": loss_smooth,
             "loss_region_dist": loss_region_dist,
             "loss_boundary_trans": loss_boundary_trans,
+            "loss_phase_preserve": loss_phase_preserve,
             "coarse_motion_error": coarse_motion_error,
             "pred_motion_error": pred_motion_error,
             "motion_improvement": coarse_motion_error - pred_motion_error,

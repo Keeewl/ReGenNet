@@ -45,6 +45,16 @@ class ContactGroupWeights:
     body: float = 0.5
 
 
+@dataclass
+class PhasePreserveGroupWeights:
+    hand: float = 0.05
+    arm: float = 0.1
+    torso: float = 0.3
+    root: float = 1.0
+    transl: float = 2.0
+    lower_body: float = 0.5
+
+
 def _valid_ids(ids, num_joints: int) -> list[int]:
     return [int(idx) for idx in ids if 0 <= int(idx) < int(num_joints)]
 
@@ -159,6 +169,38 @@ def contact_group_weight_tensor(
             out[b, same_arm, :, :] = float(weights.same_side_arm)
         if selected_hand:
             out[b, selected_hand, :, :] = float(weights.selected_hand)
+    return out
+
+
+def phase_preserve_group_weight_tensor(
+    *,
+    num_joints: int,
+    num_channels: int,
+    num_frames: int,
+    device,
+    dtype,
+    weights: PhasePreserveGroupWeights,
+) -> torch.Tensor:
+    out = torch.full(
+        (1, num_joints, num_channels, num_frames),
+        float(weights.torso),
+        device=device,
+        dtype=dtype,
+    )
+    lower_ids = _valid_ids(LOWER_BODY_IDS, num_joints)
+    if lower_ids:
+        out[:, lower_ids, :, :] = float(weights.lower_body)
+    root_ids = _valid_ids(ROOT_IDS, num_joints)
+    if root_ids:
+        out[:, root_ids, :, :] = float(weights.root)
+    arm_ids = _valid_ids(LEFT_ARM_IDS + RIGHT_ARM_IDS, num_joints)
+    if arm_ids:
+        out[:, arm_ids, :, :] = float(weights.arm)
+    hand_ids = _valid_ids(LEFT_HAND_IDS + RIGHT_HAND_IDS, num_joints)
+    if hand_ids:
+        out[:, hand_ids, :, :] = float(weights.hand)
+    if 0 <= TRANSL_INDEX < num_joints:
+        out[:, TRANSL_INDEX, :, :] = float(weights.transl)
     return out
 
 
