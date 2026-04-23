@@ -178,3 +178,52 @@ delta_norm_transl
 refined_topk_gap_to_gt
 diagnosis_ratio_already_good
 ```
+
+## Run Result
+
+The exp6 run completed and was evaluated.
+
+Detailed result log:
+
+```text
+refine_v2/log/2026-04-23_exp6_phase_smallroot_eval_summary.md
+```
+
+Main result:
+
+```text
+exp6 does not beat exp5.
+```
+
+Key exp6 contact metrics:
+
+```text
+gt_contact_contact_dist_improvement = 0.0022491207
+refined_contact_f1 = 0.8172011076
+topk_refined_contact_f1 = 0.8250681969
+surrogate_penetration_depth_improvement = -0.0000531603
+```
+
+exp5 reference:
+
+```text
+gt_contact_contact_dist_improvement = 0.0028254371
+refined_contact_f1 = 0.8221591739
+topk_refined_contact_f1 = 0.8297871497
+surrogate_penetration_depth_improvement = -0.0000661652
+```
+
+Conclusion:
+
+```text
+phase preserve is useful as an available loss option,
+but the exp6 setting is too conservative and weakens hand/arm contact
+correction.
+```
+
+Decision:
+
+```text
+keep exp5 as the practical baseline
+do not adopt exp6 phase-smallroot as the next baseline
+```

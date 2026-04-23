@@ -892,3 +892,90 @@ Then use those contact metrics to update feature/model/loss.
       - train/eval CLI help
       - geometry-enabled model/loss smoke test
       - direct nonzero phase-preserve loss test
+  - exp6 phase-smallroot eval completed:
+    - output path:
+      - `refine_v2/save/train/refiner_v2_exp6_phase_smallroot_10k`
+    - window eval:
+      - `pred_motion_error = 0.0140063309`
+      - `motion_improvement = 0.0023574536`
+      - `pred_contact_motion_error = 0.0140281759`
+      - `contact_motion_improvement = 0.0025201235`
+      - `boundary_trans_jump_excess = -0.0000019395`
+      - `delta_norm_selected_hand = 0.0106538811`
+      - `delta_norm_same_side_arm = 0.0120693502`
+      - `delta_norm_torso_root = 0.0012815233`
+      - `delta_norm_lower_body = 0.0014016628`
+      - `delta_norm_transl = 0.0002735069`
+    - contact eval:
+      - `all_valid_dist_l1_improvement = 0.0020643177`
+      - `gt_contact_contact_dist_improvement = 0.0022491207`
+      - `refined_contact_f1 = 0.8172011076`
+      - `topk_refined_contact_f1 = 0.8250681969`
+      - `surrogate_penetration_depth_improvement = -0.0000531603`
+    - comparison with exp5:
+      - exp6 loses about `26.3%` of exp5 all-valid distance improvement
+      - exp6 loses about `20.4%` of exp5 GT-contact distance improvement
+      - refined contact F1 drops by about `0.0050`
+      - top-k refined contact F1 drops by about `0.0047`
+      - translation boundary stability remains good
+      - surrogate penetration is slightly safer than exp5, but still worse
+        than coarse
+    - interpretation:
+      - the phase preserve loss works as a conservative scope/stability loss
+      - the tested setting is too conservative for Stage2 contact refinement
+      - it suppresses selected hand and same-side arm deltas, which are the
+        main useful corrections in exp5
+    - decision:
+      - do not adopt exp6 as baseline
+      - keep `refiner_v2_exp5_scope_geom_10k` as the practical baseline
+      - keep `lambda_phase_preserve` available but default-off
+    - if phase preserve is tried again:
+      - use a much lighter setting:
+        - `lambda_phase_preserve = 0.1` or `0.2`
+        - `phase_preserve_hand_weight = 0.0`
+        - `phase_preserve_arm_weight = 0.0`
+        - `phase_preserve_root_weight = 0.5`
+        - `phase_preserve_transl_weight = 1.0`
+      - keep `lambda_boundary_trans = 2.0`
+    - more promising next direction:
+      - start from exp5
+      - keep phase preserve off
+      - keep translation conservative
+      - moderately strengthen hand/contact supervision
+      - candidate:
+        - `refiner_v2_exp7_mild_hand_geom_10k`
+  - exp6 revised follow-up:
+    - instead of adopting broad phase-smallroot, add a cleaner transl-only
+      phase preserve experiment:
+      - `refiner_v2_exp6_transl_phase_10k`
+    - rationale:
+      - phase-smallroot was too conservative because it also constrained
+        hand/arm/root/body motion
+      - transl-only phase preserve targets only window boundary translation
+        continuity
+      - hand/arm parameters stay at exp5 values, so the main contact-refine
+        path is not weakened
+    - key parameters:
+      - `lambda_phase_preserve = 0.2`
+      - `phase_preserve_power = 2.0`
+      - `phase_preserve_transl_weight = 1.0`
+      - `phase_preserve_root_weight = 0.0`
+      - `phase_preserve_lower_body_weight = 0.0`
+      - `phase_preserve_torso_weight = 0.0`
+      - `phase_preserve_arm_weight = 0.0`
+      - `phase_preserve_hand_weight = 0.0`
+      - `lambda_boundary_trans = 2.0`
+      - `boundary_trans_frames = 2`
+    - exp5 hand/arm/model parameters are kept unchanged:
+      - `hand_delta_scale = 1.0`
+      - `arm_delta_scale = 1.0`
+      - `selected_hand_motion_weight = 3.0`
+      - `selected_hand_contact_weight = 4.0`
+    - commands added:
+      - `refine_v2/commands/train/04_train_refiner_exp6_transl_phase.sh`
+      - `refine_v2/commands/eval/07_eval_refiner_exp6_transl_phase.sh`
+      - `refine_v2/commands/eval/08_eval_contact_refiner_exp6_transl_phase.sh`
+      - `refine_v2/commands/visual/08_export_refiner_vis_pack_exp6_transl_phase.sh`
+      - `refine_v2/commands/visual/09_diagnose_refiner_vis_pack_exp6_transl_phase.sh`
+    - detailed design:
+      - `refine_v2/log/2026-04-23_exp6_transl_only_phase_design.md`

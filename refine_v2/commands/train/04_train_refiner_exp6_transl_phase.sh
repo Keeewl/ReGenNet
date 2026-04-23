@@ -1,0 +1,62 @@
+conda activate regennet5090
+
+####### refine_v2 exp6: transl-only phase preserve, 10k steps #######
+export CUDA_VISIBLE_DEVICES=0
+python -m refine_v2.cli_train_refiner \
+  --reaction_data_path refine/dataset/train/reaction_data.npz \
+  --contact_labels_path refine_v2/outputs/train/contact_labels_gt.npz \
+  --subset_manifest_path refine_v2/outputs/train/contact_subset/subset_manifest.json \
+  --selector_windows_path refine_v2/outputs/train/contact_subset/selector_rerun/subset_selector_windows.npz \
+  --geometry_feature_cache_path refine_v2/save/features/scope_geom_train/geometry_feature_cache.npz \
+  --include_buckets "GT+ / Pred+" \
+  --save_dir refine_v2/save/train/refiner_v2_exp6_transl_phase_10k \
+  --batch_size 32 \
+  --num_workers 4 \
+  --device cuda \
+  --val_ratio 0.1 \
+  --split_seed 1234 \
+  --hidden_dim 512 \
+  --num_heads 8 \
+  --num_layers 8 \
+  --dropout 0.1 \
+  --mlp_ratio 4.0 \
+  --num_steps 10000 \
+  --warmup_steps 1000 \
+  --eval_interval 1000 \
+  --save_interval 1000 \
+  --log_interval 100 \
+  --mixed_precision \
+  --use_geometry_features \
+  --use_group_gated_residual \
+  --hand_delta_scale 1.0 \
+  --arm_delta_scale 1.0 \
+  --torso_delta_scale 0.5 \
+  --root_delta_scale 0.2 \
+  --transl_delta_scale 0.2 \
+  --lower_body_delta_scale 0.1 \
+  --use_group_weighted_loss \
+  --selected_hand_motion_weight 3.0 \
+  --same_side_arm_motion_weight 2.0 \
+  --other_hand_arm_motion_weight 1.0 \
+  --torso_root_motion_weight 0.75 \
+  --lower_body_motion_weight 0.25 \
+  --transl_motion_weight 0.25 \
+  --use_hand_arm_contact_loss \
+  --selected_hand_contact_weight 4.0 \
+  --same_side_arm_contact_weight 3.0 \
+  --other_upper_contact_weight 1.0 \
+  --body_contact_weight 0.5 \
+  --lambda_motion 1.0 \
+  --lambda_contact 1.0 \
+  --lambda_smooth 0.05 \
+  --lambda_region_dist 0.0 \
+  --lambda_boundary_trans 2.0 \
+  --boundary_trans_frames 2 \
+  --lambda_phase_preserve 0.2 \
+  --phase_preserve_power 2.0 \
+  --phase_preserve_transl_weight 1.0 \
+  --phase_preserve_root_weight 0.0 \
+  --phase_preserve_lower_body_weight 0.0 \
+  --phase_preserve_torso_weight 0.0 \
+  --phase_preserve_arm_weight 0.0 \
+  --phase_preserve_hand_weight 0.0
