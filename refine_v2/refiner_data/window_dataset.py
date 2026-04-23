@@ -57,6 +57,17 @@ def _matches_selected_action(record: dict[str, Any], selected: set[str]) -> bool
     return bool(candidates & selected)
 
 
+def _geometry_cache_key(row: int, window_index: int, start: int, end: int, hand_id: int, primary_region_id: int):
+    return (
+        int(row),
+        int(window_index),
+        int(start),
+        int(end),
+        int(hand_id),
+        int(primary_region_id),
+    )
+
+
 class RefineV2WindowDataset:
     """One hand-time selector window per sample.
 
@@ -255,40 +266,49 @@ class RefineV2WindowDataset:
         require_restored_pair_space(cache["space_definition"], context="geometry_feature_cache")
         arrays = {key: np.asarray(cache[key]) for key in required if key != "space_definition"}
         n = int(arrays["dataset_row_indices"].shape[0])
-        if n != len(self.window_records):
-            raise ValueError(
-                "geometry_feature_cache window count mismatch: "
-                f"cache={n}, dataset={len(self.window_records)}. Build the cache with the same "
-                "reaction/contact/subset/selector inputs and filters."
+        cache_index: dict[tuple[int, int, int, int, int, int], int] = {}
+        for idx in range(n):
+            key = _geometry_cache_key(
+                np.asarray(arrays["dataset_row_indices"][idx]).reshape(-1)[0],
+                np.asarray(arrays["window_indices"][idx]).reshape(-1)[0],
+                np.asarray(arrays["start_frames"][idx]).reshape(-1)[0],
+                np.asarray(arrays["end_frames"][idx]).reshape(-1)[0],
+                np.asarray(arrays["hand_side_ids"][idx]).reshape(-1)[0],
+                np.asarray(arrays["primary_target_region_ids"][idx]).reshape(-1)[0],
             )
+            if key in cache_index:
+                raise ValueError(f"geometry_feature_cache contains duplicate window key: {key}")
+            cache_index[key] = idx
+        selected_cache_indices = []
         for idx, window in enumerate(self.window_records):
-            checks = {
-                "dataset_row_indices": int(window["dataset_row_index"]),
-                "window_indices": int(window["window_index"]),
-                "start_frames": int(window["start_frame"]),
-                "end_frames": int(window["end_frame"]),
-                "hand_side_ids": int(window["hand_side_id"]),
-                "primary_target_region_ids": int(window["primary_target_region_id"]),
-            }
-            for key, expected in checks.items():
-                actual = int(np.asarray(arrays[key][idx]).reshape(-1)[0])
-                if actual != expected:
-                    raise ValueError(
-                        f"geometry_feature_cache alignment mismatch at dataset window {idx}: "
-                        f"{key} cache={actual}, dataset={expected}."
-                    )
-            cache_topk = np.asarray(arrays["topk_target_region_ids"][idx], dtype=np.int64).reshape(-1).tolist()
+            key = _geometry_cache_key(
+                int(window["dataset_row_index"]),
+                int(window["window_index"]),
+                int(window["start_frame"]),
+                int(window["end_frame"]),
+                int(window["hand_side_id"]),
+                int(window["primary_target_region_id"]),
+            )
+            if key not in cache_index:
+                raise ValueError(
+                    "geometry_feature_cache is missing a required window after dataset filtering: "
+                    f"dataset_index={idx}, key={key}. Build the cache from a compatible selector artifact."
+                )
+            cache_idx = int(cache_index[key])
+            selected_cache_indices.append(cache_idx)
+            cache_topk = np.asarray(arrays["topk_target_region_ids"][cache_idx], dtype=np.int64).reshape(-1).tolist()
             window_topk = [int(x) for x in window.get("topk_target_region_ids", [])]
             if cache_topk != window_topk:
                 raise ValueError(
                     f"geometry_feature_cache top-k region mismatch at dataset window {idx}: "
                     f"cache={cache_topk}, dataset={window_topk}."
                 )
+        selected_cache_indices = np.asarray(selected_cache_indices, dtype=np.int64)
         return {
-            "primary_relative_vector_window": np.asarray(cache["primary_relative_vector_window"], dtype=np.float32),
-            "primary_relative_dist_window": np.asarray(cache["primary_relative_dist_window"], dtype=np.float32),
-            "topk_relative_vectors_window": np.asarray(cache["topk_relative_vectors_window"], dtype=np.float32),
-            "topk_relative_dists_window": np.asarray(cache["topk_relative_dists_window"], dtype=np.float32),
+            "primary_relative_vector_window": np.asarray(cache["primary_relative_vector_window"], dtype=np.float32)[selected_cache_indices],
+            "primary_relative_dist_window": np.asarray(cache["primary_relative_dist_window"], dtype=np.float32)[selected_cache_indices],
+            "topk_relative_vectors_window": np.asarray(cache["topk_relative_vectors_window"], dtype=np.float32)[selected_cache_indices],
+            "topk_relative_dists_window": np.asarray(cache["topk_relative_dists_window"], dtype=np.float32)[selected_cache_indices],
         }
 
     def _validate_window_row(self, window: dict[str, Any]):

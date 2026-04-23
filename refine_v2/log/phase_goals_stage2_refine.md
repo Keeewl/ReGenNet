@@ -690,3 +690,72 @@ Then use those contact metrics to update feature/model/loss.
     - build geometry cache
     - train `refiner_v2_exp5_scope_geom_10k`
     - compare against exp3 using window eval, contact eval, and aitviewer visual pack
+- 2026-04-23:
+  - exp5 geometry cache completed quickly and correctly:
+    - `6749` windows
+    - elapsed `00:00:22`
+    - `primary_relative_vector_window = [6749, 3, 30]`
+    - `primary_relative_dist_window = [6749, 30]`
+    - `topk_relative_vectors_window = [6749, 3, 3, 30]`
+    - `topk_relative_dists_window = [6749, 3, 30]`
+    - speed is expected because this cache only computes sparse window-level
+      centroid geometry, not dense region-to-region mesh min-distance.
+  - exp5 window eval completed:
+    - `pred_motion_error = 0.0130820452`
+    - `motion_improvement = 0.0032817393`
+    - `pred_contact_motion_error = 0.0130605551`
+    - `contact_motion_improvement = 0.0034877443`
+    - `boundary_trans_jump_excess = -0.0000008370`
+    - `pred_boundary_trans_jump = 0.0097265707`
+    - `coarse_boundary_trans_jump = 0.0097274078`
+    - interpretation: exp5 improves window motion/contact-frame motion while
+      keeping boundary translation essentially unchanged from coarse.
+  - exp5 scope/delta eval confirms that the v1 design is doing the intended
+    hand/arm-focused refinement:
+    - `delta_norm_selected_hand = 0.0124185895`
+    - `delta_norm_same_side_arm = 0.0155224866`
+    - `delta_norm_other_hand_arm = 0.0110871044`
+    - `delta_norm_lower_body = 0.0044759440`
+    - `delta_norm_torso_root = 0.0029985403`
+    - `delta_norm_transl = 0.0002474822`
+    - selected hand delta is about `50x` transl delta
+    - same-side arm delta is about `63x` transl delta
+  - exp5 contact eval completed:
+    - `all_valid_dist_l1_improvement = 0.0027992890`
+    - `gt_contact_contact_dist_improvement = 0.0028254371`
+    - `coarse_contact_f1 = 0.8003375103`
+    - `refined_contact_f1 = 0.8221591739`
+    - `topk_coarse_contact_f1 = 0.8083653870`
+    - `topk_refined_contact_f1 = 0.8297871497`
+    - `surrogate_penetration_depth_improvement = -0.0000661652`
+  - exp5 vs exp3:
+    - `all_valid_dist_l1_improvement` improves by about `17.1%`
+    - `gt_contact_contact_dist_improvement` improves by about `19.6%`
+    - `refined_contact_f1` improves by about `+0.0035`
+    - `topk_refined_contact_f1` improves by about `+0.0034`
+    - surrogate penetration is slightly worse than exp3
+  - exp5 is now the current practical baseline:
+    - better than exp3 on motion eval
+    - better than exp3 on contact-distance eval
+    - better than exp3 on refined/top-k contact F1
+    - translation remains controlled
+    - residual scope matches the Stage2 hand/arm contact-refinement target
+  - exp5 is not yet the final upper-bound model:
+    - `refined_contact_f1` is still below the target `0.84`
+    - `topk_refined_contact_f1` is still below the target `0.845`
+    - `gt_contact_contact_dist_improvement` is still below the target `0.004`
+    - surrogate penetration is slightly worse and needs visual inspection
+  - Breakdown observations:
+    - strongest action-type gains: `High-five`, `Dance`, `Massaging leg`,
+      `Hand wrestling`, `Sit on leg`, `Handshake`
+    - weakest gains: `Pull`, `Support with hand`, `Hug`, `Link arms`, `Help up`
+    - strongest primary-region gains are on `left_hand` and `right_hand`,
+      which matches the Stage2 objective
+  - Next concrete task:
+    - export and inspect exp5 aitviewer visual packs
+    - compare exp5 against exp3/exp2 visually on direct hand contact and weak
+      action types
+    - if visible over-close/penetration exists, add a light anti-overclose or
+      anti-penetration regularizer
+    - if weak action types remain poor, extend geometry features beyond simple
+      selected-hand to target-region centroid features
