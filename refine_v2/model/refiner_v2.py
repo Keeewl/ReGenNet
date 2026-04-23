@@ -8,7 +8,15 @@ import torch
 from torch import nn
 
 from refine_v2.model.condition_encoder import RefineV2ConditionEncoder, RefineV2ConditionEncoderConfig
-from refine_v2.model.joint_groups import ResidualGroupScales, residual_scale_tensor
+from refine_v2.model.joint_groups import (
+    LEFT_ARM_IDS,
+    LEFT_HAND_IDS,
+    RIGHT_ARM_IDS,
+    RIGHT_HAND_IDS,
+    TRANSL_INDEX,
+    ResidualGroupScales,
+    residual_scale_tensor,
+)
 
 
 @dataclass
@@ -26,6 +34,8 @@ class RefineV2WindowRefinerConfig:
     top_k_regions: int = 3
     delta_scale: float = 1.0
     use_geometry_features: bool = False
+    use_geometry_v2_features: bool = False
+    use_separate_residual_heads: bool = False
     use_group_gated_residual: bool = False
     hand_delta_scale: float = 1.0
     arm_delta_scale: float = 1.0
@@ -108,6 +118,7 @@ class RefineV2WindowRefiner(nn.Module):
                 top_k_regions=int(config.top_k_regions),
                 dropout=float(config.dropout),
                 use_geometry_features=bool(config.use_geometry_features),
+                use_geometry_v2_features=bool(config.use_geometry_v2_features),
             )
         )
         self.blocks = nn.ModuleList(
@@ -125,6 +136,23 @@ class RefineV2WindowRefiner(nn.Module):
         self.output_head = nn.Linear(d, self.motion_dim)
         nn.init.zeros_(self.output_head.weight)
         nn.init.zeros_(self.output_head.bias)
+        self.hand_output_head = None
+        self.arm_output_head = None
+        self.body_output_head = None
+        self.transl_output_head = None
+        if bool(config.use_separate_residual_heads):
+            self.hand_output_head = nn.Linear(d, self.motion_dim)
+            self.arm_output_head = nn.Linear(d, self.motion_dim)
+            self.body_output_head = nn.Linear(d, self.motion_dim)
+            self.transl_output_head = nn.Linear(d, self.motion_dim)
+            for head in (
+                self.hand_output_head,
+                self.arm_output_head,
+                self.body_output_head,
+                self.transl_output_head,
+            ):
+                nn.init.zeros_(head.weight)
+                nn.init.zeros_(head.bias)
 
     def _motion_to_tokens(self, value: torch.Tensor, proj: nn.Linear) -> torch.Tensor:
         if value.ndim != 4:
@@ -160,6 +188,9 @@ class RefineV2WindowRefiner(nn.Module):
             primary_relative_dist_window=batch.get("primary_relative_dist_window"),
             topk_relative_vectors_window=batch.get("topk_relative_vectors_window"),
             topk_relative_dists_window=batch.get("topk_relative_dists_window"),
+            topk_relative_dist_velocity_window=batch.get("topk_relative_dist_velocity_window"),
+            coarse_topk_nearest_vectors_window=batch.get("coarse_topk_nearest_vectors_window"),
+            coarse_topk_nearest_dists_window=batch.get("coarse_topk_nearest_dists_window"),
         )
 
         valid_mask = batch.get("valid_mask")
@@ -176,8 +207,28 @@ class RefineV2WindowRefiner(nn.Module):
                 key_padding_mask=key_padding_mask,
             )
 
-        delta_tokens = self.output_head(self.output_norm(x)) * float(self.config.delta_scale)
-        pred_delta = delta_tokens.reshape(b, t, j, f).permute(0, 2, 3, 1).contiguous()
+        x_norm = self.output_norm(x)
+        if bool(self.config.use_separate_residual_heads):
+            head_tokens = (
+                self.hand_output_head(x_norm),
+                self.arm_output_head(x_norm),
+                self.body_output_head(x_norm),
+                self.transl_output_head(x_norm),
+            )
+            head_deltas = [
+                tokens.reshape(b, t, j, f).permute(0, 2, 3, 1).contiguous()
+                for tokens in head_tokens
+            ]
+            masks = self._residual_head_masks(j, f, device=coarse_motion.device, dtype=coarse_motion.dtype)
+            pred_delta = (
+                head_deltas[0] * masks["hand"]
+                + head_deltas[1] * masks["arm"]
+                + head_deltas[2] * masks["body"]
+                + head_deltas[3] * masks["transl"]
+            ) * float(self.config.delta_scale)
+        else:
+            delta_tokens = self.output_head(x_norm) * float(self.config.delta_scale)
+            pred_delta = delta_tokens.reshape(b, t, j, f).permute(0, 2, 3, 1).contiguous()
         if bool(self.config.use_group_gated_residual):
             scales = residual_scale_tensor(
                 num_joints=j,
@@ -200,3 +251,19 @@ class RefineV2WindowRefiner(nn.Module):
             "pred_motion_window": pred_motion,
             "coarse_motion_window": coarse_motion,
         }
+
+    def _residual_head_masks(self, num_joints: int, num_channels: int, *, device, dtype) -> dict[str, torch.Tensor]:
+        hand_ids = [idx for idx in LEFT_HAND_IDS + RIGHT_HAND_IDS if 0 <= int(idx) < int(num_joints)]
+        arm_ids = [idx for idx in LEFT_ARM_IDS + RIGHT_ARM_IDS if 0 <= int(idx) < int(num_joints)]
+        transl_ids = [TRANSL_INDEX] if 0 <= int(TRANSL_INDEX) < int(num_joints) else []
+        hand = torch.zeros((1, num_joints, num_channels, 1), device=device, dtype=dtype)
+        arm = torch.zeros_like(hand)
+        transl = torch.zeros_like(hand)
+        if hand_ids:
+            hand[:, hand_ids, :, :] = 1.0
+        if arm_ids:
+            arm[:, arm_ids, :, :] = 1.0
+        if transl_ids:
+            transl[:, transl_ids, :, :] = 1.0
+        body = (1.0 - hand - arm - transl).clamp_min(0.0)
+        return {"hand": hand, "arm": arm, "body": body, "transl": transl}

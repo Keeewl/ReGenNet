@@ -18,6 +18,19 @@ TENSOR_KEYS = (
     "primary_relative_dist_window",
     "topk_relative_vectors_window",
     "topk_relative_dists_window",
+    "gt_primary_relative_vector_window",
+    "gt_primary_relative_dist_window",
+    "gt_topk_relative_vectors_window",
+    "gt_topk_relative_dists_window",
+    "topk_relative_dist_velocity_window",
+    "topk_gt_relative_dist_velocity_window",
+    "topk_relative_dist_gap_window",
+    "contact_geometry_weight_window",
+    "coarse_topk_nearest_vectors_window",
+    "coarse_topk_nearest_dists_window",
+    "gt_topk_nearest_vectors_window",
+    "gt_topk_nearest_dists_window",
+    "topk_nearest_dist_gap_window",
 )
 
 INT_TENSOR_KEYS = (

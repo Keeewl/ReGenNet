@@ -57,6 +57,8 @@ class RefineV2TrainerConfig:
     max_window_size: int = 256
     delta_scale: float = 1.0
     use_geometry_features: bool = False
+    use_geometry_v2_features: bool = False
+    use_separate_residual_heads: bool = False
     use_group_gated_residual: bool = False
     hand_delta_scale: float = 1.0
     arm_delta_scale: float = 1.0
@@ -70,6 +72,8 @@ class RefineV2TrainerConfig:
     lambda_region_dist: float = 0.0
     lambda_boundary_trans: float = 0.0
     lambda_phase_preserve: float = 0.0
+    lambda_contact_geometry: float = 0.0
+    lambda_gt_relative_overclose: float = 0.0
     boundary_trans_frames: int = 2
     phase_preserve_power: float = 2.0
     phase_preserve_transl_weight: float = 2.0
@@ -92,6 +96,8 @@ class RefineV2TrainerConfig:
     same_side_arm_contact_weight: float = 3.0
     other_upper_contact_weight: float = 1.0
     body_contact_weight: float = 0.5
+    contact_geometry_weight_scale: float = 0.05
+    gt_relative_overclose_margin: float = 0.005
 
 
 def _now() -> str:
@@ -206,6 +212,8 @@ class RefineV2Trainer:
             top_k_regions=int(sample["topk_target_region_ids"].shape[0]),
             delta_scale=float(self.config.delta_scale),
             use_geometry_features=bool(self.config.use_geometry_features),
+            use_geometry_v2_features=bool(self.config.use_geometry_v2_features),
+            use_separate_residual_heads=bool(self.config.use_separate_residual_heads),
             use_group_gated_residual=bool(self.config.use_group_gated_residual),
             hand_delta_scale=float(self.config.hand_delta_scale),
             arm_delta_scale=float(self.config.arm_delta_scale),
@@ -223,6 +231,8 @@ class RefineV2Trainer:
                 lambda_region_dist=float(self.config.lambda_region_dist),
                 lambda_boundary_trans=float(self.config.lambda_boundary_trans),
                 lambda_phase_preserve=float(self.config.lambda_phase_preserve),
+                lambda_contact_geometry=float(self.config.lambda_contact_geometry),
+                lambda_gt_relative_overclose=float(self.config.lambda_gt_relative_overclose),
                 boundary_trans_frames=int(self.config.boundary_trans_frames),
                 phase_preserve_power=float(self.config.phase_preserve_power),
                 phase_preserve_transl_weight=float(self.config.phase_preserve_transl_weight),
@@ -245,6 +255,8 @@ class RefineV2Trainer:
                 same_side_arm_contact_weight=float(self.config.same_side_arm_contact_weight),
                 other_upper_contact_weight=float(self.config.other_upper_contact_weight),
                 body_contact_weight=float(self.config.body_contact_weight),
+                contact_geometry_weight_scale=float(self.config.contact_geometry_weight_scale),
+                gt_relative_overclose_margin=float(self.config.gt_relative_overclose_margin),
             )
         ).to(self.device)
         self.optimizer = torch.optim.AdamW(

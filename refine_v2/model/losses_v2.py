@@ -26,6 +26,8 @@ class RefineV2LossConfig:
     lambda_region_dist: float = 0.0
     lambda_boundary_trans: float = 0.0
     lambda_phase_preserve: float = 0.0
+    lambda_contact_geometry: float = 0.0
+    lambda_gt_relative_overclose: float = 0.0
     boundary_trans_frames: int = 2
     phase_preserve_power: float = 2.0
     phase_preserve_transl_weight: float = 2.0
@@ -48,6 +50,8 @@ class RefineV2LossConfig:
     same_side_arm_contact_weight: float = 3.0
     other_upper_contact_weight: float = 1.0
     body_contact_weight: float = 0.5
+    contact_geometry_weight_scale: float = 0.05
+    gt_relative_overclose_margin: float = 0.005
 
 
 def _valid_frame_weights(valid_mask: torch.Tensor, motion: torch.Tensor) -> torch.Tensor:
@@ -170,6 +174,74 @@ class RefineV2Loss(nn.Module):
             loss_smooth = delta.sum() * 0.0
 
         loss_region_dist = pred.sum() * 0.0
+        if float(self.config.lambda_contact_geometry) != 0.0:
+            if "contact_geometry_weight_window" not in batch:
+                raise KeyError(
+                    "lambda_contact_geometry > 0 requires geometry cache v2 field "
+                    "contact_geometry_weight_window."
+                )
+            geom_frame_weight = batch["contact_geometry_weight_window"].float().amax(dim=1)
+            geom_frame_weight = torch.nan_to_num(geom_frame_weight, nan=0.0, posinf=0.0, neginf=0.0)
+            geom_frame_weight = (
+                geom_frame_weight / max(float(self.config.contact_geometry_weight_scale), 1e-8)
+            ).clamp(0.0, 1.0)
+            geom_frame_weight = geom_frame_weight * valid_mask.float()
+            geom_group_weights = contact_group_weight_tensor(
+                hand_side_id=batch["hand_side_id"],
+                num_joints=pred.shape[1],
+                num_channels=pred.shape[2],
+                num_frames=pred.shape[-1],
+                device=pred.device,
+                dtype=pred.dtype,
+                weights=ContactGroupWeights(
+                    selected_hand=float(self.config.selected_hand_contact_weight),
+                    same_side_arm=float(self.config.same_side_arm_contact_weight),
+                    other_upper=0.0,
+                    body=0.0,
+                ),
+            )
+            loss_contact_geometry = _masked_mean(
+                pred_err,
+                geom_frame_weight.view(pred.shape[0], 1, 1, pred.shape[-1]) * geom_group_weights,
+            )
+        else:
+            loss_contact_geometry = pred.sum() * 0.0
+
+        if float(self.config.lambda_gt_relative_overclose) != 0.0:
+            if "topk_nearest_dist_gap_window" not in batch:
+                raise KeyError(
+                    "lambda_gt_relative_overclose > 0 requires geometry cache v2 field "
+                    "topk_nearest_dist_gap_window."
+                )
+            overclose_weight = (
+                -batch["topk_nearest_dist_gap_window"].float()
+                - float(self.config.gt_relative_overclose_margin)
+            ).clamp_min(0.0).amax(dim=1)
+            overclose_weight = (
+                overclose_weight / max(float(self.config.contact_geometry_weight_scale), 1e-8)
+            ).clamp(0.0, 1.0)
+            overclose_weight = overclose_weight * valid_mask.float()
+            overclose_group_weights = contact_group_weight_tensor(
+                hand_side_id=batch["hand_side_id"],
+                num_joints=pred.shape[1],
+                num_channels=pred.shape[2],
+                num_frames=pred.shape[-1],
+                device=pred.device,
+                dtype=pred.dtype,
+                weights=ContactGroupWeights(
+                    selected_hand=1.0,
+                    same_side_arm=0.5,
+                    other_upper=0.0,
+                    body=0.0,
+                ),
+            )
+            loss_gt_relative_overclose = _masked_mean(
+                torch.abs(delta),
+                overclose_weight.view(pred.shape[0], 1, 1, pred.shape[-1]) * overclose_group_weights,
+            )
+        else:
+            loss_gt_relative_overclose = pred.sum() * 0.0
+
         if float(self.config.lambda_phase_preserve) != 0.0:
             phase_weights = _phase_preserve_weights(valid_mask, pred, float(self.config.phase_preserve_power))
             group_weights = phase_preserve_group_weight_tensor(
@@ -216,6 +288,8 @@ class RefineV2Loss(nn.Module):
             + float(self.config.lambda_region_dist) * loss_region_dist
             + float(self.config.lambda_boundary_trans) * loss_boundary_trans
             + float(self.config.lambda_phase_preserve) * loss_phase_preserve
+            + float(self.config.lambda_contact_geometry) * loss_contact_geometry
+            + float(self.config.lambda_gt_relative_overclose) * loss_gt_relative_overclose
         )
 
         contact_weights_plain = contact_frame.float().view(pred.shape[0], 1, 1, pred.shape[-1]).expand_as(pred)
@@ -238,6 +312,8 @@ class RefineV2Loss(nn.Module):
             "loss_region_dist": loss_region_dist,
             "loss_boundary_trans": loss_boundary_trans,
             "loss_phase_preserve": loss_phase_preserve,
+            "loss_contact_geometry": loss_contact_geometry,
+            "loss_gt_relative_overclose": loss_gt_relative_overclose,
             "coarse_motion_error": coarse_motion_error,
             "pred_motion_error": pred_motion_error,
             "motion_improvement": coarse_motion_error - pred_motion_error,

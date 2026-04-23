@@ -41,6 +41,8 @@ def build_parser():
     parser.add_argument("--max_window_size", type=int, default=256)
     parser.add_argument("--delta_scale", type=float, default=1.0)
     parser.add_argument("--use_geometry_features", action="store_true")
+    parser.add_argument("--use_geometry_v2_features", action="store_true")
+    parser.add_argument("--use_separate_residual_heads", action="store_true")
     parser.add_argument("--use_group_gated_residual", action="store_true")
     parser.add_argument("--hand_delta_scale", type=float, default=1.0)
     parser.add_argument("--arm_delta_scale", type=float, default=1.0)
@@ -54,6 +56,8 @@ def build_parser():
     parser.add_argument("--lambda_region_dist", type=float, default=0.0)
     parser.add_argument("--lambda_boundary_trans", type=float, default=0.0)
     parser.add_argument("--lambda_phase_preserve", type=float, default=0.0)
+    parser.add_argument("--lambda_contact_geometry", type=float, default=0.0)
+    parser.add_argument("--lambda_gt_relative_overclose", type=float, default=0.0)
     parser.add_argument("--boundary_trans_frames", type=int, default=2)
     parser.add_argument("--phase_preserve_power", type=float, default=2.0)
     parser.add_argument("--phase_preserve_transl_weight", type=float, default=2.0)
@@ -76,6 +80,8 @@ def build_parser():
     parser.add_argument("--same_side_arm_contact_weight", type=float, default=3.0)
     parser.add_argument("--other_upper_contact_weight", type=float, default=1.0)
     parser.add_argument("--body_contact_weight", type=float, default=0.5)
+    parser.add_argument("--contact_geometry_weight_scale", type=float, default=0.05)
+    parser.add_argument("--gt_relative_overclose_margin", type=float, default=0.005)
     return parser
 
 

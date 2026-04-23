@@ -68,6 +68,27 @@ def _geometry_cache_key(row: int, window_index: int, start: int, end: int, hand_
     )
 
 
+GEOMETRY_CACHE_FEATURE_KEYS = (
+    "primary_relative_vector_window",
+    "primary_relative_dist_window",
+    "topk_relative_vectors_window",
+    "topk_relative_dists_window",
+    "gt_primary_relative_vector_window",
+    "gt_primary_relative_dist_window",
+    "gt_topk_relative_vectors_window",
+    "gt_topk_relative_dists_window",
+    "topk_relative_dist_velocity_window",
+    "topk_gt_relative_dist_velocity_window",
+    "topk_relative_dist_gap_window",
+    "contact_geometry_weight_window",
+    "coarse_topk_nearest_vectors_window",
+    "coarse_topk_nearest_dists_window",
+    "gt_topk_nearest_vectors_window",
+    "gt_topk_nearest_dists_window",
+    "topk_nearest_dist_gap_window",
+)
+
+
 class RefineV2WindowDataset:
     """One hand-time selector window per sample.
 
@@ -305,10 +326,9 @@ class RefineV2WindowDataset:
                 )
         selected_cache_indices = np.asarray(selected_cache_indices, dtype=np.int64)
         return {
-            "primary_relative_vector_window": np.asarray(cache["primary_relative_vector_window"], dtype=np.float32)[selected_cache_indices],
-            "primary_relative_dist_window": np.asarray(cache["primary_relative_dist_window"], dtype=np.float32)[selected_cache_indices],
-            "topk_relative_vectors_window": np.asarray(cache["topk_relative_vectors_window"], dtype=np.float32)[selected_cache_indices],
-            "topk_relative_dists_window": np.asarray(cache["topk_relative_dists_window"], dtype=np.float32)[selected_cache_indices],
+            key: np.asarray(cache[key], dtype=np.float32)[selected_cache_indices]
+            for key in GEOMETRY_CACHE_FEATURE_KEYS
+            if key in cache.files
         }
 
     def _validate_window_row(self, window: dict[str, Any]):
@@ -420,12 +440,7 @@ class RefineV2WindowDataset:
             },
             "geometry_feature_shapes": {
                 key: list(sample[key].shape)
-                for key in (
-                    "primary_relative_vector_window",
-                    "primary_relative_dist_window",
-                    "topk_relative_vectors_window",
-                    "topk_relative_dists_window",
-                )
+                for key in GEOMETRY_CACHE_FEATURE_KEYS
                 if key in sample
             },
             "target_region_names": list(TARGET_REGION_NAMES),

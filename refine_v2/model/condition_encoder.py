@@ -16,6 +16,7 @@ class RefineV2ConditionEncoderConfig:
     top_k_regions: int = 3
     dropout: float = 0.0
     use_geometry_features: bool = False
+    use_geometry_v2_features: bool = False
 
 
 class RefineV2ConditionEncoder(nn.Module):
@@ -47,6 +48,8 @@ class RefineV2ConditionEncoder(nn.Module):
         self.geometry_mlp = None
         if bool(config.use_geometry_features):
             geom_dim = 4 + int(config.top_k_regions) * 4
+            if bool(config.use_geometry_v2_features):
+                geom_dim += int(config.top_k_regions) * 5
             self.geometry_mlp = nn.Sequential(
                 nn.Linear(geom_dim, d),
                 nn.SiLU(),
@@ -74,6 +77,9 @@ class RefineV2ConditionEncoder(nn.Module):
         primary_relative_dist_window: torch.Tensor | None = None,
         topk_relative_vectors_window: torch.Tensor | None = None,
         topk_relative_dists_window: torch.Tensor | None = None,
+        topk_relative_dist_velocity_window: torch.Tensor | None = None,
+        coarse_topk_nearest_vectors_window: torch.Tensor | None = None,
+        coarse_topk_nearest_dists_window: torch.Tensor | None = None,
     ) -> dict[str, torch.Tensor]:
         hand_side_id = hand_side_id.long().clamp(0, self.config.num_hands - 1)
         primary_target_region_id = primary_target_region_id.long().clamp(0, self.config.num_regions - 1)
@@ -112,7 +118,23 @@ class RefineV2ConditionEncoder(nn.Module):
             primary_dist = primary_relative_dist_window.float().unsqueeze(-1)
             topk_vec = topk_relative_vectors_window.float().permute(0, 3, 1, 2).flatten(2)
             topk_dist = topk_relative_dists_window.float().transpose(1, 2)
-            geom = torch.cat([primary_vec, primary_dist, topk_vec, topk_dist], dim=-1)
+            geom_parts = [primary_vec, primary_dist, topk_vec, topk_dist]
+            if bool(self.config.use_geometry_v2_features):
+                if (
+                    topk_relative_dist_velocity_window is None
+                    or coarse_topk_nearest_vectors_window is None
+                    or coarse_topk_nearest_dists_window is None
+                ):
+                    raise KeyError(
+                        "use_geometry_v2_features=True requires v2 geometry cache fields: "
+                        "topk_relative_dist_velocity_window, coarse_topk_nearest_vectors_window, "
+                        "coarse_topk_nearest_dists_window."
+                    )
+                topk_vel = topk_relative_dist_velocity_window.float().transpose(1, 2)
+                nearest_vec = coarse_topk_nearest_vectors_window.float().permute(0, 3, 1, 2).flatten(2)
+                nearest_dist = coarse_topk_nearest_dists_window.float().transpose(1, 2)
+                geom_parts.extend([topk_vel, nearest_vec, nearest_dist])
+            geom = torch.cat(geom_parts, dim=-1)
             geom = torch.nan_to_num(geom, nan=0.0, posinf=10.0, neginf=-10.0).clamp(-10.0, 10.0)
             frame_contact = frame_contact + self.geometry_mlp(geom)
         per_frame_condition = self.frame_fuse(

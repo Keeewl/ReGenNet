@@ -85,6 +85,89 @@ def _centroid(vertices: torch.Tensor, ids: np.ndarray) -> torch.Tensor:
     return vertices.index_select(1, index).mean(dim=1)
 
 
+def _selected_hand_centroid(
+    vertices: torch.Tensor,
+    hand_side_id: torch.Tensor,
+    region_map: dict[str, np.ndarray],
+) -> torch.Tensor:
+    bsz = int(vertices.shape[0])
+    num_frames = int(vertices.shape[-1])
+    out = vertices.new_zeros((bsz, 3, num_frames))
+    for hand_id, hand_side in enumerate(HAND_SIDE_NAMES):
+        idx = torch.nonzero(hand_side_id.long() == hand_id, as_tuple=False).flatten()
+        if idx.numel() == 0:
+            continue
+        sub_centroid = _centroid(vertices.index_select(0, idx), region_map[f"{hand_side}_hand"])
+        out.index_copy_(0, idx, sub_centroid)
+    return out
+
+
+def _gather_topk_targets(actor_region_centroids: torch.Tensor, topk_ids: torch.Tensor) -> torch.Tensor:
+    bsz = int(actor_region_centroids.shape[0])
+    num_frames = int(actor_region_centroids.shape[-1])
+    topk_ids = topk_ids.long().clamp(0, len(TARGET_REGION_NAMES) - 1)
+    topk_target = actor_region_centroids.new_zeros((bsz, int(topk_ids.shape[1]), 3, num_frames))
+    for region_id in range(len(TARGET_REGION_NAMES)):
+        pos = torch.nonzero(topk_ids == region_id, as_tuple=False)
+        if pos.numel() == 0:
+            continue
+        row_ids = pos[:, 0]
+        topk_pos = pos[:, 1]
+        topk_target[row_ids, topk_pos] = actor_region_centroids[row_ids, region_id]
+    return topk_target
+
+
+def _nearest_hand_to_targets(
+    hand_vertices: torch.Tensor,
+    targets: torch.Tensor,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    # hand_vertices: [B, H, 3, T], targets: [B, K, 3, T].
+    hv = hand_vertices.permute(0, 3, 1, 2).contiguous()  # [B,T,H,3]
+    tg = targets.permute(0, 3, 1, 2).contiguous()  # [B,T,K,3]
+    diff = tg[:, :, :, None, :] - hv[:, :, None, :, :]
+    dist = torch.linalg.norm(diff, dim=-1)
+    min_dist, min_idx = dist.min(dim=-1)
+    gather_idx = min_idx[..., None, None].expand(-1, -1, -1, 1, 3)
+    nearest = hv[:, :, None, :, :].expand(-1, -1, tg.shape[2], -1, -1).gather(3, gather_idx).squeeze(3)
+    vec = tg - nearest
+    return vec.permute(0, 2, 3, 1).contiguous(), min_dist.permute(0, 2, 1).contiguous()
+
+
+def _selected_hand_nearest_vectors(
+    vertices: torch.Tensor,
+    hand_side_id: torch.Tensor,
+    targets: torch.Tensor,
+    region_map: dict[str, np.ndarray],
+) -> tuple[torch.Tensor, torch.Tensor]:
+    bsz = int(vertices.shape[0])
+    top_k = int(targets.shape[1])
+    num_frames = int(vertices.shape[-1])
+    vec_out = vertices.new_zeros((bsz, top_k, 3, num_frames))
+    dist_out = vertices.new_zeros((bsz, top_k, num_frames))
+    for hand_id, hand_side in enumerate(HAND_SIDE_NAMES):
+        idx = torch.nonzero(hand_side_id.long() == hand_id, as_tuple=False).flatten()
+        if idx.numel() == 0:
+            continue
+        hand_index = torch.as_tensor(
+            np.asarray(region_map[f"{hand_side}_hand"], dtype=np.int64),
+            device=vertices.device,
+            dtype=torch.long,
+        )
+        hand_vertices = vertices.index_select(0, idx).index_select(1, hand_index)
+        vec, dist = _nearest_hand_to_targets(hand_vertices, targets.index_select(0, idx))
+        vec_out.index_copy_(0, idx, vec)
+        dist_out.index_copy_(0, idx, dist)
+    return vec_out, dist_out
+
+
+def _temporal_velocity(value: torch.Tensor) -> torch.Tensor:
+    if value.shape[-1] <= 1:
+        return torch.zeros_like(value)
+    diff = value[..., 1:] - value[..., :-1]
+    first = torch.zeros_like(value[..., :1])
+    return torch.cat([first, diff], dim=-1)
+
+
 @torch.no_grad()
 def _compute_batch_geometry(
     *,
@@ -112,16 +195,18 @@ def _compute_batch_geometry(
         gender_id=meta["reactor_gender_id"],
         body_model_type=meta["body_model_type"],
     )
+    gt_reactor_vertices = _motion_to_vertices(
+        body_forward,
+        batch["gt_motion_window"].float(),
+        valid_mask,
+        betas=meta["reactor_betas"],
+        gender_id=meta["reactor_gender_id"],
+        body_model_type=meta["body_model_type"],
+    )
 
     bsz = int(actor_vertices.shape[0])
-    num_frames = int(actor_vertices.shape[-1])
-    hand_centroid = actor_vertices.new_zeros((bsz, 3, num_frames))
-    for hand_id, hand_side in enumerate(HAND_SIDE_NAMES):
-        idx = torch.nonzero(batch["hand_side_id"].long() == hand_id, as_tuple=False).flatten()
-        if idx.numel() == 0:
-            continue
-        sub_centroid = _centroid(reactor_vertices.index_select(0, idx), region_map[f"{hand_side}_hand"])
-        hand_centroid.index_copy_(0, idx, sub_centroid)
+    coarse_hand_centroid = _selected_hand_centroid(reactor_vertices, batch["hand_side_id"], region_map)
+    gt_hand_centroid = _selected_hand_centroid(gt_reactor_vertices, batch["hand_side_id"], region_map)
 
     actor_region_centroids = torch.stack(
         [_centroid(actor_vertices, region_map[name]) for name in TARGET_REGION_NAMES],
@@ -132,22 +217,51 @@ def _compute_batch_geometry(
     primary_target = actor_region_centroids[batch_ids, primary_ids]
 
     topk_ids = batch["topk_target_region_ids"].long().clamp(0, len(TARGET_REGION_NAMES) - 1)
-    topk_target = actor_vertices.new_zeros((bsz, int(topk_ids.shape[1]), 3, num_frames))
-    for region_id in range(len(TARGET_REGION_NAMES)):
-        pos = torch.nonzero(topk_ids == region_id, as_tuple=False)
-        if pos.numel() == 0:
-            continue
-        row_ids = pos[:, 0]
-        topk_pos = pos[:, 1]
-        topk_target[row_ids, topk_pos] = actor_region_centroids[row_ids, region_id]
+    topk_target = _gather_topk_targets(actor_region_centroids, topk_ids)
 
-    primary_vec = primary_target - hand_centroid
-    topk_vec = topk_target - hand_centroid[:, None, :, :]
+    primary_vec = primary_target - coarse_hand_centroid
+    topk_vec = topk_target - coarse_hand_centroid[:, None, :, :]
+    gt_primary_vec = primary_target - gt_hand_centroid
+    gt_topk_vec = topk_target - gt_hand_centroid[:, None, :, :]
+    topk_dist = torch.linalg.norm(topk_vec, dim=2)
+    gt_topk_dist = torch.linalg.norm(gt_topk_vec, dim=2)
+    topk_gap = topk_dist - gt_topk_dist
+    topk_gt_contact = torch.gather(
+        batch["gt_region_contact_mask_window"].float(),
+        1,
+        topk_ids[:, :, None].expand(-1, -1, batch["gt_region_contact_mask_window"].shape[-1]),
+    )
+    contact_weight = topk_gap.clamp_min(0.0) * topk_gt_contact
+    coarse_nearest_vec, coarse_nearest_dist = _selected_hand_nearest_vectors(
+        reactor_vertices,
+        batch["hand_side_id"],
+        topk_target,
+        region_map,
+    )
+    gt_nearest_vec, gt_nearest_dist = _selected_hand_nearest_vectors(
+        gt_reactor_vertices,
+        batch["hand_side_id"],
+        topk_target,
+        region_map,
+    )
     return {
         "primary_relative_vector_window": primary_vec,
         "primary_relative_dist_window": torch.linalg.norm(primary_vec, dim=1),
         "topk_relative_vectors_window": topk_vec,
-        "topk_relative_dists_window": torch.linalg.norm(topk_vec, dim=2),
+        "topk_relative_dists_window": topk_dist,
+        "gt_primary_relative_vector_window": gt_primary_vec,
+        "gt_primary_relative_dist_window": torch.linalg.norm(gt_primary_vec, dim=1),
+        "gt_topk_relative_vectors_window": gt_topk_vec,
+        "gt_topk_relative_dists_window": gt_topk_dist,
+        "topk_relative_dist_velocity_window": _temporal_velocity(topk_dist),
+        "topk_gt_relative_dist_velocity_window": _temporal_velocity(gt_topk_dist),
+        "topk_relative_dist_gap_window": topk_gap,
+        "contact_geometry_weight_window": contact_weight,
+        "coarse_topk_nearest_vectors_window": coarse_nearest_vec,
+        "coarse_topk_nearest_dists_window": coarse_nearest_dist,
+        "gt_topk_nearest_vectors_window": gt_nearest_vec,
+        "gt_topk_nearest_dists_window": gt_nearest_dist,
+        "topk_nearest_dist_gap_window": coarse_nearest_dist - gt_nearest_dist,
     }
 
 
@@ -186,12 +300,7 @@ def build_geometry_feature_cache(
     )
     region_map = load_region_map(region_map_path or None)
     body_forward = RestoredBodyModelForward(device=dev)
-    chunks: dict[str, list[np.ndarray]] = {
-        "primary_relative_vector_window": [],
-        "primary_relative_dist_window": [],
-        "topk_relative_vectors_window": [],
-        "topk_relative_dists_window": [],
-    }
+    chunks: dict[str, list[np.ndarray]] = {}
     bar = ProgressBar("build_geometry_cache", total=len(dataset), unit="windows", enabled=progress).start()
     for batch in loader:
         batch_dev = {
@@ -207,6 +316,7 @@ def build_geometry_feature_cache(
         )
         bsz = int(batch_dev["dataset_row_index"].shape[0])
         for key, value in geom.items():
+            chunks.setdefault(key, [])
             chunks[key].append(value.detach().cpu().numpy().astype(np.float32))
         bar.update(bsz)
     bar.finish()
@@ -215,7 +325,7 @@ def build_geometry_feature_cache(
     records = dataset.window_records
     metadata = {
         "artifact": "refine_v2_geometry_feature_cache",
-        "description": "Offline actor-target centroid minus coarse-reactor selected-hand centroid features.",
+        "description": "Offline coarse/GT reactor selected-hand to actor target-region geometry features.",
         "paths": {
             "reaction_data_path": reaction_data_path,
             "contact_labels_path": contact_labels_path,
@@ -234,8 +344,9 @@ def build_geometry_feature_cache(
         "region_map_summary": region_map_summary(region_map),
         "feature_shapes": {key: list(value.shape) for key, value in arrays.items()},
         "notes": [
-            "Features are computed from actor_motion and reactor_coarse only.",
-            "No GT reactor motion is used, so the cache is safe as model input.",
+            "Model-input features are computed from actor_motion and reactor_coarse.",
+            "GT reactor motion is also used for supervision-only geometry targets and weights.",
+            "Training code must only feed coarse-prefixed/current feature fields to the condition encoder.",
         ],
     }
     os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)

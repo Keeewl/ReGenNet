@@ -300,7 +300,7 @@ def _window_metrics(
     )
 
     # This is an unsigned-distance surrogate, not a true signed penetration metric.
-    for prefix, dist in (("coarse", coarse_dist), ("refined", refined_dist)):
+    for prefix, dist in (("gt", gt_dist), ("coarse", coarse_dist), ("refined", refined_dist)):
         too_close = (penetration_margin - dist).clamp_min(0.0)
         valid_count = valid.float().sum().clamp_min(1.0)
         metrics[f"{prefix}_surrogate_penetration_rate"] = float(((too_close > 0) & valid).float().sum().item() / valid_count.item())
@@ -310,6 +310,30 @@ def _window_metrics(
     )
     metrics["surrogate_penetration_depth_improvement"] = (
         metrics["coarse_surrogate_penetration_depth"] - metrics["refined_surrogate_penetration_depth"]
+    )
+    metrics["coarse_vs_gt_surrogate_penetration_rate_gap"] = abs(
+        metrics["coarse_surrogate_penetration_rate"] - metrics["gt_surrogate_penetration_rate"]
+    )
+    metrics["refined_vs_gt_surrogate_penetration_rate_gap"] = abs(
+        metrics["refined_surrogate_penetration_rate"] - metrics["gt_surrogate_penetration_rate"]
+    )
+    metrics["surrogate_penetration_rate_gap_improvement"] = (
+        metrics["coarse_vs_gt_surrogate_penetration_rate_gap"]
+        - metrics["refined_vs_gt_surrogate_penetration_rate_gap"]
+    )
+    metrics["coarse_vs_gt_surrogate_penetration_depth_gap"] = abs(
+        metrics["coarse_surrogate_penetration_depth"] - metrics["gt_surrogate_penetration_depth"]
+    )
+    metrics["refined_vs_gt_surrogate_penetration_depth_gap"] = abs(
+        metrics["refined_surrogate_penetration_depth"] - metrics["gt_surrogate_penetration_depth"]
+    )
+    metrics["surrogate_penetration_depth_gap_improvement"] = (
+        metrics["coarse_vs_gt_surrogate_penetration_depth_gap"]
+        - metrics["refined_vs_gt_surrogate_penetration_depth_gap"]
+    )
+    metrics["refined_penetration_depth_excess_over_gt"] = max(
+        0.0,
+        metrics["refined_surrogate_penetration_depth"] - metrics["gt_surrogate_penetration_depth"],
     )
     return metrics, {"coarse_contact": coarse_contact, "refined_contact": refined_contact, "gt_contact": gt_contact}, {
         "valid": valid,

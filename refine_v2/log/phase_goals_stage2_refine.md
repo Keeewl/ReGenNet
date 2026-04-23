@@ -979,3 +979,46 @@ Then use those contact metrics to update feature/model/loss.
       - `refine_v2/commands/visual/09_diagnose_refiner_vis_pack_exp6_transl_phase.sh`
     - detailed design:
       - `refine_v2/log/2026-04-23_exp6_transl_only_phase_design.md`
+  - next major contact-refine framework finalized:
+    - keep `refiner_v2_exp5_scope_geom_10k` as the practical baseline
+    - stop making phase-loss tuning the main path
+    - implement a complete contact-aware refiner upgrade:
+      - geometry feature cache v2
+      - contact-distance loss
+      - GT-relative overclose / penetration loss
+      - separate hand/arm/body/transl residual heads
+      - contact-centric eval upgrade
+      - aitviewer validation
+    - penetration principle updated:
+      - penetration should be evaluated relative to GT
+      - smaller absolute penetration is not always better
+      - refined is acceptable if contact improves and penetration approaches GT
+        without clearly exceeding GT
+    - expected target:
+      - `refined_contact_f1 >= 0.835`
+      - `topk_refined_contact_f1 >= 0.840`
+      - `gt_contact_contact_dist_improvement >= 0.0035` to `0.0040`
+    - detailed framework:
+      - `refine_v2/log/2026-04-23_next_contact_refine_framework.md`
+  - exp7 contact-refine v1 implementation completed:
+    - added geometry feature cache v2:
+      - coarse and GT selected-hand to top-k target geometry
+      - coarse nearest hand-vertex to top-k target centroid features
+      - distance velocity/gap/contact geometry weight fields
+    - added `--use_geometry_v2_features`
+    - added `--use_separate_residual_heads`
+    - added lightweight contact-aware losses:
+      - `loss_contact_geometry`
+      - `loss_gt_relative_overclose`
+    - updated contact eval to report GT-relative surrogate penetration gaps
+    - added exp7 feature/train/eval/contact-eval/visual/diagnosis commands
+    - output paths:
+      - `refine_v2/save/features/contact_geom_v2_train/geometry_feature_cache_v2.npz`
+      - `refine_v2/save/train/refiner_v2_exp7_contact_refine_v1_10k`
+    - validation passed:
+      - py_compile
+      - train CLI help
+      - command syntax checks
+      - geometry-v2 model/loss smoke test
+    - detailed implementation:
+      - `refine_v2/log/2026-04-23_exp7_contact_refine_v1_implementation.md`

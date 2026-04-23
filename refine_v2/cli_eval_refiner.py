@@ -72,6 +72,8 @@ def main(argv=None):
             lambda_region_dist=0.0,
             lambda_boundary_trans=float(train_cfg.get("lambda_boundary_trans", 0.0)),
             lambda_phase_preserve=float(train_cfg.get("lambda_phase_preserve", 0.0)),
+            lambda_contact_geometry=float(train_cfg.get("lambda_contact_geometry", 0.0)),
+            lambda_gt_relative_overclose=float(train_cfg.get("lambda_gt_relative_overclose", 0.0)),
             boundary_trans_frames=int(train_cfg.get("boundary_trans_frames", 2)),
             phase_preserve_power=float(train_cfg.get("phase_preserve_power", 2.0)),
             phase_preserve_transl_weight=float(train_cfg.get("phase_preserve_transl_weight", 2.0)),
@@ -94,6 +96,8 @@ def main(argv=None):
             same_side_arm_contact_weight=float(train_cfg.get("same_side_arm_contact_weight", 3.0)),
             other_upper_contact_weight=float(train_cfg.get("other_upper_contact_weight", 1.0)),
             body_contact_weight=float(train_cfg.get("body_contact_weight", 0.5)),
+            contact_geometry_weight_scale=float(train_cfg.get("contact_geometry_weight_scale", 0.05)),
+            gt_relative_overclose_margin=float(train_cfg.get("gt_relative_overclose_margin", 0.005)),
         )
     ).to(device)
     result = evaluate_model(model, loader, loss_fn, device=device, max_batches=int(args.max_batches))
