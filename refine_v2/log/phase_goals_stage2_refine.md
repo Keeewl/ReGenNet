@@ -1128,3 +1128,84 @@ Then use those contact metrics to update feature/model/loss.
       - `refine_v2/save/train/refiner_v2_exp8_interaction_v1_10k`
     - detailed implementation:
       - `refine_v2/log/2026-04-24_exp8_lightweight_interaction_implementation.md`
+  - exp8 interaction model evaluated:
+    - window eval:
+      - `pred_motion_error = 0.013667550909166373`
+      - `motion_improvement = 0.002696233594414481`
+      - `pred_contact_motion_error = 0.013666775117047735`
+      - `contact_motion_improvement = 0.002881524312023031`
+      - `boundary_trans_jump_excess = -2.6215136578259542e-06`
+    - contact eval:
+      - `all_valid_dist_l1_improvement = 0.0025347111161972244`
+      - `gt_contact_contact_dist_improvement = 0.003047680515683272`
+      - `refined_contact_f1 = 0.8214249439940374`
+      - `topk_refined_contact_f1 = 0.8288972412102136`
+      - `surrogate_penetration_depth_improvement = -9.166959621832446e-05`
+    - comparison to exp5:
+      - exp8 is slightly weaker on binary/F1-style contact metrics
+      - exp8 is stronger on direct GT-contact distance improvement
+    - revised Stage2 interpretation:
+      - Stage2 should be treated as a `contact-refine` module, not a
+        `motion-reconstruction` module
+      - weaker STGCN / reconstruction is acceptable if contact metrics improve
+        clearly
+      - penetration must be interpreted relative to GT, not as an absolute
+        "smaller is always better" metric
+    - current conclusion:
+      - `exp5` remains the more conservative overall baseline
+      - `exp8` is currently the more contact-oriented and goal-aligned model
+        direction
+      - the next decisive comparison should be Stage1-only vs Stage1+Stage2
+        under both reconstruction and contact metrics
+    - detailed summary:
+      - `refine_v2/log/2026-04-24_exp8_interaction_eval_summary.md`
+  - formal Stage2 full-sequence evaluation protocol defined:
+    - final Stage2 eval should be full-sequence, not window-level
+    - evaluation objects:
+      - `GT`
+      - `coarse (Stage1 output)`
+      - `refined (Stage1 + Stage2 output)`
+    - stitching rule:
+      - merge in residual space
+      - use center-weighted merge over overlapping windows
+      - uncovered frames keep coarse unchanged
+    - metric spaces:
+      - STGCN / reconstruction metrics in canonical space
+      - contact metrics in restored pair space / restored shape
+    - evaluation domain:
+      - contact-rich subset
+    - sampling protocol:
+      - balanced sampled eval by action type
+      - per action type use `min(100, available_sequences)`
+    - reporting structure:
+      - one unified evaluation pipeline
+      - one STGCN/reconstruction table
+      - one contact table
+    - objective interpretation:
+      - Stage2 is a contact-refine module, not a motion-reconstruction module
+      - weaker reconstruction is acceptable if contact improves clearly
+      - penetration must be interpreted relative to GT
+    - protocol document:
+      - `refine_v2/log/2026-04-24_full_sequence_eval_protocol.md`
+  - formal full-sequence evaluation implementation completed:
+    - added residual-space center-weighted stitching:
+      - `refine_v2/eval/full_sequence_stitch.py`
+    - added full-sequence Stage1-only vs Stage1+Stage2 eval:
+      - `refine_v2/eval/full_sequence_eval.py`
+      - `refine_v2/cli_eval_full_sequence.py`
+    - added command:
+      - `refine_v2/commands/eval/17_eval_full_sequence_exp8_interaction_v1.sh`
+    - added local exp8 viewer command:
+      - `refine_v2/commands/visual/18_view_refiner_vis_pack_exp8_interaction_v1.sh`
+    - outputs:
+      - `full_sequence_eval.json`
+      - `full_sequence_eval.md`
+      - `full_sequence_eval_stgcn.csv`
+      - `full_sequence_eval_contact.csv`
+      - optional `full_sequence_eval_pack.npz`
+    - current local note:
+      - local workspace has exp8 eval outputs and vis pack
+      - local workspace does not currently include `model_best.pt` for exp8
+      - therefore local smoke run stopped at checkpoint loading
+    - implementation note:
+      - `refine_v2/log/2026-04-24_full_sequence_eval_implementation.md`

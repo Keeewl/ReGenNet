@@ -1,0 +1,26 @@
+conda activate regennet5090
+
+####### refine_v2 exp8: full-sequence Stage1 vs Stage1+Stage2 eval #######
+export CUDA_VISIBLE_DEVICES=0
+python -m refine_v2.cli_eval_full_sequence \
+  --checkpoint refine_v2/save/train/refiner_v2_exp8_interaction_v1_10k/model_best.pt \
+  --reaction_data_path refine/dataset/train/reaction_data.npz \
+  --contact_labels_path refine_v2/outputs/train/contact_labels_gt.npz \
+  --subset_manifest_path refine_v2/outputs/train/contact_subset/subset_manifest.json \
+  --selector_windows_path refine_v2/outputs/train/contact_subset/selector_rerun/subset_selector_windows.npz \
+  --region_map_path visualize/viewer/part_segm/6_parts/six_parts.pkl \
+  --stgcn_model_path recognition_training/interx_exp1/checkpoint_0100.pth.tar \
+  --geometry_feature_cache_path refine_v2/save/features/contact_geom_v2_train/geometry_feature_cache_v2.npz \
+  --output_dir refine_v2/save/train/refiner_v2_exp8_interaction_v1_10k/full_sequence_eval \
+  --include_buckets "GT+ / Pred+" \
+  --max_sequences_per_action_type 100 \
+  --sample_seed 1234 \
+  --batch_size 32 \
+  --stgcn_batch_size 64 \
+  --num_workers 0 \
+  --device cuda \
+  --tau_contact 0.05 \
+  --penetration_margin 0.015 \
+  --frame_chunk 1 \
+  --target_chunk 2048 \
+  --save_pack
