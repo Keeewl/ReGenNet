@@ -1022,3 +1022,50 @@ Then use those contact metrics to update feature/model/loss.
       - geometry-v2 model/loss smoke test
     - detailed implementation:
       - `refine_v2/log/2026-04-23_exp7_contact_refine_v1_implementation.md`
+  - exp7 contact-refine v1 eval completed and failed to beat exp5:
+    - window eval:
+      - `pred_motion_error = 0.0146233759`
+      - `pred_contact_motion_error = 0.0146865906`
+      - `motion_improvement = 0.0017404086`
+      - `contact_motion_improvement = 0.0018617088`
+    - contact eval:
+      - `all_valid_dist_l1_improvement = 0.0017661969`
+      - `gt_contact_contact_dist_improvement = 0.0024847729`
+      - `refined_contact_f1 = 0.8158168217`
+      - `topk_refined_contact_f1 = 0.8235661854`
+      - `surrogate_penetration_depth_improvement = -0.0000740772`
+    - comparison with exp5:
+      - all main motion/contact metrics are worse
+      - selected hand / same-side arm deltas are significantly reduced
+      - conclusion:
+        - current bundled exp7 design is too conservative
+        - the failure could come from geometry v2 input, separate heads,
+          contact proxy loss, or their interaction
+    - decision:
+      - do not adopt exp7 as baseline
+      - keep exp5 as current baseline
+      - run controlled ablations next
+  - exp7 ablation plan added:
+    - `exp7a_geom_v2_only_10k`
+      - geometry v2 input only
+      - no separate heads
+      - no contact geometry loss
+      - no GT-relative overclose loss
+    - `exp7b_geom_v2_light_contact_10k`
+      - geometry v2 input
+      - no separate heads
+      - light `lambda_contact_geometry = 0.1`
+      - no GT-relative overclose loss
+    - commands added:
+      - `refine_v2/commands/train/06_train_refiner_exp7a_geom_v2_only.sh`
+      - `refine_v2/commands/train/07_train_refiner_exp7b_geom_v2_light_contact.sh`
+      - `refine_v2/commands/eval/11_eval_refiner_exp7a_geom_v2_only.sh`
+      - `refine_v2/commands/eval/12_eval_contact_refiner_exp7a_geom_v2_only.sh`
+      - `refine_v2/commands/eval/13_eval_refiner_exp7b_geom_v2_light_contact.sh`
+      - `refine_v2/commands/eval/14_eval_contact_refiner_exp7b_geom_v2_light_contact.sh`
+      - `refine_v2/commands/visual/12_export_refiner_vis_pack_exp7a_geom_v2_only.sh`
+      - `refine_v2/commands/visual/13_diagnose_refiner_vis_pack_exp7a_geom_v2_only.sh`
+      - `refine_v2/commands/visual/14_export_refiner_vis_pack_exp7b_geom_v2_light_contact.sh`
+      - `refine_v2/commands/visual/15_diagnose_refiner_vis_pack_exp7b_geom_v2_light_contact.sh`
+    - detailed plan:
+      - `refine_v2/log/2026-04-24_exp7_contact_ablation_plan.md`
