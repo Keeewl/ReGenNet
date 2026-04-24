@@ -288,8 +288,8 @@ def evaluate_full_sequence(
             frame_chunk=frame_chunk,
             target_chunk=target_chunk,
         )
-        coarse_dist_parts.append(np.asarray(coarse_payload["min_dist"], dtype=np.float32))
-        refined_dist_parts.append(np.asarray(refined_payload["min_dist"], dtype=np.float32))
+        coarse_dist_parts.append(np.asarray(coarse_payload["min_region_dist"], dtype=np.float32))
+        refined_dist_parts.append(np.asarray(refined_payload["min_region_dist"], dtype=np.float32))
         gt_idx = [label_row_to_idx[int(row)] for row in rows[start:end].tolist()]
         gt_dist_parts.append(np.asarray(labels["gt_min_region_dist"])[gt_idx].astype(np.float32))
         gt_mask_parts.append(np.asarray(labels["gt_contact_mask"])[gt_idx].astype(np.uint8))
