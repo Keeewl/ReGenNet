@@ -190,8 +190,11 @@ def stitch_refiner_full_sequences(
             global_frames = global_frames[keep]
             local_valid = local_valid[keep]
             local_weights = local_weights[keep]
+            # Use np.take on the temporal axis to avoid numpy advanced-indexing
+            # reordering the dimensions into [T, J, C].
+            window_delta = np.take(pred_delta[i], local_valid, axis=-1)
             delta_sum[seq_idx, :, :, global_frames] += (
-                pred_delta[i, :, :, local_valid] * local_weights.reshape(1, 1, -1)
+                window_delta * local_weights.reshape(1, 1, -1)
             )
             weight_sum[seq_idx, global_frames] += local_weights
             coverage_count[seq_idx, global_frames] += 1
