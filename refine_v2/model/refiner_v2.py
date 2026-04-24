@@ -16,6 +16,7 @@ from refine_v2.model.joint_groups import (
     TRANSL_INDEX,
     ResidualGroupScales,
     residual_scale_tensor,
+    side_group_ids,
 )
 
 
@@ -36,7 +37,11 @@ class RefineV2WindowRefinerConfig:
     use_geometry_features: bool = False
     use_geometry_v2_features: bool = False
     use_separate_residual_heads: bool = False
+    use_hand_target_interaction: bool = False
+    use_focused_hand_arm_boost: bool = False
     use_group_gated_residual: bool = False
+    hand_interaction_boost_scale: float = 0.35
+    arm_interaction_boost_scale: float = 0.2
     hand_delta_scale: float = 1.0
     arm_delta_scale: float = 1.0
     torso_delta_scale: float = 0.5
@@ -119,6 +124,7 @@ class RefineV2WindowRefiner(nn.Module):
                 dropout=float(config.dropout),
                 use_geometry_features=bool(config.use_geometry_features),
                 use_geometry_v2_features=bool(config.use_geometry_v2_features),
+                use_hand_target_interaction=bool(config.use_hand_target_interaction),
             )
         )
         self.blocks = nn.ModuleList(
@@ -140,6 +146,8 @@ class RefineV2WindowRefiner(nn.Module):
         self.arm_output_head = None
         self.body_output_head = None
         self.transl_output_head = None
+        self.hand_boost_head = None
+        self.arm_boost_head = None
         if bool(config.use_separate_residual_heads):
             self.hand_output_head = nn.Linear(d, self.motion_dim)
             self.arm_output_head = nn.Linear(d, self.motion_dim)
@@ -153,6 +161,13 @@ class RefineV2WindowRefiner(nn.Module):
             ):
                 nn.init.zeros_(head.weight)
                 nn.init.zeros_(head.bias)
+        if bool(config.use_focused_hand_arm_boost):
+            self.hand_boost_head = nn.Linear(d, self.motion_dim)
+            self.arm_boost_head = nn.Linear(d, self.motion_dim)
+            nn.init.zeros_(self.hand_boost_head.weight)
+            nn.init.zeros_(self.hand_boost_head.bias)
+            nn.init.zeros_(self.arm_boost_head.weight)
+            nn.init.zeros_(self.arm_boost_head.bias)
 
     def _motion_to_tokens(self, value: torch.Tensor, proj: nn.Linear) -> torch.Tensor:
         if value.ndim != 4:
@@ -229,6 +244,28 @@ class RefineV2WindowRefiner(nn.Module):
         else:
             delta_tokens = self.output_head(x_norm) * float(self.config.delta_scale)
             pred_delta = delta_tokens.reshape(b, t, j, f).permute(0, 2, 3, 1).contiguous()
+        if bool(self.config.use_focused_hand_arm_boost):
+            if "hand_interaction_condition" not in cond or "arm_interaction_condition" not in cond:
+                raise KeyError(
+                    "use_focused_hand_arm_boost=True requires condition encoder outputs "
+                    "hand_interaction_condition and arm_interaction_condition."
+                )
+            hand_src = x_norm + cond["hand_interaction_condition"]
+            arm_src = x_norm + cond["arm_interaction_condition"]
+            hand_delta = self.hand_boost_head(hand_src).reshape(b, t, j, f).permute(0, 2, 3, 1).contiguous()
+            arm_delta = self.arm_boost_head(arm_src).reshape(b, t, j, f).permute(0, 2, 3, 1).contiguous()
+            focused_masks = self._focused_group_masks(
+                batch["hand_side_id"],
+                j,
+                f,
+                device=coarse_motion.device,
+                dtype=coarse_motion.dtype,
+            )
+            pred_delta = (
+                pred_delta
+                + float(self.config.hand_interaction_boost_scale) * hand_delta * focused_masks["selected_hand"]
+                + float(self.config.arm_interaction_boost_scale) * arm_delta * focused_masks["same_side_arm"]
+            )
         if bool(self.config.use_group_gated_residual):
             scales = residual_scale_tensor(
                 num_joints=j,
@@ -267,3 +304,17 @@ class RefineV2WindowRefiner(nn.Module):
             transl[:, transl_ids, :, :] = 1.0
         body = (1.0 - hand - arm - transl).clamp_min(0.0)
         return {"hand": hand, "arm": arm, "body": body, "transl": transl}
+
+    def _focused_group_masks(self, hand_side_id: torch.Tensor, num_joints: int, num_channels: int, *, device, dtype):
+        batch_size = int(hand_side_id.shape[0])
+        selected_hand = torch.zeros((batch_size, num_joints, num_channels, 1), device=device, dtype=dtype)
+        same_side_arm = torch.zeros_like(selected_hand)
+        for b, side in enumerate(hand_side_id.detach().cpu().long().view(-1).tolist()):
+            groups = side_group_ids(int(side))
+            hand_ids = [idx for idx in groups["selected_hand"] if 0 <= int(idx) < int(num_joints)]
+            arm_ids = [idx for idx in groups["same_side_arm"] if 0 <= int(idx) < int(num_joints)]
+            if hand_ids:
+                selected_hand[b, hand_ids, :, :] = 1.0
+            if arm_ids:
+                same_side_arm[b, arm_ids, :, :] = 1.0
+        return {"selected_hand": selected_hand, "same_side_arm": same_side_arm}

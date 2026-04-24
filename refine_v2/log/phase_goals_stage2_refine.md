@@ -1069,3 +1069,62 @@ Then use those contact metrics to update feature/model/loss.
       - `refine_v2/commands/visual/15_diagnose_refiner_vis_pack_exp7b_geom_v2_light_contact.sh`
     - detailed plan:
       - `refine_v2/log/2026-04-24_exp7_contact_ablation_plan.md`
+  - exp7 ablation results completed:
+    - `exp7a_geom_v2_only_10k`:
+      - geometry v2 input only
+      - clearly worse than exp5 on motion and contact metrics
+      - conclusion:
+        - geometry v2 input itself did not prove useful in the current
+          encoder/backbone setup
+    - `exp7b_geom_v2_light_contact_10k`:
+      - geometry v2 input + light contact proxy loss
+      - clearly better than exp7a
+      - still does not beat exp5
+      - conclusion:
+        - light contact proxy supervision is directionally useful
+        - but this branch is still weaker than exp5
+    - current ordering:
+      - `exp5 > exp7b > exp6_transl_phase > exp7a > exp7`
+    - main framework conclusion:
+      - do not continue heavy iteration on the current geometry-v2 /
+        proxy-contact-loss branch
+      - exp5 remains the active best baseline
+    - final practical recommendation:
+      - either stop at exp5 and consolidate reporting/visualization
+      - or run only one last minimal exp5-based light contact regularization
+        test
+    - detailed summary:
+      - `refine_v2/log/2026-04-24_exp7_ablation_results_summary.md`
+  - stage2 high-level diagnosis updated:
+    - selector/window/subset are no longer the main bottleneck
+    - the main bottleneck has shifted to the refiner model:
+      - hand-target interaction is not modeled explicitly enough
+      - training target is still not directly contact-geometric enough
+      - added geometry information is not yet being consumed effectively
+    - current model has temporal attention, but not explicit full spatial
+      attention
+    - do not move to a heavy full spatial-attention / space-time-transformer
+      redesign under current time constraints
+    - if one more meaningful model upgrade is attempted, it should be:
+      - exp5-style backbone
+      - lightweight hand-target interaction module
+      - selected-hand / same-side-arm focused representation
+      - light direct contact-aware supervision
+    - detailed diagnosis:
+      - `refine_v2/log/2026-04-24_stage2_high_level_model_diagnosis.md`
+  - exp8 lightweight interaction model implementation completed:
+    - keeps exp5-style shared backbone
+    - adds lightweight hand-target interaction in the condition encoder
+    - adds focused selected-hand / same-side-arm residual booster
+    - avoids heavy full spatial attention and avoids separate full-body heads
+    - uses only very light contact regularization by default
+    - commands added:
+      - `refine_v2/commands/train/08_train_refiner_exp8_interaction_v1.sh`
+      - `refine_v2/commands/eval/15_eval_refiner_exp8_interaction_v1.sh`
+      - `refine_v2/commands/eval/16_eval_contact_refiner_exp8_interaction_v1.sh`
+      - `refine_v2/commands/visual/16_export_refiner_vis_pack_exp8_interaction_v1.sh`
+      - `refine_v2/commands/visual/17_diagnose_refiner_vis_pack_exp8_interaction_v1.sh`
+    - output path:
+      - `refine_v2/save/train/refiner_v2_exp8_interaction_v1_10k`
+    - detailed implementation:
+      - `refine_v2/log/2026-04-24_exp8_lightweight_interaction_implementation.md`

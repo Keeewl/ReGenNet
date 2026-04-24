@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import math
 
 import torch
 from torch import nn
@@ -17,6 +18,7 @@ class RefineV2ConditionEncoderConfig:
     dropout: float = 0.0
     use_geometry_features: bool = False
     use_geometry_v2_features: bool = False
+    use_hand_target_interaction: bool = False
 
 
 class RefineV2ConditionEncoder(nn.Module):
@@ -52,6 +54,40 @@ class RefineV2ConditionEncoder(nn.Module):
                 geom_dim += int(config.top_k_regions) * 5
             self.geometry_mlp = nn.Sequential(
                 nn.Linear(geom_dim, d),
+                nn.SiLU(),
+                nn.Dropout(float(config.dropout)),
+                nn.Linear(d, d),
+            )
+        self.interaction_query_mlp = None
+        self.interaction_region_mlp = None
+        self.hand_interaction_mlp = None
+        self.arm_interaction_mlp = None
+        if bool(config.use_hand_target_interaction):
+            region_dim = 4 + (5 if bool(config.use_geometry_v2_features) else 0)
+            self.interaction_query_mlp = nn.Sequential(
+                nn.LayerNorm(d + 4),
+                nn.Linear(d + 4, d),
+                nn.SiLU(),
+                nn.Dropout(float(config.dropout)),
+                nn.Linear(d, d),
+            )
+            self.interaction_region_mlp = nn.Sequential(
+                nn.LayerNorm(region_dim),
+                nn.Linear(region_dim, d),
+                nn.SiLU(),
+                nn.Dropout(float(config.dropout)),
+                nn.Linear(d, d),
+            )
+            self.hand_interaction_mlp = nn.Sequential(
+                nn.LayerNorm(d * 2),
+                nn.Linear(d * 2, d),
+                nn.SiLU(),
+                nn.Dropout(float(config.dropout)),
+                nn.Linear(d, d),
+            )
+            self.arm_interaction_mlp = nn.Sequential(
+                nn.LayerNorm(d * 2),
+                nn.Linear(d * 2, d),
                 nn.SiLU(),
                 nn.Dropout(float(config.dropout)),
                 nn.Linear(d, d),
@@ -102,6 +138,8 @@ class RefineV2ConditionEncoder(nn.Module):
         dist = coarse_min_region_dist_window.float().transpose(1, 2)
         dist = torch.nan_to_num(dist, nan=0.0, posinf=10.0, neginf=0.0).clamp(0.0, 10.0)
         frame_contact = self.frame_contact_mlp(torch.cat([contact, dist], dim=-1))
+        hand_interaction_condition = None
+        arm_interaction_condition = None
         if self.geometry_mlp is not None:
             if (
                 primary_relative_vector_window is None
@@ -137,10 +175,61 @@ class RefineV2ConditionEncoder(nn.Module):
             geom = torch.cat(geom_parts, dim=-1)
             geom = torch.nan_to_num(geom, nan=0.0, posinf=10.0, neginf=-10.0).clamp(-10.0, 10.0)
             frame_contact = frame_contact + self.geometry_mlp(geom)
+        if bool(self.config.use_hand_target_interaction):
+            if (
+                primary_relative_vector_window is None
+                or primary_relative_dist_window is None
+                or topk_relative_vectors_window is None
+                or topk_relative_dists_window is None
+            ):
+                raise KeyError(
+                    "use_hand_target_interaction=True requires geometry fields: "
+                    "primary_relative_vector_window, primary_relative_dist_window, "
+                    "topk_relative_vectors_window, topk_relative_dists_window."
+                )
+            primary_vec = primary_relative_vector_window.float().transpose(1, 2)
+            primary_dist = primary_relative_dist_window.float().unsqueeze(-1)
+            query = self.interaction_query_mlp(torch.cat([frame_contact, primary_vec, primary_dist], dim=-1))
+            region_parts = [
+                topk_relative_vectors_window.float().permute(0, 3, 1, 2),
+                topk_relative_dists_window.float().transpose(1, 2).unsqueeze(-1),
+            ]
+            if bool(self.config.use_geometry_v2_features):
+                if coarse_topk_nearest_vectors_window is None or coarse_topk_nearest_dists_window is None:
+                    raise KeyError(
+                        "use_hand_target_interaction with use_geometry_v2_features=True requires "
+                        "coarse_topk_nearest_vectors_window and coarse_topk_nearest_dists_window."
+                    )
+                if topk_relative_dist_velocity_window is None:
+                    raise KeyError(
+                        "use_hand_target_interaction with use_geometry_v2_features=True requires "
+                        "topk_relative_dist_velocity_window."
+                    )
+                region_parts.extend(
+                    [
+                        topk_relative_dist_velocity_window.float().transpose(1, 2).unsqueeze(-1),
+                        coarse_topk_nearest_vectors_window.float().permute(0, 3, 1, 2),
+                        coarse_topk_nearest_dists_window.float().transpose(1, 2).unsqueeze(-1),
+                    ]
+                )
+            region_tokens = self.interaction_region_mlp(torch.cat(region_parts, dim=-1))
+            scores = (query.unsqueeze(2) * region_tokens).sum(dim=-1) / math.sqrt(float(query.shape[-1]))
+            attn = torch.softmax(scores, dim=2)
+            interaction = (attn.unsqueeze(-1) * region_tokens).sum(dim=2)
+            frame_contact = frame_contact + interaction
+            hand_interaction_condition = self.hand_interaction_mlp(torch.cat([interaction, query], dim=-1))
+            arm_interaction_condition = self.arm_interaction_mlp(
+                torch.cat([interaction, global_condition.unsqueeze(1).expand_as(interaction)], dim=-1)
+            )
         per_frame_condition = self.frame_fuse(
             torch.cat([frame_contact, global_condition.unsqueeze(1).expand_as(frame_contact)], dim=-1)
         )
-        return {
+        out = {
             "global_condition": global_condition,
             "per_frame_condition": per_frame_condition,
         }
+        if hand_interaction_condition is not None:
+            out["hand_interaction_condition"] = hand_interaction_condition
+        if arm_interaction_condition is not None:
+            out["arm_interaction_condition"] = arm_interaction_condition
+        return out

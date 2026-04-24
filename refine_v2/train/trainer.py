@@ -59,7 +59,11 @@ class RefineV2TrainerConfig:
     use_geometry_features: bool = False
     use_geometry_v2_features: bool = False
     use_separate_residual_heads: bool = False
+    use_hand_target_interaction: bool = False
+    use_focused_hand_arm_boost: bool = False
     use_group_gated_residual: bool = False
+    hand_interaction_boost_scale: float = 0.35
+    arm_interaction_boost_scale: float = 0.2
     hand_delta_scale: float = 1.0
     arm_delta_scale: float = 1.0
     torso_delta_scale: float = 0.5
@@ -214,7 +218,11 @@ class RefineV2Trainer:
             use_geometry_features=bool(self.config.use_geometry_features),
             use_geometry_v2_features=bool(self.config.use_geometry_v2_features),
             use_separate_residual_heads=bool(self.config.use_separate_residual_heads),
+            use_hand_target_interaction=bool(self.config.use_hand_target_interaction),
+            use_focused_hand_arm_boost=bool(self.config.use_focused_hand_arm_boost),
             use_group_gated_residual=bool(self.config.use_group_gated_residual),
+            hand_interaction_boost_scale=float(self.config.hand_interaction_boost_scale),
+            arm_interaction_boost_scale=float(self.config.arm_interaction_boost_scale),
             hand_delta_scale=float(self.config.hand_delta_scale),
             arm_delta_scale=float(self.config.arm_delta_scale),
             torso_delta_scale=float(self.config.torso_delta_scale),
