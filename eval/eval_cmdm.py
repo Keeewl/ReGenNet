@@ -36,7 +36,12 @@ def evaluate(args, model, diffusion, data, rec_model_path, setting, acc_only, au
     scale = 1 if scale is None else scale['action'][0].item()
     scale = str(scale).replace('.', 'p')
     auto = 'auto' if auto_regressive else 'not_auto'
-    metricname = "evaluation_results_iter{}_samp{}_scale{}_a2m_{}_{}_{}.yaml".format(iter, args.num_samples, scale, auto, args.timestep_respacing, args.eval_mode)
+    metricname = "evaluation_results_iter{}_samp{}_scale{}_a2m_{}_{}_{}".format(
+        iter, args.num_samples, scale, auto, args.timestep_respacing, args.eval_mode
+    )
+    if getattr(args, "eval_tag", ""):
+        metricname = f"{metricname}_{args.eval_tag}"
+    metricname = f"{metricname}.yaml"
     evalpath = os.path.join(folder, metricname)
     print(f"Saving evaluation: {evalpath}")
     save_metrics(evalpath, eval_results)

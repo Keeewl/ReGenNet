@@ -270,6 +270,8 @@ def add_evaluation_options(parser):
     group.add_argument("--rec_model_path", required=True, type=str,
                        help="Path to model####.pt of the action recognition model.")
     group.add_argument("--eval_mode", default='debug', type=str, help="Evaluation mode.")
+    group.add_argument("--eval_tag", default='', type=str,
+                       help="Optional suffix appended to the saved evaluation yaml filename.")
     group.add_argument("--guidance_param", default=2.5, type=float,
                        help="For classifier-free sampling - specifies the s parameter, as defined in the paper.")
     group.add_argument("--auto_regressive", action='store_true',
