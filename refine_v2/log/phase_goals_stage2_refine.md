@@ -1313,3 +1313,35 @@ Then use those contact metrics to update feature/model/loss.
       - dummy forward smoke test
     - detailed note:
       - `refine_v2/log/2026-04-24_exp9_spatial_interaction_implementation.md`
+  - exp9 evaluation completed:
+    - window-level metrics:
+      - `gt_contact_contact_dist_improvement = 0.0029010999687671232`
+      - `refined_contact_f1 = 0.818623481298672`
+      - `topk_refined_contact_f1 = 0.8264006654633981`
+    - full-sequence metrics:
+      - `refined_contact_f1 = 0.7926315553499481`
+      - `gt_contact_contact_dist_improvement = 0.0016739577986299992`
+      - `surrogate_penetration_depth_gap_improvement = 0.00023515056818723679`
+    - comparison against exp8:
+      - exp9 is weaker on both window-level and full-sequence contact metrics
+      - stronger spatial interaction did not improve the current framework
+      - effective hand/arm residuals became smaller and more conservative
+    - final decision:
+      - keep `exp8_interaction_v1_10k` as the Stage2 main result
+      - treat exp9 as the final no-gain / negative ablation
+      - Stage2 model line is now basically converged
+    - detailed note:
+      - `refine_v2/log/2026-04-24_exp9_spatial_interaction_eval_summary.md`
+  - exp8b transl-relax calibration added:
+    - rationale:
+      - exp8 may still be limited by very conservative transl residuals
+      - try one final small calibration before fully freezing Stage2
+    - configuration:
+      - `transl_delta_scale = 0.3`
+      - `root_delta_scale = 0.2`
+      - `lambda_boundary_trans = 1.0`
+      - `lambda_contact_geometry = 0.03`
+    - command set added:
+      - train / window eval / contact eval / full-sequence eval / vis export / diagnose / aitviewer
+    - note:
+      - `refine_v2/log/2026-04-24_exp8b_transl_relax_plan.md`
