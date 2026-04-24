@@ -193,22 +193,19 @@ def stitch_refiner_full_sequences(
             # Use np.take on the temporal axis to avoid numpy advanced-indexing
             # reordering the dimensions into [T, J, C].
             window_delta = np.take(pred_delta[i], local_valid, axis=-1)
-            delta_sum[seq_idx, :, :, global_frames] += (
-                window_delta * local_weights.reshape(1, 1, -1)
-            )
+            weighted_delta = window_delta * local_weights.reshape(1, 1, -1)
+            # Do explicit per-frame accumulation to avoid numpy advanced-indexing
+            # moving the temporal axis to the front on assignment.
+            for local_idx, global_frame in enumerate(global_frames.tolist()):
+                delta_sum[seq_idx, :, :, int(global_frame)] += weighted_delta[:, :, local_idx]
             weight_sum[seq_idx, global_frames] += local_weights
             coverage_count[seq_idx, global_frames] += 1
             sequence_window_counts[seq_idx] += 1
 
-    merged_delta = np.zeros_like(delta_sum, dtype=np.float32)
     covered = weight_sum > 0
-    for seq_idx in range(rows.shape[0]):
-        mask = covered[seq_idx]
-        if not np.any(mask):
-            continue
-        merged_delta[seq_idx, :, :, mask] = (
-            delta_sum[seq_idx, :, :, mask] / weight_sum[seq_idx, mask].reshape(1, 1, -1)
-        )
+    denom = np.where(covered, weight_sum, 1.0).astype(np.float32, copy=False)
+    merged_delta = delta_sum / denom[:, None, None, :]
+    merged_delta *= covered[:, None, None, :].astype(np.float32, copy=False)
     refined_motion = coarse_motion + merged_delta
 
     pack: dict[str, Any] = {
