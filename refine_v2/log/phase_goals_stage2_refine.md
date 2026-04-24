@@ -1209,3 +1209,107 @@ Then use those contact metrics to update feature/model/loss.
       - therefore local smoke run stopped at checkpoint loading
     - implementation note:
       - `refine_v2/log/2026-04-24_full_sequence_eval_implementation.md`
+  - exp8 formal full-sequence evaluation completed:
+    - counts:
+      - `num_sequences = 1487`
+      - `num_action_types = 15`
+    - stitch summary:
+      - `mean_windows_per_sequence = 2.3618`
+      - `mean_covered_frame_ratio = 0.3797`
+      - `mean_overlap_frame_ratio = 0.0862`
+      - `num_sequences_with_windows = 1487`
+    - STGCN:
+      - coarse:
+        - `accuracy = 0.9778`
+        - `fid = 0.4742`
+      - refined:
+        - `accuracy = 0.9785`
+        - `fid = 0.2955`
+      - conclusion:
+        - refined does not damage global motion distribution
+        - refined is slightly better than coarse on system-level STGCN
+    - contact:
+      - `coarse_contact_f1 = 0.7816277361600042`
+      - `refined_contact_f1 = 0.7945530333590035`
+      - `delta_contact_f1 = +0.01293`
+      - `gt_contact_contact_dist_improvement = 0.001841994933784008`
+      - `all_valid_dist_l1_improvement = 0.010855725966393948`
+      - `all_valid_contact_dist_improvement = 0.013058219105005264`
+      - `contact_ratio_error_improvement = 0.0055951580363146625`
+      - `contact_duration_error_improvement = 0.2513984531395863`
+      - `contact_frequency_error_improvement = -0.01008742434431742`
+      - `contact_jitter_error_improvement = -0.0001399150580196143`
+    - GT-relative penetration interpretation:
+      - `surrogate_penetration_depth_improvement = -0.00024501560255885124`
+      - `surrogate_penetration_depth_gap_improvement = +0.00024501560255885124`
+      - `refined_penetration_depth_excess_over_gt = 0.0`
+      - conclusion:
+        - absolute surrogate overclose is not smaller
+        - but GT-relative overclose / penetration behavior is improved
+        - refined does not exceed GT on the surrogate depth metric
+    - action-type pattern:
+      - strongest gains on:
+        - `High-five`
+        - `Dance`
+        - `Massaging leg`
+        - `Hand wrestling`
+        - `Handshake`
+      - weakest / remaining hard cases:
+        - `Pull`
+        - `Support with hand`
+        - `Link arms`
+    - current overall conclusion:
+      - exp8 is valid at the full-sequence system level
+      - Stage1 + Stage2(exp8) clearly improves contact over Stage1-only coarse
+      - exp8 can now be treated as a legitimate Stage2 main result
+      - any further iteration should be a very small calibration pass, not a new branch
+    - detailed summary:
+      - `refine_v2/log/2026-04-24_exp8_full_sequence_eval_summary.md`
+  - Stage2 lightweight-status and next-update judgment clarified:
+    - current Stage2 refiner remains lightweight:
+      - window-level residual refiner
+      - only runs on selected windows
+      - training is fast and GPU footprint is low
+      - inference latency should not increase dramatically by itself
+    - current trainable Stage2 model is still the `refiner_v2` line:
+      - `refine_v2/model/refiner_v2.py`
+      - `refine_v2/model/condition_encoder.py`
+      - `refine_v2/model/losses_v2.py`
+    - the full Stage2 system is:
+      - selector/window/subset
+      - refiner_v2
+      - residual stitching
+      - full-sequence evaluation
+    - exp8 is already a valid system-level Stage2 result
+    - the next update should be treated as the final contact-refine upgrade:
+      - keep exp8 backbone / selector / subset / eval protocol fixed
+      - strengthen hand-target spatial interaction
+      - keep the model lightweight
+      - avoid heavy full spatial transformer redesign
+      - avoid reopening broad transl / phase / proxy-loss branches
+    - after that update, the Stage2 model line should be considered basically fixed
+    - detailed note:
+      - `refine_v2/log/2026-04-24_stage2_lightweight_status_and_next_update.md`
+  - exp9 final model-side upgrade implemented:
+    - stronger but still lightweight task-specific spatial interaction added on top of exp8
+    - no change to:
+      - selector / window / subset
+      - restored-space protocol
+      - full-sequence evaluation protocol
+    - new interaction design:
+      - selected-hand query
+      - same-side-arm query
+      - top-k target-region tokens
+      - lightweight spatial interaction blocks with region self-attention and query-to-region cross-attention
+    - model remains:
+      - temporal residual refiner
+      - focused hand/arm booster
+      - group-gated residual
+    - exp9 command set added:
+      - train / window eval / contact eval / full-sequence eval / vis export / vis diagnose
+    - verification passed:
+      - `py_compile`
+      - `zsh -n` for new commands
+      - dummy forward smoke test
+    - detailed note:
+      - `refine_v2/log/2026-04-24_exp9_spatial_interaction_implementation.md`

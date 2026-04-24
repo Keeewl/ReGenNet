@@ -38,8 +38,11 @@ class RefineV2WindowRefinerConfig:
     use_geometry_v2_features: bool = False
     use_separate_residual_heads: bool = False
     use_hand_target_interaction: bool = False
+    use_hand_target_spatial_attention: bool = False
     use_focused_hand_arm_boost: bool = False
     use_group_gated_residual: bool = False
+    interaction_num_layers: int = 1
+    interaction_num_heads: int = 4
     hand_interaction_boost_scale: float = 0.35
     arm_interaction_boost_scale: float = 0.2
     hand_delta_scale: float = 1.0
@@ -125,6 +128,9 @@ class RefineV2WindowRefiner(nn.Module):
                 use_geometry_features=bool(config.use_geometry_features),
                 use_geometry_v2_features=bool(config.use_geometry_v2_features),
                 use_hand_target_interaction=bool(config.use_hand_target_interaction),
+                use_hand_target_spatial_attention=bool(config.use_hand_target_spatial_attention),
+                interaction_num_layers=int(config.interaction_num_layers),
+                interaction_num_heads=int(config.interaction_num_heads),
             )
         )
         self.blocks = nn.ModuleList(
