@@ -158,23 +158,9 @@ class RefineV2ConditionEncoder(nn.Module):
                 nn.Dropout(float(config.dropout)),
                 nn.Linear(d, d),
             )
-            self.interaction_arm_query_mlp = nn.Sequential(
-                nn.LayerNorm(d * 2 + 4),
-                nn.Linear(d * 2 + 4, d),
-                nn.SiLU(),
-                nn.Dropout(float(config.dropout)),
-                nn.Linear(d, d),
-            )
             self.interaction_region_mlp = nn.Sequential(
                 nn.LayerNorm(region_dim),
                 nn.Linear(region_dim, d),
-                nn.SiLU(),
-                nn.Dropout(float(config.dropout)),
-                nn.Linear(d, d),
-            )
-            self.interaction_region_fuse = nn.Sequential(
-                nn.LayerNorm(d * 2),
-                nn.Linear(d * 2, d),
                 nn.SiLU(),
                 nn.Dropout(float(config.dropout)),
                 nn.Linear(d, d),
@@ -194,6 +180,20 @@ class RefineV2ConditionEncoder(nn.Module):
                 nn.Linear(d, d),
             )
             if bool(config.use_hand_target_spatial_attention):
+                self.interaction_arm_query_mlp = nn.Sequential(
+                    nn.LayerNorm(d * 2 + 4),
+                    nn.Linear(d * 2 + 4, d),
+                    nn.SiLU(),
+                    nn.Dropout(float(config.dropout)),
+                    nn.Linear(d, d),
+                )
+                self.interaction_region_fuse = nn.Sequential(
+                    nn.LayerNorm(d * 2),
+                    nn.Linear(d * 2, d),
+                    nn.SiLU(),
+                    nn.Dropout(float(config.dropout)),
+                    nn.Linear(d, d),
+                )
                 self.interaction_blocks = nn.ModuleList(
                     [
                         RefineV2SpatialInteractionBlock(
@@ -302,17 +302,6 @@ class RefineV2ConditionEncoder(nn.Module):
             primary_vec = primary_relative_vector_window.float().transpose(1, 2)
             primary_dist = primary_relative_dist_window.float().unsqueeze(-1)
             hand_query = self.interaction_query_mlp(torch.cat([frame_contact, primary_vec, primary_dist], dim=-1))
-            arm_query = self.interaction_arm_query_mlp(
-                torch.cat(
-                    [
-                        frame_contact,
-                        global_condition.unsqueeze(1).expand_as(frame_contact),
-                        primary_vec,
-                        primary_dist,
-                    ],
-                    dim=-1,
-                )
-            )
             region_parts = [
                 topk_relative_vectors_window.float().permute(0, 3, 1, 2),
                 topk_relative_dists_window.float().transpose(1, 2).unsqueeze(-1),
@@ -336,14 +325,25 @@ class RefineV2ConditionEncoder(nn.Module):
                     ]
                 )
             region_tokens = self.interaction_region_mlp(torch.cat(region_parts, dim=-1))
-            region_cond = (topk_region_emb + topk_score_emb).unsqueeze(1).expand(
-                -1,
-                region_tokens.shape[1],
-                -1,
-                -1,
-            )
-            region_tokens = self.interaction_region_fuse(torch.cat([region_tokens, region_cond], dim=-1))
             if self.interaction_blocks is not None:
+                arm_query = self.interaction_arm_query_mlp(
+                    torch.cat(
+                        [
+                            frame_contact,
+                            global_condition.unsqueeze(1).expand_as(frame_contact),
+                            primary_vec,
+                            primary_dist,
+                        ],
+                        dim=-1,
+                    )
+                )
+                region_cond = (topk_region_emb + topk_score_emb).unsqueeze(1).expand(
+                    -1,
+                    region_tokens.shape[1],
+                    -1,
+                    -1,
+                )
+                region_tokens = self.interaction_region_fuse(torch.cat([region_tokens, region_cond], dim=-1))
                 bt = int(region_tokens.shape[0] * region_tokens.shape[1])
                 num_regions = int(region_tokens.shape[2])
                 hand_query_bt = hand_query.reshape(bt, 1, -1)
@@ -360,14 +360,16 @@ class RefineV2ConditionEncoder(nn.Module):
                 region_tokens = region_tokens_bt.reshape_as(region_tokens)
                 pooled_regions = region_tokens.mean(dim=2)
                 interaction = 0.5 * (hand_query + arm_query)
+                arm_condition_src = arm_query
             else:
                 scores = (hand_query.unsqueeze(2) * region_tokens).sum(dim=-1) / math.sqrt(float(hand_query.shape[-1]))
                 attn = torch.softmax(scores, dim=2)
                 interaction = (attn.unsqueeze(-1) * region_tokens).sum(dim=2)
                 pooled_regions = interaction
+                arm_condition_src = frame_contact
             frame_contact = frame_contact + interaction
             hand_interaction_condition = self.hand_interaction_mlp(torch.cat([pooled_regions, hand_query], dim=-1))
-            arm_interaction_condition = self.arm_interaction_mlp(torch.cat([pooled_regions, arm_query], dim=-1))
+            arm_interaction_condition = self.arm_interaction_mlp(torch.cat([pooled_regions, arm_condition_src], dim=-1))
         per_frame_condition = self.frame_fuse(
             torch.cat([frame_contact, global_condition.unsqueeze(1).expand_as(frame_contact)], dim=-1)
         )
