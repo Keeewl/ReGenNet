@@ -133,9 +133,18 @@ class ClipInferenceArtifacts:
     pack: dict[str, Any]
 
 
+class _ReactionLikeDict:
+    def __init__(self, payload: dict[str, Any]):
+        self._payload = dict(payload)
+        self.files = tuple(self._payload.keys())
+
+    def __getitem__(self, key: str):
+        return self._payload[key]
+
+
 class _SingleReactionDataset:
     def __init__(self, reaction: dict[str, np.ndarray]):
-        self.reaction = reaction
+        self.reaction = _ReactionLikeDict(reaction)
 
 
 def _build_single_batch(
