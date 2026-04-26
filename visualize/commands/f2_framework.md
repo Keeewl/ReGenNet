@@ -12,6 +12,86 @@ python visualize/viewer/snapshot_viewer.py \
 ```
 
 
+
+### F2_Framework_Handshake
+
+GT Video:
+
+```bash
+cd visualize/viewer
+python data_viewer.py \
+  --dataset interx \
+  --data_dir ../../outputs/interx_regen_train_restored_height \
+  --texts_dir ''
+```
+
+CNetV5 Video:
+
+```bash
+cd visualize/viewer
+python data_viewer.py \
+  --dataset interx \
+  --data_dir ../../outputs/cnetv5_interx_handshake_online_200K/motions \
+  --texts_dir '' \
+  --title 'cnetv5-interx-handshake'
+```
+
+GT snapshot (162):
+
+```bash
+python visualize/viewer/snapshot_viewer.py \
+  --dataset interx \
+  --data_dir outputs/interx_regen_train_restored_height \
+  --clip_name G002T000A001R005 \
+  --frame_ids 0 14 69 92 \
+  --offset_dir 1 0 1 \
+  --spacing 1.0 \
+  --time_gradient
+```
+
+CNetV5 snapshot (stage1 input):
+
+```bash
+python visualize/viewer/snapshot_viewer.py \
+  --dataset interx \
+  --data_dir outputs/cnetv5_interx_handshake_online_200K/motions \
+  --clip_name 0001_Handshake \
+  --frame_ids 0 14 69 91 \
+  --offset_dir 1 0 0 \
+  --spacing 1.0 \
+  --time_gradient
+```
+
+CNetV5 snapshot (stage1 output, stage2 input):
+
+```bash
+python visualize/viewer/snapshot_viewer.py \
+  --dataset interx \
+  --data_dir outputs/cnetv5_interx_handshake_online_200K/motions \
+  --clip_name 0001_Handshake \
+  --frame_ids 0 14 69 91 \
+  --offset_dir 0 0 1 \
+  --spacing 2.0 \
+  --time_gradient
+```
+
+CNetV5 snapshot (stage1 output, stage2 input):
+
+```bash
+python visualize/viewer/snapshot_viewer.py \
+  --dataset interx \
+  --data_dir outputs/cnetv5_interx_handshake_online_200K/motions \
+  --clip_name 0001_Handshake \
+  --frame_ids 0 14 79 91 \
+  --offset_dir 0 0 1 \
+  --spacing 2.0 \
+  --time_gradient
+```
+
+
+
+
+
 ## 4-part actor attention highlight
 
 These commands keep the actor in the original blue style and render one actor

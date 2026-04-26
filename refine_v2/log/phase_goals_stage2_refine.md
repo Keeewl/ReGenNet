@@ -1345,3 +1345,36 @@ Then use those contact metrics to update feature/model/loss.
       - train / window eval / contact eval / full-sequence eval / vis export / diagnose / aitviewer
     - note:
       - `refine_v2/log/2026-04-24_exp8b_transl_relax_plan.md`
+  - exp8b transl-relax evaluation completed:
+    - window-level:
+      - `gt_contact_contact_dist_improvement = 0.003091907999345312`
+      - `refined_contact_f1 = 0.82147090909662`
+      - `topk_refined_contact_f1 = 0.8292480359936559`
+      - transl residual increased while boundary stayed stable
+    - full-sequence:
+      - `refined_contact_f1 = 0.7941684977507704`
+      - `gt_contact_contact_dist_improvement = 0.0018250503344461322`
+      - `surrogate_penetration_depth_gap_improvement = 0.000270589254796505`
+    - comparison against exp8:
+      - exp8b gets slight local gains on GT-contact distance
+      - but does not beat exp8 on full-sequence contact main metrics
+    - conclusion:
+      - transl relaxation is a limited calibration handle, not a new main direction
+      - keep `exp8_interaction_v1_10k` as the final Stage2 main result
+      - keep exp8b as the final transl-relax calibration result
+    - detailed note:
+      - `refine_v2/log/2026-04-25_exp8b_transl_relax_eval_summary.md`
+  - stage1 clip -> stage2 exp8 inference bridge added:
+    - purpose:
+      - run the best Stage2 model directly on one viewer-ready Stage1 clip
+      - support strict one-to-one snapshot comparison for the same clip before/after Stage2
+    - implementation:
+      - `refine_v2/tools/infer_refiner_on_viewer_clip.py`
+      - `refine_v2/cli_infer_refiner_on_viewer_clip.py`
+    - command set:
+      - server-side inference:
+        - `refine_v2/commands/visual/25_infer_refiner_on_stage1_clip_exp8.sh`
+      - local snapshot viewing:
+        - `refine_v2/commands/visual/26_view_snapshot_refined_stage1_clip_exp8.sh`
+    - note:
+      - `refine_v2/log/2026-04-26_stage1_clip_exp8_inference_bridge.md`
