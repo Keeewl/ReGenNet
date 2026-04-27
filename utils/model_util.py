@@ -5,6 +5,7 @@ from model.cnet.cnet_v3 import CNetV3
 from model.cnet.cnet_v4 import CNetV4
 from model.cnet.cnet_v5 import CNetV5
 from model.ablation.cnet_v5_actor_bodyhand import CNetV5ActorBodyHand
+from model.ablation.cnet_v5_actor_globalonly import CNetV5ActorGlobalOnly
 from diffusion import gaussian_diffusion as gd
 from diffusion.respace import SpacedDiffusion, space_timesteps
 
@@ -48,6 +49,11 @@ def create_model_and_diffusion(args, data):
         if not args.unconstrained:
             raise ValueError("CNetV5 actor-bodyhand ablation currently supports no_cond only; run with --unconstrained.")
         model = CNetV5ActorBodyHand(**get_model_args(args, data))
+        args.num_person = 1 # Attention here
+    elif setting == 'cnet_v5_actor_globalonly':
+        if not args.unconstrained:
+            raise ValueError("CNetV5 actor-globalonly ablation currently supports no_cond only; run with --unconstrained.")
+        model = CNetV5ActorGlobalOnly(**get_model_args(args, data))
         args.num_person = 1 # Attention here
     diffusion = create_gaussian_diffusion(args)
     return model, diffusion

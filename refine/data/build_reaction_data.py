@@ -211,6 +211,10 @@ def _get_model_ctor(setting):
         from model.ablation.cnet_v5_actor_bodyhand import CNetV5ActorBodyHand
 
         return CNetV5ActorBodyHand
+    if setting == "cnet_v5_actor_globalonly":
+        from model.ablation.cnet_v5_actor_globalonly import CNetV5ActorGlobalOnly
+
+        return CNetV5ActorGlobalOnly
     raise ValueError(f"Unsupported Stage1 setting for reaction_data build: {setting}")
 
 
