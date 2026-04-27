@@ -1,3 +1,13 @@
+## Table1: HiReact stage1 STGCN metric
+
+Protocol: 
+1. Inter-X **full** datasets.
+2. **Canonical** space.
+3. **Online, unconstrained** setting (no text).
+4. Train for 200K steps, 5 sampling step.
+
+---
+
 <table class="paper-table">
   <thead>
     <tr>

@@ -130,22 +130,49 @@ python visualize/viewer/snapshot_viewer.py \
 
 
 
+#### Feature
 
-CNetV5 snapshot (stage1 output, stage2 input):
+CNetV5 snapshot (show distance):
 
 ```bash
 python visualize/viewer/snapshot_viewer.py \
   --dataset interx \
   --data_dir outputs/cnetv5_interx_handshake_online_200K/motions \
   --clip_name 0001_Handshake \
-  --frame_ids 83 84 \
+  --frame_ids 84 \
   --offset_dir 0 0 1 \
-  --spacing 0 \
+  --spacing 1.8 \
   --time_gradient
 ```
 
+CNetV5 snapshot (show velocity):
 
+```bash
+python visualize/viewer/velocity/velocity_viewer.py \
+  --dataset interx \
+  --data_dir outputs/cnetv5_interx_handshake_online_200K/motions \
+  --clip_name 0001_Handshake \
+  --current_frame 84 \
+  --actor_prev_frame 65 \
+  --reactor_prev_frame 51 \
+  --ghost_alpha 0.50 \
+  --ghost_white_mix 0.15
+  --title "Velocity: 0001_Handshake"
+```
 
+CNetV5 snapshot (show heatmap):
+
+```bash
+python visualize/viewer/heatmap/heatmap_viewer.py \
+  --dataset interx \
+  --data_dir outputs/cnetv5_interx_handshake_online_200K/motions \
+  --clip_name 0001_Handshake \
+  --frame_id 84 \
+  --actor_hand_side auto \
+  --tau_contact 0.005 \
+  --max_dist 0.20 \
+  --title "Heatmap: 0001_Handshake"
+```
 
 
 
