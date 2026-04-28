@@ -83,18 +83,17 @@ def _build_parser() -> argparse.ArgumentParser:
         type=str,
         help="Path to Inter-X raw motions root used for restored export.",
     )
-    parser.add_argument(
-        "--interaction_order",
-        default=_default_interx_paths()["interaction_order"],
-        type=str,
-        help="Path to Inter-X interaction_order.pkl.",
-    )
     return parser
 
 
 def _load_args():
     parser = _build_parser()
     args = parse_and_load_from_model_wo_data(parser)
+    defaults = _default_interx_paths()
+    if not getattr(args, "interaction_order", ""):
+        args.interaction_order = defaults["interaction_order"]
+    if not getattr(args, "raw_motions_root", ""):
+        args.raw_motions_root = defaults["raw_motions_root"]
     if args.dataset == "interx":
         if int(args.num_person) == 1:
             args.num_person = 2
