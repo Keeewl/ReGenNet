@@ -1,8 +1,25 @@
-### F3_Framework_Handshake
+### F3_compare_Handshake
+
+
+#### Candidation
+
+highfive, handwrestling, messagingleg, dance
+
+```bash
+python -m visualize.refine_v2.view_refiner_vis_pack_ait \
+  --vis_pack_path refine_v2/save/visual_hireact/highfive/vis_pack_random20/refiner_vis_pack.npz \
+  --sequence_index 0 \
+  --mode coarse_refined_gt \
+  --fps 30 \
+  --window_scale 0.9
+```
+
+
+
 
 #### Video
 
-GT Video:
+GT Video (idx 162):
 
 ```bash
 cd visualize/viewer
@@ -45,61 +62,28 @@ python data_viewer.py \
   --title 'stage1-clip-refined-exp8'
 ```
 
-#### Snapshot
 
-GT snapshot (162):
 
-```bash
-python visualize/viewer/snapshot_viewer.py \
-  --dataset interx \
-  --data_dir outputs/interx_regen_train_restored_height \
-  --clip_name G002T000A001R005 \
-  --frame_ids 0 14 69 92 \
-  --offset_dir 1 0 1 \
-  --spacing 1.0 \
-  --time_gradient
-```
 
-CNetV5 snapshot (stage1 input):
+
+
+#### Snapshot-Handshake
+
+ReGenNet:
 
 ```bash
 python visualize/viewer/snapshot_viewer.py \
   --dataset interx \
-  --data_dir outputs/cnetv5_interx_handshake_online_200K/motions \
-  --clip_name 0001_Handshake \
-  --frame_ids 0 14 69 91 \
-  --offset_dir 1 0 0 \
-  --spacing 1.0 \
-  --time_gradient
-```
-
-CNetV5 snapshot (stage1 output, stage2 input):
-
-```bash
-python visualize/viewer/snapshot_viewer.py \
-  --dataset interx \
-  --data_dir outputs/cnetv5_interx_handshake_online_200K/motions \
-  --clip_name 0001_Handshake \
-  --frame_ids 91 69 14 0 \
-  --offset_dir 1.1 0 -0.5 \
-  --spacing 1.3 \
-  --time_gradient
-```
-
-CNetV5 snapshot (stage1 output, stage2 input):
-
-```bash
-python visualize/viewer/snapshot_viewer.py \
-  --dataset interx \
-  --data_dir outputs/cnetv5_interx_handshake_online_200K/motions \
+  --data_dir outputs/cmdm_interx_handshake_online_200K/motions \
   --clip_name 0001_Handshake \
   --frame_ids 14 84 91 124 \
-  --offset_dir 0 0 1 \
-  --spacing 1.8 \
-  --time_gradient
+  --offset_dir 1 0 1 \
+  --spacing 1 \
+  --time_gradient \
+  --title 'ReGenNet'
 ```
 
-Refine snapshot (stage2 output):
+HiReact:
 
 ```bash
 python visualize/viewer/snapshot_viewer.py \
@@ -107,13 +91,22 @@ python visualize/viewer/snapshot_viewer.py \
   --data_dir refine_v2/save/infer/refiner_v2_exp8_on_stage1_clip_0001_handshake/refined \
   --clip_name 0001_Handshake \
   --frame_ids 14 84 91 124 \
-  --offset_dir 0 0 1 \
-  --spacing 1.8 \
-  --time_gradient
+  --offset_dir 1 0 1 \
+  --spacing 1 \
+  --time_gradient \
+  --title 'HiReact'
 ```
 
+Real:
 
-
-
-
-
+```bash
+python visualize/viewer/snapshot_viewer.py \
+  --dataset interx \
+  --data_dir outputs/interx_regen_train_restored_height \
+  --clip_name G002T000A001R005 \
+  --frame_ids 14 84 91 124 \
+  --offset_dir 1 0 1 \
+  --spacing 1 \
+  --time_gradient \
+  --title 'Real'
+```

@@ -1378,3 +1378,25 @@ Then use those contact metrics to update feature/model/loss.
         - `refine_v2/commands/visual/26_view_snapshot_refined_stage1_clip_exp8.sh`
     - note:
       - `refine_v2/log/2026-04-26_stage1_clip_exp8_inference_bridge.md`
+  - single-stage1 infer/export bridge added:
+    - purpose:
+      - support strict GT / Stage1 baseline / Stage2-refined comparison for one `dataset_key`
+      - baseline can be `cmdm` or `cnetv5`
+    - implementation:
+      - `sample/infer_single_stage1_clip.py`
+    - commands:
+      - `refine_v2/commands/visual/27_infer_single_stage1_cmdm_by_dataset_key.sh`
+      - `refine_v2/commands/visual/28_infer_single_stage1_cnetv5_by_dataset_key.sh`
+    - note:
+      - `refine_v2/log/2026-04-28_single_stage1_infer_export.md`
+  - single-stage1 infer/export bridge added:
+    - purpose:
+      - support strict GT / Stage1 baseline / Stage2-refined comparison for one `dataset_key`
+      - baseline can be `cmdm` or `cnetv5`
+    - implementation:
+      - `sample/infer_single_stage1_clip.py`
+    - commands:
+      - `refine_v2/commands/visual/27_infer_single_stage1_cmdm_by_dataset_key.sh`
+      - `refine_v2/commands/visual/28_infer_single_stage1_cnetv5_by_dataset_key.sh`
+    - note:
+      - `refine_v2/log/2026-04-28_single_stage1_infer_export.md`
