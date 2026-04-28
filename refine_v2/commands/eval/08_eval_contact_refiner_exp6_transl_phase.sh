@@ -1,7 +1,7 @@
 conda activate regennet5090
 
 ####### refine_v2 exp6: contact eval for transl-only phase refiner #######
-export CUDA_VISIBLE_DEVICES=0
+export CUDA_VISIBLE_DEVICES=2
 python -m refine_v2.cli_eval_contact_refiner \
   --checkpoint refine_v2/save/train/refiner_v2_exp6_transl_phase_10k/model_best.pt \
   --reaction_data_path refine/dataset/train/reaction_data.npz \

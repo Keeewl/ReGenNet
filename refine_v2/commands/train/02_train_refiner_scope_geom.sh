@@ -1,7 +1,7 @@
 conda activate regennet5090
 
 ####### refine_v2_v1: scope-aware geometry-conditioned refiner, 10k steps #######
-export CUDA_VISIBLE_DEVICES=0
+export CUDA_VISIBLE_DEVICES=7
 python -m refine_v2.cli_train_refiner \
   --reaction_data_path refine/dataset/train/reaction_data.npz \
   --contact_labels_path refine_v2/outputs/train/contact_labels_gt.npz \

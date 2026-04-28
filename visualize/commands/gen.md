@@ -42,7 +42,7 @@ Restored body shape + raw height/global alignment:
 ```bash
 python visualize/converters/convert_results_to_motions.py \
   --outputs_root outputs \
-  --runs cnetv5_interx_online_200K \
+  --runs cnetv5_interx_handshake_online_200K \
   --shape_mode restored_shape_height \
   --overwrite
 ```
