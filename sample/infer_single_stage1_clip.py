@@ -31,10 +31,6 @@ from visualize.converters.convert_results_to_motions import (
     apply_world_align_root_only,
     build_params,
     build_rot_matrix_from_flags,
-    load_raw_shapes,
-    load_raw_trans,
-    resolve_role_shapes,
-    select_raw_trans,
 )
 
 
@@ -57,12 +53,14 @@ def _default_interx_paths() -> dict[str, str]:
     repo_motions_root = os.path.join(repo_interx_root, "motions")
     sibling_motions_root = os.path.join(sibling_interx_root, "datasets", "interx", "motions")
     raw_motions_root = repo_motions_root if os.path.isdir(repo_motions_root) else sibling_motions_root
+    restoration_meta_path = os.path.join(repo_interx_root, "cache", "interx_restoration_meta.npz")
     return {
         "train": os.path.join(repo_interx_root, "regen", "train.h5"),
         "val": os.path.join(repo_interx_root, "regen", "val.h5"),
         "test": os.path.join(repo_interx_root, "regen", "test.h5"),
         "raw_motions_root": raw_motions_root,
         "interaction_order": os.path.join(repo_interx_root, "annots", "interaction_order.pkl"),
+        "restoration_meta_path": restoration_meta_path,
     }
 
 
@@ -87,6 +85,12 @@ def _build_parser() -> argparse.ArgumentParser:
         type=str,
         help="Path to Inter-X raw motions root used for restored export.",
     )
+    parser.add_argument(
+        "--restoration_meta_path",
+        default=_default_interx_paths()["restoration_meta_path"],
+        type=str,
+        help="Path to Inter-X restoration metadata package used for restored export.",
+    )
     return parser
 
 
@@ -98,6 +102,8 @@ def _load_args():
         args.interaction_order = defaults["interaction_order"]
     if not getattr(args, "raw_motions_root", ""):
         args.raw_motions_root = defaults["raw_motions_root"]
+    if not getattr(args, "restoration_meta_path", ""):
+        args.restoration_meta_path = defaults["restoration_meta_path"]
     if args.dataset == "interx":
         if int(args.num_person) == 1:
             args.num_person = 2
@@ -118,9 +124,22 @@ def _make_dataset(args, *, data_path: str, split: str):
         body_model=args.body_model,
         split=split,
         enable_restoration_metadata=True,
+        restoration_meta_path=args.restoration_meta_path,
         interaction_order_path=args.interaction_order,
         raw_motions_root=args.raw_motions_root,
     )
+
+
+def _gender_name_from_id(value) -> str:
+    try:
+        value = int(value)
+    except (TypeError, ValueError):
+        value = 0
+    if value == 1:
+        return "male"
+    if value == 2:
+        return "female"
+    return "neutral"
 
 
 def _resolve_dataset_bundle(args) -> _DatasetBundle:
@@ -349,10 +368,10 @@ def _export_motion_clip(args, sample_out: dict[str, object], out_dir: str):
     frame_ix = np.asarray(item.get("frame_ix", np.empty((0,), dtype=np.int64)), dtype=np.int64)
     downsample = int(item.get("downsample", 4 if args.dataset == "interx" else 1))
     if args.shape_mode in {"restored", "restored_shape_height"}:
-        betas_p1, gender_p1, betas_p2, gender_p2 = load_raw_shapes(args.raw_motions_root, dataset_key)
-        actor_shape, reactor_shape = resolve_role_shapes(actor_is_p1, betas_p1, gender_p1, betas_p2, gender_p2)
-        p1_betas, p1_gender = actor_shape
-        p2_betas, p2_gender = reactor_shape
+        p1_betas = np.asarray(item.get("actor_betas", np.zeros((10,), dtype=np.float32)), dtype=np.float32)
+        p2_betas = np.asarray(item.get("reactor_betas", np.zeros((10,), dtype=np.float32)), dtype=np.float32)
+        p1_gender = _gender_name_from_id(item.get("actor_gender_id", 0))
+        p2_gender = _gender_name_from_id(item.get("reactor_gender_id", 0))
 
     meta_common = {
         "dataset_key": dataset_key,
@@ -378,12 +397,14 @@ def _export_motion_clip(args, sample_out: dict[str, object], out_dir: str):
 
     trans_p1 = trans_p2 = None
     if args.shape_mode == "restored_shape_height":
-        raw_trans_p1, raw_trans_p2 = load_raw_trans(args.raw_motions_root, dataset_key)
-        raw_indices = frame_ix * downsample if frame_ix.size else None
-        actor_trans = select_raw_trans(raw_trans_p1 if actor_is_p1 == 1 else raw_trans_p2, raw_indices, length)
-        reactor_trans = select_raw_trans(raw_trans_p2 if actor_is_p1 == 1 else raw_trans_p1, raw_indices, length)
-        trans_p1 = actor_trans
-        trans_p2 = reactor_trans
+        trans_p1 = np.asarray(
+            item.get("actor_raw_trans_clip", sample_out["actor_cmotion"][55, 0:3, :].T),
+            dtype=np.float32,
+        )[:length]
+        trans_p2 = np.asarray(
+            item.get("reactor_raw_trans_clip", sample_out["reactor_output"][55, 0:3, :].T),
+            dtype=np.float32,
+        )[:length]
 
     p1_params = build_params(
         sample_out["actor_cmotion"],
@@ -424,6 +445,7 @@ def main():
         "setting": args.setting,
         "baseline_family": getattr(args, "baseline_family", "regennet"),
         "shape_mode": args.shape_mode,
+        "restoration_meta_path": args.restoration_meta_path,
         "output_dir": os.path.abspath(args.output_dir),
         "motion_clip_dir": os.path.abspath(os.path.join(args.output_dir, "motions", args.dataset_key)),
     }

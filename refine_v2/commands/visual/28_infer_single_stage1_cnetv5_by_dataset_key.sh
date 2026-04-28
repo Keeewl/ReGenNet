@@ -13,4 +13,5 @@ python -m sample.infer_single_stage1_clip \
   --dataset_key "${DATASET_KEY}" \
   --output_dir "${OUTPUT_DIR}" \
   --shape_mode restored_shape_height \
+  --restoration_meta_path dataset/interx/cache/interx_restoration_meta.npz \
   --raw_motions_root dataset/interx/motions
