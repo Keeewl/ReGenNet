@@ -53,12 +53,16 @@ def _repo_root() -> str:
 def _default_interx_paths() -> dict[str, str]:
     repo_root = _repo_root()
     sibling_interx_root = os.path.join(os.path.dirname(repo_root), "Inter-X")
+    repo_interx_root = os.path.join(repo_root, "dataset", "interx")
+    repo_motions_root = os.path.join(repo_interx_root, "motions")
+    sibling_motions_root = os.path.join(sibling_interx_root, "datasets", "interx", "motions")
+    raw_motions_root = repo_motions_root if os.path.isdir(repo_motions_root) else sibling_motions_root
     return {
-        "train": os.path.join(repo_root, "dataset", "interx", "regen", "train.h5"),
-        "val": os.path.join(repo_root, "dataset", "interx", "regen", "val.h5"),
-        "test": os.path.join(repo_root, "dataset", "interx", "regen", "test.h5"),
-        "raw_motions_root": os.path.join(sibling_interx_root, "datasets", "interx", "motions"),
-        "interaction_order": os.path.join(repo_root, "dataset", "interx", "annots", "interaction_order.pkl"),
+        "train": os.path.join(repo_interx_root, "regen", "train.h5"),
+        "val": os.path.join(repo_interx_root, "regen", "val.h5"),
+        "test": os.path.join(repo_interx_root, "regen", "test.h5"),
+        "raw_motions_root": raw_motions_root,
+        "interaction_order": os.path.join(repo_interx_root, "annots", "interaction_order.pkl"),
     }
 
 
