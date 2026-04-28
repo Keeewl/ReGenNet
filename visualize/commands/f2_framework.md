@@ -95,9 +95,9 @@ python visualize/viewer/snapshot_viewer.py \
   --dataset interx \
   --data_dir outputs/cnetv5_interx_handshake_online_200K/motions \
   --clip_name 0001_Handshake \
-  --frame_ids 0 14 69 91 \
-  --offset_dir 0 0 1 \
-  --spacing 2.0 \
+  --frame_ids 91 69 14 0 \
+  --offset_dir 1.1 0 -0.5 \
+  --spacing 1.3 \
   --time_gradient
 ```
 
@@ -173,6 +173,24 @@ python visualize/viewer/heatmap/heatmap_viewer.py \
   --max_dist 0.20 \
   --title "Heatmap: 0001_Handshake"
 ```
+
+
+
+
+#### Residual
+
+```bash
+python visualize/viewer/residual/residual_viewer.py \
+  --dataset interx \
+  --coarse_data_dir outputs/cnetv5_interx_handshake_online_200K/motions \
+  --refined_data_dir refine_v2/save/infer/refiner_v2_exp8_on_stage1_clip_0001_handshake/refined \
+  --clip_name 0001_Handshake \
+  --frame_id 124 \
+  --ghost_alpha 0.30 \
+  --ghost_white_mix 0.18 \
+  --title "Residual: 0001_Handshake"
+```
+
 
 
 

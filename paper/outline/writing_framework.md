@@ -9,6 +9,7 @@
 
 - Current title:
   `HiReact: Fine-Grained Human Reaction Generation via Multi-Scale Interaction Modeling and Contact-Aware Two-Stage Refinement`
+  `HiReact: Human Reaction Generation via Multi-Scale Modeling and Multi-Stage Refinement`
 
 ## Core Positioning
 
