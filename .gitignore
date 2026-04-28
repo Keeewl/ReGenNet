@@ -193,4 +193,5 @@ tmp/
 stage2_old/refine_v2
 
 # paper
+references_papers/
 *.pdf

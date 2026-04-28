@@ -12,7 +12,4 @@ python -m sample.infer_single_stage1_clip \
   --dataset interx \
   --dataset_key "${DATASET_KEY}" \
   --output_dir "${OUTPUT_DIR}" \
-  --shape_mode restored_shape_height \
-  --reaction_mode online \
-  --online_strategy sliding_window \
-  --guidance_param 2.5
+  --shape_mode restored_shape_height
