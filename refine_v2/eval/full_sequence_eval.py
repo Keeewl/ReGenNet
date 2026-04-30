@@ -14,6 +14,7 @@ from refine_v2.data.schema import to_jsonable
 from refine_v2.data.restored_space import RestoredBodyModelForward
 from refine_v2.model.regions import load_region_map, region_map_summary
 from refine_v2.eval.full_sequence_stitch import stitch_refiner_full_sequences
+from refine_v2.eval.full_sequence_stitch import build_coarse_only_full_sequence_pack
 
 
 def _safe_div(num: float, den: float) -> float:
@@ -194,11 +195,11 @@ def _accumulate_by_action(
 @torch.no_grad()
 def evaluate_full_sequence(
     *,
-    checkpoint_path: str,
+    checkpoint_path: str = "",
     reaction_data_path: str,
     contact_labels_path: str,
     subset_manifest_path: str,
-    selector_windows_path: str,
+    selector_windows_path: str = "",
     region_map_path: str,
     stgcn_model_path: str,
     include_buckets: list[str],
@@ -217,22 +218,33 @@ def evaluate_full_sequence(
     dataset: str = "interx",
     body_model: str = "smplx",
     num_classes: int = 0,
+    coarse_only: bool = False,
 ) -> dict[str, Any]:
-    stitched = stitch_refiner_full_sequences(
-        checkpoint_path=checkpoint_path,
-        reaction_data_path=reaction_data_path,
-        contact_labels_path=contact_labels_path,
-        subset_manifest_path=subset_manifest_path,
-        selector_windows_path=selector_windows_path,
-        include_buckets=include_buckets,
-        geometry_feature_cache_path=geometry_feature_cache_path,
-        selected_action_types=selected_action_types,
-        max_sequences_per_action_type=max_sequences_per_action_type,
-        sample_seed=sample_seed,
-        batch_size=batch_size,
-        num_workers=num_workers,
-        device=device,
-    )
+    if coarse_only:
+        stitched = build_coarse_only_full_sequence_pack(
+            reaction_data_path=reaction_data_path,
+            subset_manifest_path=subset_manifest_path,
+            include_buckets=include_buckets,
+            selected_action_types=selected_action_types,
+            max_sequences_per_action_type=max_sequences_per_action_type,
+            sample_seed=sample_seed,
+        )
+    else:
+        stitched = stitch_refiner_full_sequences(
+            checkpoint_path=checkpoint_path,
+            reaction_data_path=reaction_data_path,
+            contact_labels_path=contact_labels_path,
+            subset_manifest_path=subset_manifest_path,
+            selector_windows_path=selector_windows_path,
+            include_buckets=include_buckets,
+            geometry_feature_cache_path=geometry_feature_cache_path,
+            selected_action_types=selected_action_types,
+            max_sequences_per_action_type=max_sequences_per_action_type,
+            sample_seed=sample_seed,
+            batch_size=batch_size,
+            num_workers=num_workers,
+            device=device,
+        )
     pack = stitched["pack"]
     region_map = load_region_map(region_map_path or None)
     body_forward = RestoredBodyModelForward(device=device)
@@ -352,6 +364,7 @@ def evaluate_full_sequence(
         {
             "artifact": "refine_v2_full_sequence_eval",
             "checkpoint_path": checkpoint_path,
+            "coarse_only": bool(coarse_only),
             "paths": {
                 "reaction_data_path": reaction_data_path,
                 "contact_labels_path": contact_labels_path,
@@ -388,7 +401,9 @@ def evaluate_full_sequence(
             "per_sequence_contact": per_sequence_contact,
             "notes": [
                 "This is the formal Stage2 full-sequence evaluation.",
-                "Full-sequence refined motion is built by center-weighted residual stitching over overlapping windows.",
+                "Full-sequence refined motion is built by center-weighted residual stitching over overlapping windows."
+                if not coarse_only
+                else "Coarse-only baseline mode uses refined := coarse and skips Stage2 inference/stitching.",
                 "STGCN metrics are computed in canonical/Stage1-aligned processed space after inverse restore.",
                 "Contact metrics are computed in restored pair space with restored shape.",
                 "Stage2 is interpreted as a contact-refine module, not a motion-reconstruction module.",

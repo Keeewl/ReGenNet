@@ -35,11 +35,11 @@ def _write_md(path: str, payload: dict):
 
 def build_parser():
     parser = argparse.ArgumentParser(description="Evaluate Stage1-only vs Stage1+Stage2 on stitched full sequences.")
-    parser.add_argument("--checkpoint", required=True)
+    parser.add_argument("--checkpoint", default="")
     parser.add_argument("--reaction_data_path", required=True)
     parser.add_argument("--contact_labels_path", required=True)
     parser.add_argument("--subset_manifest_path", required=True)
-    parser.add_argument("--selector_windows_path", required=True)
+    parser.add_argument("--selector_windows_path", default="")
     parser.add_argument("--region_map_path", required=True)
     parser.add_argument("--stgcn_model_path", required=True)
     parser.add_argument("--output_dir", required=True)
@@ -60,12 +60,19 @@ def build_parser():
     parser.add_argument("--body_model", default="smplx")
     parser.add_argument("--num_classes", type=int, default=0)
     parser.add_argument("--save_pack", action="store_true")
+    parser.add_argument("--coarse_only", action="store_true")
     return parser
 
 
 def main(argv=None):
     args = build_parser().parse_args(argv)
     from refine_v2.eval.full_sequence_eval import evaluate_full_sequence
+
+    if not args.coarse_only:
+        if not args.checkpoint:
+            raise ValueError("--checkpoint is required unless --coarse_only is set.")
+        if not args.selector_windows_path:
+            raise ValueError("--selector_windows_path is required unless --coarse_only is set.")
 
     payload = evaluate_full_sequence(
         checkpoint_path=args.checkpoint,
@@ -91,6 +98,7 @@ def main(argv=None):
         dataset=args.dataset,
         body_model=args.body_model,
         num_classes=args.num_classes,
+        coarse_only=args.coarse_only,
     )
     pack = payload.pop("pack", None)
     os.makedirs(args.output_dir, exist_ok=True)

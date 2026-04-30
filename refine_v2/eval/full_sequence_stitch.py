@@ -91,6 +91,101 @@ def _slice_reaction_value(arr: np.ndarray, rows: np.ndarray):
     return arr[rows]
 
 
+def build_coarse_only_full_sequence_pack(
+    *,
+    reaction_data_path: str,
+    subset_manifest_path: str,
+    include_buckets: list[str],
+    selected_action_types: list[str] | None = None,
+    max_sequences_per_action_type: int = 100,
+    sample_seed: int = 1234,
+) -> dict[str, Any]:
+    sequence_records = select_subset_sequence_records(
+        subset_manifest_path,
+        include_buckets=include_buckets,
+        selected_action_types=selected_action_types,
+        max_sequences_per_action_type=max_sequences_per_action_type,
+        sample_seed=sample_seed,
+    )
+    if not sequence_records:
+        raise ValueError("No subset sequences remain after bucket/action sampling.")
+
+    reaction = np.load(reaction_data_path, allow_pickle=True)
+    rows = np.asarray([int(item["dataset_row_index"]) for item in sequence_records], dtype=np.int64)
+    actor_motion = np.asarray(reaction["actor_motion"])[rows].astype(np.float32, copy=True)
+    coarse_motion = np.asarray(reaction["reactor_coarse"])[rows].astype(np.float32, copy=True)
+    gt_motion = np.asarray(reaction["reactor_gt"])[rows].astype(np.float32, copy=True)
+    lengths = np.asarray(reaction["lengths"])[rows].astype(np.int64, copy=True)
+    sample_indices = np.asarray(reaction["sample_indices"])[rows].astype(np.int64, copy=True)
+
+    zero_delta = np.zeros_like(coarse_motion, dtype=np.float32)
+    pack: dict[str, Any] = {
+        "actor_motion": actor_motion,
+        "reactor_gt": gt_motion,
+        "reactor_coarse": coarse_motion,
+        "reactor_refined": coarse_motion.copy(),
+        "reactor_refined_delta": zero_delta,
+        "lengths": lengths,
+        "sample_indices": sample_indices,
+        "dataset_row_indices": rows,
+        "dataset_key": np.asarray([_as_str(item.get("dataset_key", "")) for item in sequence_records], dtype=object),
+        "action_type": np.asarray([str(item.get("action_type", item.get("action_name", ""))) for item in sequence_records], dtype=object),
+        "bucket_label": np.asarray([str(item.get("bucket_label", "")) for item in sequence_records], dtype=object),
+        "space_definition": _slice_reaction_value(reaction["space_definition"], rows),
+    }
+    optional_fields = (
+        "loader_base_trans",
+        "pair_base_trans",
+        "ground_offset_y_actor",
+        "ground_offset_y_reactor",
+        "actor_betas",
+        "reactor_betas",
+        "actor_gender_id",
+        "reactor_gender_id",
+        "body_model_type",
+    )
+    for key in optional_fields:
+        if key in reaction.files:
+            pack[key] = _slice_reaction_value(reaction[key], rows)
+
+    sequence_stats = []
+    for seq_idx, item in enumerate(sequence_records):
+        valid_len = int(lengths[seq_idx])
+        sequence_stats.append(
+            {
+                "dataset_row_index": int(rows[seq_idx]),
+                "sample_index": int(sample_indices[seq_idx]),
+                "dataset_key": _as_str(item.get("dataset_key", "")),
+                "action_type": str(item.get("action_type", item.get("action_name", ""))),
+                "bucket_label": str(item.get("bucket_label", "")),
+                "length": valid_len,
+                "num_windows": 0,
+                "covered_frames": 0,
+                "covered_frame_ratio": 0.0,
+                "overlap_frames": 0,
+                "overlap_frame_ratio": 0.0,
+            }
+        )
+
+    summary = {
+        "num_sequences": int(rows.shape[0]),
+        "num_sequences_with_windows": 0,
+        "mean_windows_per_sequence": 0.0,
+        "mean_covered_frame_ratio": 0.0,
+        "mean_overlap_frame_ratio": 0.0,
+        "max_sequences_per_action_type": int(max_sequences_per_action_type),
+        "sample_seed": int(sample_seed),
+        "mode": "coarse_only",
+    }
+    return {
+        "pack": pack,
+        "sequence_records": sequence_records,
+        "sequence_stats": sequence_stats,
+        "summary": summary,
+        "resolved_geometry_feature_cache_path": "",
+    }
+
+
 @torch.no_grad()
 def stitch_refiner_full_sequences(
     *,

@@ -1389,6 +1389,28 @@ Then use those contact metrics to update feature/model/loss.
       - `refine_v2/commands/visual/28_infer_single_stage1_cnetv5_by_dataset_key.sh`
     - note:
       - `refine_v2/log/2026-04-28_single_stage1_infer_export.md`
+  - table1/table2 evaluation extension priority updated:
+    - current decision:
+      - first complete missing table2 baseline results
+      - then implement the batch Stage1 -> Stage2 bridge needed to complete table1
+    - table2 interpretation:
+      - this remains the `refine_v2` subset-based Stage2 protocol
+      - evaluation domain is the fixed contact-rich subset
+      - metrics are STGCN in canonical space and contact in restored pair space
+      - missing work is to add baseline results for:
+        - `agrol`
+        - `mdm`
+        - `mdm-gru`
+        - `regennet`
+    - table1 interpretation:
+      - current `hireact*` is still only Stage1 output
+      - true `hireact` requires:
+        - Stage1 sampled outputs
+        - batch bridge into Stage2
+        - refined STGCN evaluation
+      - this is a separate implementation step after table2 baseline completion
+    - detailed note:
+      - `refine_v2/log/2026-04-30_table1_table2_eval_extension_plan.md`
   - single-stage1 infer/export bridge added:
     - purpose:
       - support strict GT / Stage1 baseline / Stage2-refined comparison for one `dataset_key`

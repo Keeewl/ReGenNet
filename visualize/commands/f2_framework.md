@@ -185,7 +185,7 @@ python visualize/viewer/residual/residual_viewer.py \
   --coarse_data_dir outputs/cnetv5_interx_handshake_online_200K/motions \
   --refined_data_dir refine_v2/save/infer/refiner_v2_exp8_on_stage1_clip_0001_handshake/refined \
   --clip_name 0001_Handshake \
-  --frame_id 124 \
+  --frame_id 84 \
   --ghost_alpha 0.30 \
   --ghost_white_mix 0.18 \
   --title "Residual: 0001_Handshake"
