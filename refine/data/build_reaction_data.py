@@ -29,6 +29,7 @@ from refine.data.restored_space import (
 )
 from refine.data.schema import OPTIONAL_REACTION_DATA_FIELDS
 from utils.fixseed import fixseed
+from utils.online_window import sliding_window_sample
 
 
 def _load_model_args(model_path):
@@ -78,6 +79,13 @@ def _build_args(args_cli):
     _maybe_override(merged, "latent_dim", args_cli.latent_dim)
     _maybe_override(merged, "layers", args_cli.layers)
     _maybe_override(merged, "timestep_respacing", args_cli.timestep_respacing)
+    _maybe_override(merged, "reaction_mode", args_cli.reaction_mode)
+    _maybe_override(merged, "online_strategy", args_cli.online_strategy)
+    _maybe_override(merged, "window_size", args_cli.window_size)
+    _maybe_override(merged, "window_stride", args_cli.window_stride)
+    _maybe_override(merged, "window_emit", args_cli.window_emit)
+    _maybe_override(merged, "window_overlap_handling", args_cli.window_overlap_handling)
+    _maybe_override(merged, "window_pad_mode", args_cli.window_pad_mode)
     if args_cli.guidance_param is not None:
         merged["guidance_param"] = args_cli.guidance_param
     if args_cli.use_ddim:
@@ -99,6 +107,13 @@ def _build_args(args_cli):
     merged.setdefault("guidance_param", 1.0)
     merged.setdefault("use_ddim", False)
     merged.setdefault("timestep_respacing", "")
+    merged.setdefault("reaction_mode", "offline")
+    merged.setdefault("online_strategy", "sliding_window")
+    merged.setdefault("window_size", 30)
+    merged.setdefault("window_stride", 10)
+    merged.setdefault("window_emit", "stride")
+    merged.setdefault("window_overlap_handling", "latest")
+    merged.setdefault("window_pad_mode", "edge")
     merged.setdefault("split", args_cli.split)
     merged.setdefault("cond_mask_prob", 0.0)
     merged.setdefault("unconstrained", True)
@@ -484,6 +499,13 @@ def parse_args():
     parser.add_argument("--guidance_param", default=None, type=float)
     parser.add_argument("--timestep_respacing", default=None, type=str)
     parser.add_argument("--use_ddim", action="store_true")
+    parser.add_argument("--reaction_mode", default=None, choices=["offline", "online"], type=str)
+    parser.add_argument("--online_strategy", default=None, choices=["sliding_window", "autoregressive"], type=str)
+    parser.add_argument("--window_size", default=None, type=int)
+    parser.add_argument("--window_stride", default=None, type=int)
+    parser.add_argument("--window_emit", default=None, choices=["last", "stride"], type=str)
+    parser.add_argument("--window_overlap_handling", default=None, choices=["latest"], type=str)
+    parser.add_argument("--window_pad_mode", default=None, choices=["edge", "zero"], type=str)
     parser.add_argument("--enable_restoration_metadata", default=None, type=lambda x: str(x).lower() in {"1", "true", "yes"})
     parser.add_argument("--restoration_meta_path", default="", type=str)
     parser.add_argument("--raw_motions_root", default="", type=str)
@@ -530,6 +552,19 @@ def main():
         )
 
     sample_fn = diffusion.ddim_sample_loop if args.use_ddim else diffusion.p_sample_loop
+    model_window_size = None
+    if getattr(model, "arch", None) == "mlp":
+        try:
+            model_window_size = int(model.mlp.motion_mlp.mlps[0].fc0.in_channels)
+        except Exception:
+            model_window_size = None
+    if (
+        args.reaction_mode == "online"
+        and args.online_strategy == "sliding_window"
+        and model_window_size is not None
+        and args.window_size > model_window_size
+    ):
+        raise ValueError("window_size must be <= model MLP sequence length")
 
     actor_chunks = []
     gt_chunks = []
@@ -571,14 +606,47 @@ def main():
                     device=device,
                 )
 
-            sample = sample_fn(
-                model,
-                motion.shape,
-                clip_denoised=False,
-                model_kwargs=cond,
-                progress=False,
-                noise=None,
-            )
+            if args.reaction_mode == "online" and args.online_strategy == "sliding_window":
+                sample, _ = sliding_window_sample(
+                    model,
+                    diffusion,
+                    cond,
+                    window_size=args.window_size,
+                    window_stride=args.window_stride,
+                    window_emit=args.window_emit,
+                    pad_mode=args.window_pad_mode,
+                    overlap_handling=args.window_overlap_handling,
+                    sample_fn=sample_fn,
+                    model_window_size=model_window_size,
+                )
+            elif args.reaction_mode == "online" and args.online_strategy == "autoregressive":
+                cmotion_bak = cond["y"]["cmotion"]
+                batch_size, njoints, nfeats, nframes = cmotion_bak.shape
+                cmotion = torch.zeros_like(cmotion_bak)
+                output = torch.zeros((batch_size, njoints, nfeats, nframes), device=cmotion_bak.device)
+                for frame_idx in range(nframes):
+                    cmotion[:, :, :, frame_idx] = cmotion_bak[:, :, :, frame_idx]
+                    cond["y"]["cmotion"] = cmotion
+                    step_sample = sample_fn(
+                        model,
+                        motion.shape,
+                        clip_denoised=False,
+                        model_kwargs=cond,
+                        progress=False,
+                        noise=None,
+                    )
+                    output[:, :, :, frame_idx] = step_sample[:, :, :, frame_idx]
+                cond["y"]["cmotion"] = cmotion_bak
+                sample = output
+            else:
+                sample = sample_fn(
+                    model,
+                    motion.shape,
+                    clip_denoised=False,
+                    model_kwargs=cond,
+                    progress=False,
+                    noise=None,
+                )
 
             keep = motion.shape[0]
             if args_cli.num_samples > 0:
