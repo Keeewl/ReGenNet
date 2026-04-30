@@ -215,6 +215,10 @@ def _get_model_ctor(setting):
         from model.ablation.cnet_v5_actor_globalonly import CNetV5ActorGlobalOnly
 
         return CNetV5ActorGlobalOnly
+    if setting == "cnet_v5_reactor_singlestream":
+        from model.ablation.cnet_v5_reactor_singlestream import CNetV5ReactorSingleStream
+
+        return CNetV5ReactorSingleStream
     raise ValueError(f"Unsupported Stage1 setting for reaction_data build: {setting}")
 
 

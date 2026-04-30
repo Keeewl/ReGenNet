@@ -207,10 +207,11 @@ def compute_time_gradient_mixes(snapshot_specs, lightest_mix: float = TIME_GRADI
         return {spec.index: 0.0 for spec in specs}
 
     lightest_mix = float(np.clip(lightest_mix, 0.0, 1.0))
-    sorted_specs = sorted(specs, key=lambda spec: (int(spec.frame_id), int(spec.index)))
-    denom = len(sorted_specs) - 1
+    # Respect the user-provided frame order instead of re-sorting by frame id.
+    ordered_specs = sorted(specs, key=lambda spec: int(spec.index))
+    denom = len(ordered_specs) - 1
     mixes = {}
-    for rank, spec in enumerate(sorted_specs):
+    for rank, spec in enumerate(ordered_specs):
         progress = rank / denom
         mixes[spec.index] = lightest_mix * (1.0 - progress)
     return mixes

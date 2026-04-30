@@ -130,7 +130,7 @@ def add_diffusion_options(parser):
 
 def add_model_options(parser):
     group = parser.add_argument_group('model')
-    group.add_argument("--setting", default='mdm', choices=['mdm', 'cmdm', 'cnet', 'cnet_v2', 'cnet_v3', 'cnet_v4', 'cnet_v5', 'cnet_v5_actor_bodyhand', 'cnet_v5_actor_globalonly'], type=str,
+    group.add_argument("--setting", default='mdm', choices=['mdm', 'cmdm', 'cnet', 'cnet_v2', 'cnet_v3', 'cnet_v4', 'cnet_v5', 'cnet_v5_actor_bodyhand', 'cnet_v5_actor_globalonly', 'cnet_v5_reactor_singlestream'], type=str,
                        help="Training MDM, CMDM, CNet, or CNetV2/V3/V4/V5 framework")
     group.add_argument("--baseline_family", default='regennet', choices=['regennet', 'mdm'], type=str,
                        help="Stage1 baseline family. 'mdm' keeps the actor-conditioned reaction shell but disables ReGenNet explicit interaction losses.")

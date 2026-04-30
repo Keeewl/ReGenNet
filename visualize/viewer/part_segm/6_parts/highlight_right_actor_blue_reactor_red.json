@@ -1,0 +1,6 @@
+{
+  "actor:right_arm": [34, 112, 196, 255],
+  "actor:right_hand": [18, 88, 172, 255],
+  "reactor:right_arm": [224, 77, 51, 255],
+  "reactor:right_hand": [224, 77, 51, 255]
+}

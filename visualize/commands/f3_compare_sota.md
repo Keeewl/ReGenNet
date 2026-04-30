@@ -76,9 +76,9 @@ python visualize/viewer/snapshot_viewer.py \
   --dataset interx \
   --data_dir outputs/cmdm_interx_handshake_online_200K/motions \
   --clip_name 0001_Handshake \
-  --frame_ids 14 84 91 124 \
+  --frame_ids 79 87 92 128 \
   --offset_dir 1 0 1 \
-  --spacing 1 \
+  --spacing 0.8 \
   --time_gradient \
   --title 'ReGenNet'
 ```
@@ -90,9 +90,9 @@ python visualize/viewer/snapshot_viewer.py \
   --dataset interx \
   --data_dir refine_v2/save/infer/refiner_v2_exp8_on_stage1_clip_0001_handshake/refined \
   --clip_name 0001_Handshake \
-  --frame_ids 14 84 91 124 \
+  --frame_ids 79 87 92 128 \
   --offset_dir 1 0 1 \
-  --spacing 1 \
+  --spacing 0.8 \
   --time_gradient \
   --title 'HiReact'
 ```
@@ -104,9 +104,9 @@ python visualize/viewer/snapshot_viewer.py \
   --dataset interx \
   --data_dir outputs/interx_regen_train_restored_height \
   --clip_name G002T000A001R005 \
-  --frame_ids 14 84 91 124 \
+  --frame_ids 79 87 92 128 \
   --offset_dir 1 0 1 \
-  --spacing 1 \
+  --spacing 0.8 \
   --time_gradient \
   --title 'Real'
 ```

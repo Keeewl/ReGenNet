@@ -55,7 +55,8 @@ def load_part_segm(path):
 
 
 def load_part_colors(path, part_names):
-    # Load {part_name: rgba}; if not provided, use a small default palette.
+    # Load {part_name: rgba}; optionally supports role-specific keys such as
+    # "actor:right_arm" / "reactor:right_arm".
     if not path:
         palette = [
             (0.90, 0.30, 0.30, 1.0),
@@ -88,7 +89,7 @@ def get_num_verts_from_layer(smplx_layer):
     return None
 
 
-def build_part_vertex_colors(smplx_layer, segm_path, colors_path):
+def build_part_vertex_colors(smplx_layer, segm_path, colors_path, base_color=None, role=None):
     # Build per-vertex RGBA colors from a part segmentation and color palette.
     segm = load_part_segm(segm_path)
     part_names = sorted(segm.keys())
@@ -98,10 +99,15 @@ def build_part_vertex_colors(smplx_layer, segm_path, colors_path):
     if num_verts is None:
         num_verts = max(max(v) for v in segm.values()) + 1
 
-    default_color = (0.7, 0.7, 0.7, 1.0)
+    default_color = base_color if base_color is not None else (0.7, 0.7, 0.7, 1.0)
     vertex_colors = np.tile(default_color, (num_verts, 1)).astype(np.float32)
     for part_name, indices in segm.items():
-        vertex_colors[np.array(indices, dtype=np.int64)] = part_colors.get(part_name, default_color)
+        color = default_color
+        if role and f"{role}:{part_name}" in part_colors:
+            color = part_colors[f"{role}:{part_name}"]
+        elif part_name in part_colors:
+            color = part_colors[part_name]
+        vertex_colors[np.array(indices, dtype=np.int64)] = color
 
     return vertex_colors
 
@@ -133,6 +139,7 @@ class SMPLX_Viewer(Viewer):
 
     def __init__(self, clip_folder='./data/', text_folder='./texts', title=None, dataset=None,
                  part_segm=None, part_colors=None, share_shape="none",
+                 soft_role_colors=False,
                  interaction_order_path=None, raw_index_root=None,
                  train_index_h5=None, val_index_h5=None, test_index_h5=None, **kwargs):
         window_title = title or self.title
@@ -157,6 +164,7 @@ class SMPLX_Viewer(Viewer):
         self.part_colors = part_colors
         self.part_vertex_colors = None
         self.share_shape = share_shape
+        self.soft_role_colors = soft_role_colors
         self.dataset = dataset
         self.interaction_order_path = interaction_order_path
         self.raw_index_root = raw_index_root
@@ -478,14 +486,12 @@ class SMPLX_Viewer(Viewer):
         smplx_layer_p1 = SMPLLayer(model_type='smplx',gender=gender_p1,num_betas=10,device=C.device)
         smplx_layer_p2 = SMPLLayer(model_type='smplx',gender=gender_p2,num_betas=10,device=C.device)
 
-        if self.part_segm and self.part_vertex_colors is None:
-            self.part_vertex_colors = build_part_vertex_colors(
-                smplx_layer_p1, self.part_segm, self.part_colors
-            )
-
-        use_part_colors = self.part_vertex_colors is not None
-        actor_color = (0.10, 0.47, 0.78, 1.0)
-        reactor_color = (0.88, 0.30, 0.20, 1.0)
+        if self.soft_role_colors:
+            actor_color = (0.30, 0.60, 0.88, 1.0)
+            reactor_color = (0.95, 0.50, 0.39, 1.0)
+        else:
+            actor_color = (0.10, 0.47, 0.78, 1.0)
+            reactor_color = (0.88, 0.30, 0.20, 1.0)
         role_p1 = self._meta_value(params_p1, "source_role", "")
         role_p2 = self._meta_value(params_p2, "source_role", "")
         if not role_p1 and not role_p2 and self.order_dict and clip_name in self.order_dict:
@@ -504,6 +510,16 @@ class SMPLX_Viewer(Viewer):
             p2_color = reactor_color
         else:
             p2_color = reactor_color
+        p1_vertex_colors = None
+        p2_vertex_colors = None
+        if self.part_segm:
+            p1_vertex_colors = build_part_vertex_colors(
+                smplx_layer_p1, self.part_segm, self.part_colors, base_color=p1_color, role=role_p1 or None
+            )
+            p2_vertex_colors = build_part_vertex_colors(
+                smplx_layer_p2, self.part_segm, self.part_colors, base_color=p2_color, role=role_p2 or None
+            )
+        use_part_colors = p1_vertex_colors is not None and p2_vertex_colors is not None
         seq_kwargs_p1 = dict(
             poses_body=poses_body_p1,
             smpl_layer=smplx_layer_p1,
@@ -535,9 +551,10 @@ class SMPLX_Viewer(Viewer):
         # create smplx sequence for two persons
         smplx_seq_p1 = SMPLSequence(**seq_kwargs_p1)
         smplx_seq_p2 = SMPLSequence(**seq_kwargs_p2)
-        if self.part_vertex_colors is not None:
-            apply_vertex_colors(smplx_seq_p1, self.part_vertex_colors)
-            apply_vertex_colors(smplx_seq_p2, self.part_vertex_colors)
+        if p1_vertex_colors is not None:
+            apply_vertex_colors(smplx_seq_p1, p1_vertex_colors)
+        if p2_vertex_colors is not None:
+            apply_vertex_colors(smplx_seq_p2, p2_vertex_colors)
         self.scene.add(smplx_seq_p1)
         self.scene.add(smplx_seq_p2)
         self.load_text_from_file()
@@ -563,6 +580,11 @@ if __name__=='__main__':
     parser.add_argument('--title', help='Window title override')
     parser.add_argument('--part_segm', help='Path to parts segmentation .pkl (dict: part_name -> vertex indices)')
     parser.add_argument('--part_colors', help='Path to JSON colors file (dict: part_name -> rgba)')
+    parser.add_argument(
+        '--soft_role_colors',
+        action='store_true',
+        help='Use softened actor/reactor base colors when part-based highlighting is enabled'
+    )
     parser.add_argument('--interaction_order', help='Path to interaction_order.pkl (Inter-X actor/reactor mapping)')
     parser.add_argument(
         '--raw_index_root',
@@ -603,6 +625,7 @@ if __name__=='__main__':
         part_segm=args.part_segm,
         part_colors=args.part_colors,
         share_shape=args.share_shape,
+        soft_role_colors=args.soft_role_colors,
         interaction_order_path=args.interaction_order,
         raw_index_root=args.raw_index_root,
         train_index_h5=args.train_index_h5,

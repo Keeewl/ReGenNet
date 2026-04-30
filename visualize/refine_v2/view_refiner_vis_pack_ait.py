@@ -100,6 +100,38 @@ def _params_with_offset(params: dict[str, Any], offset: tuple[float, float, floa
     return out
 
 
+def _load_exported_baseline_params(baseline_data_dir: str, dataset_key: str) -> tuple[dict[str, Any], dict[str, Any]]:
+    clip_dir = os.path.join(os.path.abspath(baseline_data_dir), str(dataset_key))
+    p1_path = os.path.join(clip_dir, "P1.npz")
+    p2_path = os.path.join(clip_dir, "P2.npz")
+    if not os.path.exists(p1_path) or not os.path.exists(p2_path):
+        raise FileNotFoundError(
+            f"Baseline clip not found for dataset_key={dataset_key} under {baseline_data_dir}. "
+            f"Expected {p1_path} and {p2_path}."
+        )
+
+    def _params_from_npz(path: str) -> dict[str, Any]:
+        data = np.load(path, allow_pickle=True)
+        return {
+            "root_orient": np.asarray(data["root_orient"], dtype=np.float32),
+            "pose_body": np.asarray(data["pose_body"], dtype=np.float32),
+            "pose_lhand": np.asarray(data["pose_lhand"], dtype=np.float32),
+            "pose_rhand": np.asarray(data["pose_rhand"], dtype=np.float32),
+            "trans": np.asarray(data["trans"], dtype=np.float32),
+            "betas": np.asarray(data["betas"], dtype=np.float32).reshape(-1)[:10],
+            "gender": str(data["gender"].item() if np.asarray(data["gender"]).shape == () else data["gender"]),
+            "source_role": str(data["source_role"].item() if np.asarray(data["source_role"]).shape == () else data["source_role"]),
+        }
+
+    p1 = _params_from_npz(p1_path)
+    p2 = _params_from_npz(p2_path)
+    if p1.get("source_role") == "actor":
+        return p1, p2
+    if p2.get("source_role") == "actor":
+        return p2, p1
+    raise ValueError(f"Could not infer actor/reactor roles from baseline clip: {clip_dir}")
+
+
 def _make_panel(
     viewer,
     *,
@@ -180,6 +212,7 @@ def open_refiner_vis_pack_viewer(
     sequence_window_index: int | None = None,
     start_frame: int | None = None,
     mode: str = "coarse_refined_gt",
+    baseline_data_dir: str = "",
     part_segm_path: str = "",
     title: str = "",
     fps: int = 30,
@@ -297,6 +330,13 @@ def open_refiner_vis_pack_viewer(
             coarse_params = self.sequence_params("reactor_coarse_motion", seq_idx, length, "reactor_betas", "reactor_gender_id")
             refined_params = self.sequence_params("reactor_refined_motion", seq_idx, length, "reactor_betas", "reactor_gender_id")
             gt_params = self.sequence_params("reactor_gt_motion", seq_idx, length, "reactor_betas", "reactor_gender_id")
+            baseline_actor_params = None
+            baseline_reactor_params = None
+            if baseline_data_dir:
+                baseline_actor_params, baseline_reactor_params = _load_exported_baseline_params(
+                    baseline_data_dir,
+                    str(sequence.get("dataset_key")),
+                )
 
             actor_layer = SMPLLayer(model_type="smplx", gender=actor_params["gender"], num_betas=10, device=C.device)
             reactor_layer = SMPLLayer(model_type="smplx", gender=gt_params["gender"], num_betas=10, device=C.device)
@@ -321,23 +361,36 @@ def open_refiner_vis_pack_viewer(
 
             if mode == "coarse_refined_gt":
                 panels = [
-                    ("coarse", coarse_params, (-float(panel_spacing), 0.0, 0.0)),
-                    ("refined", refined_params, (0.0, 0.0, 0.0)),
-                    ("gt", gt_params, (float(panel_spacing), 0.0, 0.0)),
+                    ("coarse", actor_params, coarse_params, (-float(panel_spacing), 0.0, 0.0)),
+                    ("refined", actor_params, refined_params, (0.0, 0.0, 0.0)),
+                    ("gt", actor_params, gt_params, (float(panel_spacing), 0.0, 0.0)),
+                ]
+            elif mode == "baseline_coarse_refined_gt":
+                if not baseline_data_dir or baseline_actor_params is None or baseline_reactor_params is None:
+                    raise ValueError("--mode baseline_coarse_refined_gt requires --baseline_data_dir")
+                panels = [
+                    ("baseline", baseline_actor_params, baseline_reactor_params, (-1.5 * float(panel_spacing), 0.0, 0.0)),
+                    ("coarse", actor_params, coarse_params, (-0.5 * float(panel_spacing), 0.0, 0.0)),
+                    ("refined", actor_params, refined_params, (0.5 * float(panel_spacing), 0.0, 0.0)),
+                    ("gt", actor_params, gt_params, (1.5 * float(panel_spacing), 0.0, 0.0)),
                 ]
             elif mode == "coarse":
-                panels = [("coarse", coarse_params, (0.0, 0.0, 0.0))]
+                panels = [("coarse", actor_params, coarse_params, (0.0, 0.0, 0.0))]
             elif mode == "refined":
-                panels = [("refined", refined_params, (0.0, 0.0, 0.0))]
+                panels = [("refined", actor_params, refined_params, (0.0, 0.0, 0.0))]
+            elif mode == "baseline":
+                if not baseline_data_dir or baseline_actor_params is None or baseline_reactor_params is None:
+                    raise ValueError("--mode baseline requires --baseline_data_dir")
+                panels = [("baseline", baseline_actor_params, baseline_reactor_params, (0.0, 0.0, 0.0))]
             else:
-                panels = [("gt", gt_params, (0.0, 0.0, 0.0))]
+                panels = [("gt", actor_params, gt_params, (0.0, 0.0, 0.0))]
 
-            for panel_name, params, offset in panels:
+            for panel_name, panel_actor_params, panel_reactor_params, offset in panels:
                 self.render_nodes.extend(
                     _make_panel(
                         self,
-                        actor_params=actor_params,
-                        reactor_params=params,
+                        actor_params=panel_actor_params,
+                        reactor_params=panel_reactor_params,
                         actor_layer=actor_layer,
                         reactor_layer=reactor_layer,
                         device=C.device,
@@ -479,7 +532,16 @@ def build_parser():
     parser.add_argument("--window_index", type=int, default=None)
     parser.add_argument("--sequence_window_index", type=int, default=None)
     parser.add_argument("--start_frame", type=int, default=None)
-    parser.add_argument("--mode", choices=["coarse", "refined", "gt", "coarse_refined_gt"], default="coarse_refined_gt")
+    parser.add_argument(
+        "--mode",
+        choices=["coarse", "refined", "gt", "baseline", "coarse_refined_gt", "baseline_coarse_refined_gt"],
+        default="coarse_refined_gt",
+    )
+    parser.add_argument(
+        "--baseline_data_dir",
+        default="",
+        help="Optional root containing exported baseline clips as <baseline_data_dir>/<dataset_key>/{P1,P2}.npz",
+    )
     parser.add_argument("--part_segm_path", default="")
     parser.add_argument("--title", default="")
     parser.add_argument("--fps", type=int, default=30)
@@ -498,6 +560,7 @@ def main(argv=None):
         sequence_window_index=args.sequence_window_index,
         start_frame=args.start_frame,
         mode=args.mode,
+        baseline_data_dir=args.baseline_data_dir,
         part_segm_path=args.part_segm_path,
         title=args.title,
         fps=args.fps,

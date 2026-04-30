@@ -1,0 +1,5 @@
+## 4.2 Implementation Details
+
+For Stage1, we use an interaction-aware diffusion generator with 8 transformer blocks, a hidden dimension of 256, and 4 attention heads. The diffusion process uses 1000 diffusion steps with a cosine noise schedule. We train the model with a batch size of 32 for 200K steps. During inference, we adopt DDIM sampling with 5 sampling steps for all diffusion-based models. Stage1 training takes about 25 hours on 4 NVIDIA RTX 5090 GPUs.
+
+For Stage2, we use the final contact-aware local refiner with a hidden dimension of 512, 8 transformer layers, and 8 attention heads. The refiner is trained and inferred on fixed-length local windows of 30 frames, using a batch size of 32 for 10K training steps. For contact-relevant window selection, we use $\tau_{\text{contact}}=0.10$ as the main threshold in the selector. Unless otherwise specified, all Stage2 results are reported after stitching the refined local windows back into the full sequence, and are therefore evaluated under the full-sequence reconstruction protocol.
