@@ -258,6 +258,46 @@ Required audit checks on subset:
 
 - `gt_positive_zero_window_ratio`
 - `topk_gt_segment_recall`
+
+## Table2 Protocol Revision
+
+Status: shared fixed-domain implementation started on 2026-05-01
+
+Reason:
+
+The earlier `table2` extension reused the Stage2 task domain:
+
+```text
+15 action types + GT+ / Pred+
+```
+
+This is acceptable for internal HiReact task analysis, but it is not a clean
+cross-method benchmark because each baseline can induce a different `Pred+`
+subset.
+
+New rule for the comparison table:
+
+```text
+fixed 15 action types
++ fixed shared sequence set per split
++ contact-only reporting
+```
+
+Implications:
+
+- baselines should no longer use their own selector outputs to define the
+  evaluation domain;
+- `HiReact` still uses selector windows internally for Stage2 refinement, but
+  not for choosing which sequences are evaluated;
+- train/test `table2` rows should now be interpreted as a shared-domain contact
+  benchmark rather than a per-method `GT+ / Pred+` task subset.
+
+First implementation assets:
+
+- `refine_v2/tools/build_fixed_eval_manifest.py`
+- `refine_v2/cli_build_fixed_eval_manifest.py`
+- `refine_v2/commands/table2_fixed/01_build_train_fixed_manifest.sh`
+- `refine_v2/commands/table2_fixed/02_build_test_fixed_manifest.sh`
 - `topk_window_match_ratio`
 - `topk_region_match_ratio`
 - `window_contact_purity`
