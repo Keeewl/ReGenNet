@@ -1411,6 +1411,22 @@ Then use those contact metrics to update feature/model/loss.
       - this is a separate implementation step after table2 baseline completion
     - detailed note:
       - `refine_v2/log/2026-04-30_table1_table2_eval_extension_plan.md`
+  - table1 HiReact batch evaluation implementation completed:
+    - one-seed dry-run bridge already validated on `train` and `test`
+    - added seed-parameterized runner:
+      - `refine_v2/commands/eval/25_run_table1_hireact_seed.sh`
+    - added 20-seed batch runner:
+      - `refine_v2/commands/eval/26_run_table1_hireact_seeds_0_19.sh`
+    - added final aggregator:
+      - `refine_v2/tools/aggregate_table1_hireact.py`
+      - `refine_v2/cli_aggregate_table1_hireact.py`
+      - `refine_v2/commands/eval/27_aggregate_table1_hireact.sh`
+    - aggregation preserves current table1 interval convention from `eval/easy_table.py`
+    - remaining work is execution only:
+      - run seeds `0..19`
+      - aggregate final `HiReact` row
+    - detailed note:
+      - `refine_v2/log/2026-05-01_table1_hireact_batch_eval_implementation.md`
   - single-stage1 infer/export bridge added:
     - purpose:
       - support strict GT / Stage1 baseline / Stage2-refined comparison for one `dataset_key`
