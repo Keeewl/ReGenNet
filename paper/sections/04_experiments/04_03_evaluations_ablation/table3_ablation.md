@@ -2,6 +2,7 @@
 
 两组分别对Stage1-Generation和Stage2-Refinement
 
+
 ### Group1: Reaction Generation
 
 1. Actor condition: Body-Hand
@@ -23,10 +24,6 @@
    use a standard transformer block with self-attention, cross-attention, and FFN.
 
 
-
-
-
-
 ### Group2: Refinement
 
 1. Condition encoder: w/o Contact-aware
@@ -45,3 +42,12 @@
    Modification:
    remove the hand-target interaction modeling branch inside the condition encoder;
    keep basic contact-aware and geometry-aware conditioning, as well as the local residual refiner backbone, unchanged.
+
+
+### Ablation Study
+
+
+
+
+
+
