@@ -1427,6 +1427,18 @@ Then use those contact metrics to update feature/model/loss.
       - aggregate final `HiReact` row
     - detailed note:
       - `refine_v2/log/2026-05-01_table1_hireact_batch_eval_implementation.md`
+  - table2 test contact gap diagnosis recorded:
+    - key finding:
+      - current test contact chain mixes table1 sampled Stage1 source with table2 contact protocol
+      - current train/test table2 numbers are therefore not yet cleanly comparable
+    - strongest current signal:
+      - test selector/window quality is much weaker than train under the subset protocol
+    - first ranked fix:
+      - rebuild test reaction_data from the same Stage1 main chain used by train table2
+      - command:
+        - `refine_v2/commands/eval/28_build_test_reaction_data_mainchain.sh`
+    - detailed note:
+      - `refine_v2/log/2026-05-01_table2_test_contact_gap_diagnosis.md`
   - single-stage1 infer/export bridge added:
     - purpose:
       - support strict GT / Stage1 baseline / Stage2-refined comparison for one `dataset_key`
