@@ -444,6 +444,20 @@ def _can_extract_restoration_metadata(cond_y):
     return all(key in cond_y for key in REQUIRED_RESTORATION_METADATA_FIELDS)
 
 
+def _slice_cond_y(cond_y: dict[str, Any], keep: int) -> dict[str, Any]:
+    out: dict[str, Any] = {}
+    for key, value in cond_y.items():
+        if torch.is_tensor(value):
+            out[key] = value[:keep]
+        elif isinstance(value, np.ndarray):
+            out[key] = value[:keep]
+        elif isinstance(value, list):
+            out[key] = value[:keep]
+        else:
+            out[key] = value
+    return out
+
+
 def _build_dataloader(args, args_cli):
     enable_restoration = args_cli.enable_restoration_metadata
     if enable_restoration is None:
@@ -657,7 +671,7 @@ def main():
             coarse_motion = sample[:keep]
 
             if _can_extract_restoration_metadata(cond["y"]):
-                meta = extract_restoration_metadata(cond["y"], device=device)
+                meta = extract_restoration_metadata(_slice_cond_y(cond["y"], keep), device=device)
                 actor_motion, gt_motion = restore_pair_batch(actor_motion, gt_motion, meta)
                 _, coarse_motion = restore_pair_batch(actor_motion, coarse_motion, meta)
                 saved_in_restored_space = True
