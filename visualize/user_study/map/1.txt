@@ -1,0 +1,3 @@
+A.mp4 = cmdm-interx-handshake_0.mp4 = CMDM
+B.mp4 = stage1-clip-refined-exp8_0.mp4 = HiReact
+C.mp4 = cnetv5-interx-handshake_0.mp4 = ReGenNet

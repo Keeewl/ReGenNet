@@ -91,8 +91,17 @@ exp:
       <td><u>0.941 ± 0.0131</u></td><td>0.97 ± 0.0001</td><td>21.222 ± 0.1602</td><td>12.375 ± 0.0392</td>
       <td><b>4.007 ± 0.0829</b></td><td><u>0.601 ± 0.0002</u></td><td><b>18.838 ± 0.2493</b></td><td><b>13.812 ± 0.0464</b></td>
     </tr>
+    <tr>
+      <td>react_holistic</td>
+      <td>3.25 ± 0.1331</td><td>0.941 ± 0.0001</td><td>20.589 ± 0.1803</td><td>12.489 ± 0.0439</td>
+      <td>7.803 ± 0.1883</td><td>0.588 ± 0.0002</td><td>18.195 ± 0.2266</td><td>13.491 ± 0.0314</td>
+    </tr>
   </tbody>
 </table>
 
+Notes:
+
+- `react_holistic` uses the same latent dimension (`256`) as `HiReact*`, but replaces the dual-stream reactor generation with a single holistic stream.
+- Because `HiReact*` keeps two reactor streams, its parameter count is roughly about twice that of the single-stream holistic ablation under the same hidden dimension.
 
 

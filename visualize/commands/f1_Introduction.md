@@ -1,19 +1,204 @@
-### handshake for hand
+### F2_Framework_Handshake
+
+### trajectory
 
 ```bash
 python visualize/viewer/snapshot_viewer.py \
   --dataset interx \
-  --data_dir visualize/viewer/interx_data \
-  --clip_name G001T000A001R005 \
-  --frame_ids 87 141 247 \
-  --offset_dir 1 0 1 \
+  --data_dir outputs/cnetv5_interx_handshake_online_200K/motions \
+  --clip_name 0001_Handshake \
+  --frame_ids 0 6 14 64 84 91 124 \
+  --offset_dir 0 0 1 \
   --spacing 0 \
-  --time_gradient
+  --soft_role_colors \
+  --time_gradient \
+  --time_gradient_alpha_min 0.5 \
+  --time_gradient_auto_alpha
+
+python visualize/viewer/snapshot_viewer.py \
+  --dataset interx \
+  --data_dir ../Inter-X/datasets/interx/motions \
+  --clip_name G002T000A001R005 \
+  --frame_ids  162 174 193 288 \
+  --offset_dir 0 0 1 \
+  --spacing 0 \
+  --time_gradient \
+  --time_gradient_alpha_min 0.5 \
+  --time_gradient_auto_alpha
+
+cd visualize/viewer
+python data_viewer.py \
+  --dataset interx \
+  --data_dir ../../../Inter-X/datasets/interx/motions \
+  --texts_dir ''
+```
+
+
+### Feature
+
+Success heatmap:
+```bash
+python visualize/viewer/heatmap/heatmap_viewer.py \
+  --dataset interx \
+  --data_dir refine_v2/save/infer/refiner_v2_exp8_on_stage1_clip_0001_handshake/refined \
+  --clip_name 0001_Handshake \
+  --frame_id 84 \
+  --actor_hand_side auto \
+  --tau_contact 0.005 \
+  --max_dist 0.20 \
+  --title "Heatmap: 0001_Handshake"
+```
+
+Success velocity:
+```bash
+python visualize/viewer/velocity/velocity_viewer.py \
+  --dataset interx \
+  --data_dir refine_v2/save/infer/refiner_v2_exp8_on_stage1_clip_0001_handshake/refined \
+  --clip_name 0001_Handshake \
+  --current_frame 84 \
+  --actor_prev_frame 65 \
+  --reactor_prev_frame 51 \
+  --ghost_alpha 0.50 \
+  --ghost_white_mix 0.15
+  --title "Velocity: 0001_Handshake"
 ```
 
 
 
-### F2_Framework_Handshake
+### figure_1
+
+Fail:
+```bash
+python visualize/viewer/snapshot_viewer.py \
+  --dataset interx \
+  --data_dir outputs/cnetv5_interx_handshake_online_200K/motions \
+  --clip_name 0001_Handshake \
+  --frame_ids 0 6 64 84 \
+  --offset_dir 0 0 1 \
+  --spacing 0 \
+  --time_gradient \
+  --time_gradient_alpha_min 0.5 \
+  --time_gradient_auto_alpha
+
+python visualize/viewer/snapshot_viewer.py \
+  --dataset interx \
+  --data_dir outputs/cnetv5_interx_handshake_online_200K/motions \
+  --clip_name 0001_Handshake \
+  --frame_ids 0 6 64 84 \
+  --offset_dir 0 0 1 \
+  --spacing 0 \
+  --soft_role_colors \
+  --time_gradient \
+  --time_gradient_alpha_min 0.5 \
+  --time_gradient_auto_alpha
+```
+
+### figure_4
+
+Success:
+```bash
+python visualize/viewer/snapshot_viewer.py \
+  --dataset interx \
+  --data_dir refine_v2/save/infer/refiner_v2_exp8_on_stage1_clip_0001_handshake/refined \
+  --clip_name 0001_Handshake \
+  --frame_ids 0 6 64 84 \
+  --offset_dir 0 0 1 \
+  --spacing 0 \
+  --time_gradient \
+  --time_gradient_alpha_min 0.5 \
+  --time_gradient_auto_alpha
+```
+
+### figure_2
+
+Success:
+```bash
+python visualize/viewer/snapshot_viewer.py \
+  --dataset interx \
+  --data_dir refine_v2/save/infer/refiner_v2_exp8_on_stage1_clip_0001_handshake/refined \
+  --clip_name 0001_Handshake \
+  --frame_ids 0 6 64 84 \
+  --offset_dir 0 0 1 \
+  --spacing 0 \
+  --time_gradient \
+  --time_gradient_alpha_min 0.5 \
+  --time_gradient_auto_alpha
+```
+
+### figure_1 and figure_3 fail and success snapshot
+
+fail:
+```bash
+python visualize/viewer/snapshot_viewer.py \
+  --dataset interx \
+  --data_dir outputs/cnetv5_interx_handshake_online_200K/motions \
+  --clip_name 0001_Handshake \
+  --frame_ids 0 6 64 84 \
+  --frame_ids 0 6 64 124 \
+  --offset_dir 0 0 1 \
+  --spacing 0 \
+  --time_gradient \
+  --time_gradient_alpha_min 0.5 \
+  --time_gradient_auto_alpha
+```
+
+Success:
+```bash
+python visualize/viewer/snapshot_viewer.py \
+  --dataset interx \
+  --data_dir refine_v2/save/infer/refiner_v2_exp8_on_stage1_clip_0001_handshake/refined \
+  --clip_name 0001_Handshake \
+  --frame_ids 0 6 64 84 \
+  --offset_dir 0 0 1 \
+  --spacing 0 \
+  --time_gradient \
+  --time_gradient_alpha_min 0.5 \
+  --time_gradient_auto_alpha
+```
+
+
+
+
+
+```bash
+python visualize/viewer/residual/residual_viewer.py \
+  --dataset interx \
+  --coarse_data_dir outputs/cnetv5_interx_handshake_online_200K/motions \
+  --refined_data_dir refine_v2/save/infer/refiner_v2_exp8_on_stage1_clip_0001_handshake/refined \
+  --clip_name 0001_Handshake \
+  --frame_id 84 \
+  --ghost_alpha 0.30 \
+  --ghost_white_mix 0.18 \
+  --title "Residual: 0001_Handshake"
+```
+
+```bash
+python visualize/viewer/residual/residual_viewer.py \
+  --dataset interx \
+  --coarse_data_dir outputs/cnetv5_interx_handshake_online_200K/motions \
+  --refined_data_dir refine_v2/save/infer/refiner_v2_exp8_on_stage1_clip_0001_handshake/refined \
+  --clip_name 0001_Handshake \
+  --frame_id 91 \
+  --ghost_alpha 0.30 \
+  --ghost_white_mix 0.18 \
+  --title "Residual: 0001_Handshake"
+```
+
+```bash
+python visualize/viewer/residual/residual_viewer.py \
+  --dataset interx \
+  --coarse_data_dir outputs/cnetv5_interx_handshake_online_200K/motions \
+  --refined_data_dir refine_v2/save/infer/refiner_v2_exp8_on_stage1_clip_0001_handshake/refined \
+  --clip_name 0001_Handshake \
+  --frame_id 124 \
+  --ghost_alpha 0.30 \
+  --ghost_white_mix 0.18 \
+  --title "Residual: 0001_Handshake"
+```
+
+
+
+
 
 #### Video
 
@@ -23,6 +208,12 @@ cd visualize/viewer
 python data_viewer.py \
   --dataset interx \
   --data_dir ../../outputs/interx_regen_train_restored_height \
+  --texts_dir ''
+
+cd visualize/viewer
+python data_viewer.py \
+  --dataset interx \
+  --data_dir ../../../Inter-X/datasets/interx/motions \
   --texts_dir ''
 ```
 
@@ -121,33 +312,6 @@ python visualize/viewer/snapshot_viewer.py \
   --frame_ids 14 84 91 124 \
   --offset_dir 0 0 1 \
   --spacing 1.8 \
-  --time_gradient
-
-python visualize/viewer/snapshot_viewer.py \
-  --dataset interx \
-  --data_dir refine_v2/save/infer/refiner_v2_exp8_on_stage1_clip_0001_handshake/refined \
-  --clip_name 0001_Handshake \
-  --frame_ids 14 84 91 124 \
-  --offset_dir 1.1 0 -0.5 \
-  --spacing 1.3 \
-  --time_gradient
-
-python visualize/viewer/snapshot_viewer.py \
-  --dataset interx \
-  --data_dir refine_v2/save/infer/refiner_v2_exp8_on_stage1_clip_0001_handshake/refined \
-  --clip_name 0001_Handshake \
-  --frame_ids 91 69 14 0 \
-  --offset_dir 1.1 0 -0.5 \
-  --spacing 1.3 \
-  --time_gradient
-
-python visualize/viewer/snapshot_viewer.py \
-  --dataset interx \
-  --data_dir outputs/cnetv5_interx_handshake_online_200K/motions \
-  --clip_name 0001_Handshake \
-  --frame_ids 91 69 14 0 \
-  --offset_dir 1.1 0 -0.5 \
-  --spacing 1.3 \
   --time_gradient
 ```
 
@@ -374,41 +538,3 @@ python visualize/viewer/snapshot_viewer.py \
   --highlight_part hands
 ```
 
-
-### pull for arm
-
-```bash
-python visualize/viewer/snapshot_viewer.py \
-  --dataset interx \
-  --data_dir visualize/viewer/interx_data \
-  --clip_name G001T000A003R018 \
-  --frame_ids 273 376 486 \
-  --offset_dir 1 0 1 \
-  --spacing 0 \
-  --time_gradient
-```
-
-
-### run for torso
-
-```bash
-python visualize/viewer/snapshot_viewer.py \
-  --dataset interx \
-  --data_dir visualize/viewer/interx_data \
-  --clip_name G028T003A017R015 \
-  --frame_ids 414 472 530 \
-  --offset_dir 1 0 1 \
-  --spacing 0 \
-  --time_gradient
-```
-
-```bash
-python visualize/viewer/snapshot_viewer.py \
-  --dataset interx \
-  --data_dir visualize/viewer/interx_data \
-  --clip_name G028T003A017R011 \
-  --frame_ids 61 135 237 \
-  --offset_dir 1 0 1 \
-  --spacing 0 \
-  --time_gradient
-```

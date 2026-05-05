@@ -11,8 +11,10 @@ import pickle
 import numpy as np
 
 from snapshot.clip import (
+    apply_alpha,
     blend_rgb_towards_white,
     build_frame_sequence_kwargs,
+    compute_time_gradient_alphas,
     compute_time_gradient_mixes,
     infer_interaction_order_path,
     load_clip,
@@ -86,7 +88,7 @@ def get_num_verts_from_layer(smplx_layer):
     return None
 
 
-def build_part_vertex_colors(smplx_layer, segm_path, colors_path):
+def build_part_vertex_colors(smplx_layer, segm_path, colors_path, base_color=None, role=None):
     segm = load_part_segm(segm_path)
     part_names = sorted(segm.keys())
     part_colors = load_part_colors(colors_path, part_names)
@@ -95,10 +97,15 @@ def build_part_vertex_colors(smplx_layer, segm_path, colors_path):
     if num_verts is None:
         num_verts = max(max(indices) for indices in segm.values()) + 1
 
-    default_color = (0.7, 0.7, 0.7, 1.0)
+    default_color = base_color if base_color is not None else (0.7, 0.7, 0.7, 1.0)
     vertex_colors = np.tile(default_color, (num_verts, 1)).astype(np.float32)
     for part_name, indices in segm.items():
-        vertex_colors[np.asarray(indices, dtype=np.int64)] = part_colors.get(part_name, default_color)
+        color = default_color
+        if role and f"{role}:{part_name}" in part_colors:
+            color = part_colors[f"{role}:{part_name}"]
+        elif part_name in part_colors:
+            color = part_colors[part_name]
+        vertex_colors[np.asarray(indices, dtype=np.int64)] = color
     return vertex_colors
 
 
@@ -124,6 +131,17 @@ def tint_vertex_colors_towards_white(vertex_colors, white_mix: float):
     tinted = np.asarray(vertex_colors, dtype=np.float32).copy()
     white_mix = float(np.clip(white_mix, 0.0, 1.0))
     tinted[:, :3] = tinted[:, :3] * (1.0 - white_mix) + white_mix
+    return tinted
+
+
+def tint_vertex_colors_alpha(vertex_colors, alpha: float):
+    tinted = np.asarray(vertex_colors, dtype=np.float32).copy()
+    alpha = float(np.clip(alpha, 0.0, 1.0))
+    if tinted.shape[1] < 4:
+        alpha_column = np.full((tinted.shape[0], 1), alpha, dtype=np.float32)
+        tinted = np.concatenate([tinted[:, :3], alpha_column], axis=1)
+    else:
+        tinted[:, 3] = alpha
     return tinted
 
 
@@ -175,6 +193,11 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--part_segm", help="Path to parts segmentation .pkl")
     parser.add_argument("--part_colors", help="Path to JSON colors file")
     parser.add_argument(
+        "--soft_role_colors",
+        action="store_true",
+        help="Use softened actor/reactor base colors when part-based highlighting is enabled",
+    )
+    parser.add_argument(
         "--highlight_part",
         choices=["torso_head", "lower_body", "arms", "hands"],
         help="Highlight one 4-part region in red while keeping the selected role's base color",
@@ -208,6 +231,17 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Color snapshots from light to dark by temporal order, without changing alpha",
     )
+    parser.add_argument(
+        "--time_gradient_auto_alpha",
+        action="store_true",
+        help="Also apply an automatic alpha gradient in the same user-specified temporal order",
+    )
+    parser.add_argument(
+        "--time_gradient_alpha_min",
+        type=float,
+        default=0.35,
+        help="Minimum alpha used by --time_gradient_auto_alpha for the earliest selected frame",
+    )
     return parser
 
 
@@ -237,6 +271,21 @@ def main() -> None:
     order_dict = load_interaction_order(order_path)
     role_p1, role_p2 = resolve_person_roles(clip, order_dict=order_dict)
     p1_color, p2_color = resolve_person_colors(clip, order_dict=order_dict)
+    if args.soft_role_colors:
+        actor_color = (0.30, 0.60, 0.88, 1.0)
+        reactor_color = (0.95, 0.50, 0.39, 1.0)
+        if role_p1 == "actor":
+            p1_color = actor_color
+        elif role_p1 == "reactor":
+            p1_color = reactor_color
+        else:
+            p1_color = actor_color
+        if role_p2 == "actor":
+            p2_color = actor_color
+        elif role_p2 == "reactor":
+            p2_color = reactor_color
+        else:
+            p2_color = reactor_color
 
     viewer = SnapshotViewer(title=args.title or f"Snapshot: {clip.clip_name}")
     viewer.scene.fps = 1
@@ -249,7 +298,8 @@ def main() -> None:
     if args.highlight_part and not args.part_segm:
         raise ValueError("--highlight_part requires --part_segm, e.g. part_segm/4_parts/four_parts.pkl")
 
-    part_vertex_colors = None
+    part_vertex_colors_p1 = None
+    part_vertex_colors_p2 = None
     highlight_vertex_colors_p1 = None
     highlight_vertex_colors_p2 = None
     if args.highlight_part:
@@ -264,15 +314,34 @@ def main() -> None:
                 smplx_layer_p2, args.part_segm, p2_color, args.highlight_part, args.highlight_color
             )
     elif args.part_segm:
-        part_vertex_colors = build_part_vertex_colors(smplx_layer_p1, args.part_segm, args.part_colors)
+        part_vertex_colors_p1 = build_part_vertex_colors(
+            smplx_layer_p1,
+            args.part_segm,
+            args.part_colors,
+            base_color=p1_color,
+            role=role_p1 or None,
+        )
+        part_vertex_colors_p2 = build_part_vertex_colors(
+            smplx_layer_p2,
+            args.part_segm,
+            args.part_colors,
+            base_color=p2_color,
+            role=role_p2 or None,
+        )
     time_gradient_mixes = compute_time_gradient_mixes(snapshot_specs) if args.time_gradient else {}
+    time_gradient_alphas = (
+        compute_time_gradient_alphas(snapshot_specs, lightest_alpha=args.time_gradient_alpha_min)
+        if args.time_gradient_auto_alpha
+        else {}
+    )
 
     for spec in snapshot_specs:
         white_mix = time_gradient_mixes.get(spec.index, 0.0)
-        spec_p1_color = blend_rgb_towards_white(p1_color, white_mix)
-        spec_p2_color = blend_rgb_towards_white(p2_color, white_mix)
-        use_p1_vertex_colors = highlight_vertex_colors_p1 is not None or part_vertex_colors is not None
-        use_p2_vertex_colors = highlight_vertex_colors_p2 is not None or part_vertex_colors is not None
+        alpha = time_gradient_alphas.get(spec.index, 1.0)
+        spec_p1_color = apply_alpha(blend_rgb_towards_white(p1_color, white_mix), alpha)
+        spec_p2_color = apply_alpha(blend_rgb_towards_white(p2_color, white_mix), alpha)
+        use_p1_vertex_colors = highlight_vertex_colors_p1 is not None or part_vertex_colors_p1 is not None
+        use_p2_vertex_colors = highlight_vertex_colors_p2 is not None or part_vertex_colors_p2 is not None
         seq_kwargs_p1 = build_frame_sequence_kwargs(
             clip.p1,
             frame_id=spec.frame_id,
@@ -301,13 +370,17 @@ def main() -> None:
                 if args.time_gradient
                 else highlight_vertex_colors_p1
             )
+            if args.time_gradient_auto_alpha:
+                p1_vertex_colors = tint_vertex_colors_alpha(p1_vertex_colors, alpha)
             apply_vertex_colors(smplx_seq_p1, p1_vertex_colors)
-        elif part_vertex_colors is not None:
+        elif part_vertex_colors_p1 is not None:
             spec_vertex_colors = (
-                tint_vertex_colors_towards_white(part_vertex_colors, white_mix)
+                tint_vertex_colors_towards_white(part_vertex_colors_p1, white_mix)
                 if args.time_gradient
-                else part_vertex_colors
+                else part_vertex_colors_p1
             )
+            if args.time_gradient_auto_alpha:
+                spec_vertex_colors = tint_vertex_colors_alpha(spec_vertex_colors, alpha)
             apply_vertex_colors(smplx_seq_p1, spec_vertex_colors)
 
         if highlight_vertex_colors_p2 is not None:
@@ -316,13 +389,17 @@ def main() -> None:
                 if args.time_gradient
                 else highlight_vertex_colors_p2
             )
+            if args.time_gradient_auto_alpha:
+                p2_vertex_colors = tint_vertex_colors_alpha(p2_vertex_colors, alpha)
             apply_vertex_colors(smplx_seq_p2, p2_vertex_colors)
-        elif part_vertex_colors is not None:
+        elif part_vertex_colors_p2 is not None:
             spec_vertex_colors = (
-                tint_vertex_colors_towards_white(part_vertex_colors, white_mix)
+                tint_vertex_colors_towards_white(part_vertex_colors_p2, white_mix)
                 if args.time_gradient
-                else part_vertex_colors
+                else part_vertex_colors_p2
             )
+            if args.time_gradient_auto_alpha:
+                spec_vertex_colors = tint_vertex_colors_alpha(spec_vertex_colors, alpha)
             apply_vertex_colors(smplx_seq_p2, spec_vertex_colors)
 
         viewer.scene.add(smplx_seq_p1)

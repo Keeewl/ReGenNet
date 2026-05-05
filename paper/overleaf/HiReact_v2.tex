@@ -1,0 +1,606 @@
+\documentclass{article}
+
+% NeurIPS 2026 style
+\usepackage{neurips_2026}
+
+% Recommended packages
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{hyperref}
+\usepackage{url}
+\usepackage{booktabs}
+\usepackage{amsfonts}
+\usepackage{nicefrac}
+\usepackage{microtype}
+% \usepackage{xcolor}
+\usepackage[table]{xcolor}
+\usepackage{graphicx}
+\usepackage{amsmath, amssymb}
+\usepackage{multirow}
+\usepackage{subcaption}
+
+
+\title{HiReact: Decoupling Global Motion Synthesis and Local Contact Refinement for Contact-Realistic Human Reaction Generation}
+
+\author{
+Anonymous Authors \\
+Affiliation withheld for review
+}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+
+Human reaction generation aims to synthesize realistic reactor motions conditioned on an observed actor motion sequence. Existing methods have achieved promising global motion realism, but often struggle to model fine-grained interaction details, particularly around sparse and temporally localized physical contacts. In many interaction scenarios, globally plausible reactions can still exhibit unrealistic local behaviors such as inaccurate hand alignment, unstable contact timing, or implausible contact geometry. These failures arise because global motion synthesis and local contact modeling operate at different spatial and optimization granularities.
+To address this issue, we propose HiReact, a hierarchical framework that decouples human reaction generation into global motion synthesis and local contact refinement. In Stage I, HiReact performs actor-conditioned reaction synthesis using role-specific multi-scale interaction representations. The actor motion is decomposed into global and part-level interaction cues, while the reactor motion is generated through coordinated body and hand streams to preserve both full-body coherence and fine-grained local responsiveness. In Stage II, HiReact identifies contact-relevant temporal regions and performs localized residual refinement to improve interaction fidelity without regenerating the entire motion sequence.
+Experiments on Inter-X and CHI3D demonstrate that HiReact improves both global reaction quality and local contact accuracy over prior methods. In particular, HiReact achieves more realistic hand-centric interactions and better contact geometry while maintaining temporally coherent full-body motion. Our results suggest that decoupling global reaction synthesis from local contact refinement is effective for high-fidelity human reaction generation.
+All the source code will be released. 
+\end{abstract}
+
+
+
+
+
+
+% ==================================================
+% 1. Introduction
+% ==================================================
+\section{Introduction}
+
+Human reaction generation aims to synthesize the motion of a reactor conditioned on the observed motion of an interacting actor. As an asymmetric form of human-human interaction modeling, it is important for interactive animation, virtual humans, behavior simulation, and human-centered embodied agents. 
+Recent diffusion-based approaches have significantly improved the realism and temporal coherence of generated interactions.
+However, realistic human reactions require more than globally plausible motion trajectories. 
+In many interaction scenarios, local physical behaviors, especially hand-centric contacts, play a critical role in perceived realism. 
+As illustrated in Fig.~\ref{fig:intro}, existing methods often generate reactions that appear reasonable at the global level but exhibit noticeable local artifacts, such as inaccurate hand alignment, unstable contact timing, or physically implausible contact geometry.
+
+Most existing reaction generation methods model the reactor as a holistic motion sequence and optimize interaction quality globally throughout the generation process
+While such designs are effective for learning coarse interaction dynamics, sparse local contacts remain difficult to optimize jointly with full-sequence motion realism. Contact-related errors are often temporally localized and geometrically sensitive, causing them to receive limited attention during global sequence generation. 
+Prior works have incorporated contact-aware constraints, interaction losses, or contact-guided sampling strategies to improve interaction fidelity~\cite{xu2024regennet, zhang2025reactffusion}. 
+Contact-aware refinement has also been explored in hand-object and human-object interaction tasks, where localized interaction geometry is corrected after coarse estimation~\cite{zhou2022toch, diller2024cg, cha2024text2hoi}. 
+However, these approaches still primarily optimize interaction quality within a unified full-sequence generation process, making it difficult to selectively improve sparse local contact regions without disturbing globally coherent motion.
+
+We argue that human reaction generation should be treated as a hierarchical interaction modeling problem with decoupled global and local objectives. 
+At the interaction level, actor motions provide cues at multiple spatial scales: global body motion defines the overall interaction context, while localized body-part movements indicate where and how interactions occur. 
+At the optimization level, globally coherent reaction synthesis and locally accurate contact modeling require different modeling granularities. 
+This motivates decoupling human reaction generation into two complementary stages: global motion synthesis and local contact refinement.
+
+Based on this observation, we propose \textbf{HiReact}, a \textbf{Hi}erarchical framework that decouples human \textbf{React}ion generation into global synthesis and localized contact refinement. In Stage I, HiReact performs actor-conditioned reaction synthesis using role-specific multi-scale interaction modeling. The actor motion is decomposed into global and part-level interaction cues, while the reactor motion is generated through coordinated body and hand streams to preserve both full-body coherence and fine-grained local responsiveness. In Stage II, HiReact identifies contact-relevant temporal windows from the initial reaction and performs residual local refinement to improve interaction fidelity without regenerating the entire motion sequence. This design allows HiReact to first generate globally coherent reactions and then selectively refine temporally sparse but interaction-critical local contact regions.
+
+Experiments on Inter-X~\cite{xu2024regennet} and CHI3D~\cite{fieraru2020three} demonstrate that HiReact consistently improves both global motion quality and contact-oriented interaction metrics over prior methods. In particular, HiReact produces more realistic hand-centric interactions and better local contact geometry while preserving temporally coherent full-body motion. Extensive ablation studies further validate the effectiveness of decoupling global motion synthesis from local contact refinement, as well as the proposed multi-scale actor-reactor interaction modeling strategy.
+
+Our contributions are summarized as follows. 
+\begin{itemize}
+    \item We propose HiReact, a hierarchical framework that decouples human reaction generation into global motion synthesis and local contact refinement, addressing the optimization mismatch between full-body motion realism and localized interaction fidelity.
+    \item Experiments on Inter-X and CHI3D demonstrate improved global motion realism and local contact fidelity over prior reaction generation methods.
+\end{itemize}
+
+% Figure 1 Motivation
+\begin{figure}[t]
+    \centering
+    \includegraphics[width=0.95\linewidth]{figures/Figure_1_Motivation.png}
+    \vspace{-1mm}
+    \caption{
+    Overview of HiReact. 
+    HiReact combines multi-scale actor-conditioned reaction generation with multi-stage contact-aware refinement.
+    Actor body-part cues guide fine-grained reactor responses, while local residual refinement improves hand-centric contact accuracy.
+    }
+    \label{fig:intro}
+    \vspace{-2mm}
+\end{figure}
+
+
+
+
+% Uncomment after references.bib is added
+% \bibliographystyle{plainnat}
+% \bibliography{references}
+
+
+
+% ==================================================
+% 2. Related Work
+% ==================================================
+\section{Related Work}
+
+\paragraph{Human-Human Interaction and Reaction Generation.}
+Human motion generation has recently evolved from single-person synthesis to modeling dynamic interactions between multiple humans~\citep{xu2024inter,ghosh2024remos}. Different from general two-person motion generation, which often synthesizes coordinated motions for both participants, human reaction generation focuses on an asymmetric causal setting where the reactor motion is generated conditioned on the observed actor motion~\citep{chopin2023interaction,xu2024regennet}. InterFormer studies action-to-reaction synthesis with spatial-temporal interaction modeling~\citep{chopin2023interaction}, while ReGenNet further formalizes human action-reaction synthesis and introduces a diffusion-based online generator with explicit interaction losses~\citep{xu2024regennet}. Recent works improve reaction generation through motion-conditioned body-hand synthesis~\citep{ghosh2024remos} and physical contact guidance~\citep{zhang2025reactffusion}. Despite these advances, most methods still model the reactor as a holistic sequence or inject interaction cues globally, making it difficult to explicitly associate actor part-level cues with fine-grained reactor responses. Our method addresses this limitation by modeling multi-scale actor interaction cues and further refining contact-relevant local responses.
+
+\paragraph{Part-aware and Multi-scale Motion Modeling.}
+Holistic motion generation models synthesize the human body as a single sequence, which benefits global coherence but often weakens part-specific behaviors~\citep{zou2024parco,heo2026party}. Recent fine-grained methods address this limitation with body-part attention, global-local alignment, or explicit anatomical decomposition~\citep{zhong2023attt2m,ghosh2021synthesis,zou2024parco,heo2026party}. AttT2M introduces body-part spatio-temporal embeddings and global-local motion-text attention~\citep{zhong2023attt2m}, while part-wise methods such as SCA and ParCo decompose motion into body components and coordinate part-specific generators to improve fine-grained synthesis~\citep{ghosh2021synthesis,zou2024parco}. These works reveal that part-aware modeling is effective for local expressiveness, but also requires careful coordination to maintain coherent full-body motion~\citep{zou2024parco,heo2026party}. However, existing part-aware approaches are mainly developed for text-conditioned or general single-person motion generation, where part cues are derived from language or predefined body partitions. In reaction generation, the actor's body parts provide dynamic interaction cues that can induce different local responses of the reactor. Our method therefore performs role-specific multi-scale actor-reactor modeling, using structured actor cues to guide coordinated reactor body-hand responses.
+
+\paragraph{Contact-aware Interaction Refinement.}
+Physical contact is essential for realistic interaction motion, particularly for hand-centric behaviors~\citep{ghosh2024remos,zhang2025reactffusion}. In human-object and hand-object interaction tasks, contact-aware generation and refinement have been widely explored: CG-HOI uses contact guidance in a joint human-object diffusion process~\citep{diller2024cg}, TOCH refines erroneous interaction sequences via spatio-temporal object-to-hand correspondences~\citep{zhou2022toch}, and Text2HOI incorporates contact-aware representations for hand-object interaction generation~\citep{cha2024text2hoi}. These works indicate that coarse interaction generation often leaves localized contact artifacts that benefit from explicit refinement. In reaction generation, existing methods incorporate contact through distance-based interaction losses, contact-aware reaction losses, spatial guidance, or contact-guided diffusion sampling~\citep{xu2024regennet,ghosh2024remos,zhang2025reactffusion}. However, these cues are mostly applied globally during full-sequence generation, while sparse hand-centric actor-reactor contacts are temporally localized and require targeted correction. We therefore adopt a multi-stage strategy that first generates globally plausible reactions and then refines contact-relevant local windows for fine-grained interaction quality.
+
+
+
+% ==================================================
+% 3. HiReact
+% ==================================================
+% Framework placeholder
+% Figure 2 Framework
+\begin{figure*}[t]
+    \centering
+    \includegraphics[width=0.98\textwidth]{figures/Figure_2_framework_v3.png}
+    \vspace{-1mm}
+    \caption{
+    Overview of HiReact. Stage I performs multi-scale reaction generation by encoding actor motion into global and part-level tokens and generating an initial reactor motion with coordinated reactor streams. Stage II constructs contact-aware local windows from the initial reaction, encodes actor, reactor, and contact cues, and predicts local residual corrections to obtain the refined reaction. The optional condition branch is used only when text/action conditions are available.
+    }
+    \label{fig:framework}
+    \vspace{-2mm}
+\end{figure*}
+
+
+
+\section{HiReact}
+\subsection{Problem Formulation and Framework Overview}
+
+Given an actor motion sequence $\mathbf{A}=\{a_t\}_{t=1}^{T}$, human reaction generation aims to synthesize the corresponding reactor motion sequence $\mathbf{R}=\{r_t\}_{t=1}^{T}$. Following prior reaction generation settings, we represent both actor and reactor motions with SMPL-X motion parameters~\citep{pavlakos2019expressive}. Specifically, each actor frame and reactor frame are represented as $a_t=[\theta_t^a,q_t^a,\gamma_t^a]$ and $r_t=[\theta_t^r,q_t^r,\gamma_t^r]$, respectively, where $\theta_t\in\mathbb{R}^{K\times d_{\mathrm{rot}}}$ is the rotation representation of the articulated joints, $q_t\in\mathbb{R}^{3}$ is the global orientation, and $\gamma_t\in\mathbb{R}^{3}$ is the root translation. We use the continuous 6D rotation representation~\citep{zhou2019continuity}, i.e., $d_{\mathrm{rot}}=6$. Here, $K$ denotes the number of articulated SMPL-X joints.
+
+To address the mismatch between global reaction plausibility and local contact fidelity, HiReact decomposes reaction generation into two stages. The first stage performs multi-scale reaction generation and predicts an initial reaction $\widetilde{\mathbf{R}}$, while the second stage performs contact-aware local refinement and produces the final reaction $\widehat{\mathbf{R}}$. Formally, the two stages can be written as
+\begin{equation}
+\widetilde{\mathbf{R}} \sim p_{\theta}(\mathbf{R}\mid \mathbf{A},\mathbf{c}),
+\qquad
+\widehat{\mathbf{R}} \sim p_{\phi}(\mathbf{R}\mid \mathbf{A},\widetilde{\mathbf{R}}),
+\end{equation}
+where $\mathbf{c}$ denotes an optional text or action condition. In the unconstrained setting used in our main experiments, no additional condition is provided, i.e., $\mathbf{c}=\varnothing$.
+
+As shown in Fig.~\ref{fig:framework}, Stage I models actor and reactor motions with role-specific multi-scale structures. On the actor side, HiReact encodes the actor motion into a global token stream and multiple part-level token streams, providing both overall interaction context and localized body-part cues. On the reactor side, it uses separate body and hand streams to preserve fine-grained hand responses while maintaining coherent full-body motion through Part-Coordination. Stage II then constructs contact-aware local windows from the initial reaction, encodes actor, reactor, and contact cues within each window, and applies a local refiner to improve hand-centric contact accuracy. This design allows HiReact to first obtain a globally plausible reaction and then selectively refine the temporally sparse but interaction-critical local contact regions.
+
+\subsection{Stage I: Multi-Scale Reaction Generation}
+Stage I generates an initial reactor motion $\widetilde{\mathbf{R}}$ that is globally plausible, temporally coherent, and responsive to the actor motion. We formulate this stage as a conditional denoising diffusion model. Given a clean reactor motion $\mathbf{R}_{0}$ sampled from the data distribution, the forward process perturbs it into a noisy motion $\mathbf{R}_{\tau}$:
+\begin{equation}
+q(\mathbf{R}_{\tau}\mid \mathbf{R}_{0})
+=
+\mathcal{N}
+\left(
+\mathbf{R}_{\tau};
+\sqrt{\bar{\alpha}_{\tau}}\mathbf{R}_{0},
+(1-\bar{\alpha}_{\tau})\mathbf{I}
+\right),
+\end{equation}
+where $\tau$ denotes the diffusion timestep and $\bar{\alpha}_{\tau}$ is the cumulative noise schedule coefficient. Following prior motion diffusion models, the denoising network directly predicts the clean reactor motion instead of the noise:
+\begin{equation}
+\widetilde{\mathbf{R}}
+=
+G_{\theta}
+\left(
+\mathbf{R}_{\tau},
+\mathbf{A},
+\mathbf{c},
+\tau
+\right),
+\end{equation}
+where $G_{\theta}$ is the Stage I reaction generator and $\mathbf{c}$ denotes an optional text or action condition.
+
+The actor motion provides the interaction cues that guide reaction generation. Instead of representing the actor as a single holistic condition, we decompose it into one global component and $P$ local body-part components, denoted as $\{\mathbf{A}^{p}\}_{p=0}^{P}$. Here, $\mathbf{A}^{0}$ represents the global actor motion, while $\mathbf{A}^{p}$ for $p=1,\ldots,P$ represents the $p$-th actor body part. In our implementation, $P=6$, corresponding to backbone, lower body, left arm, right arm, left hand, and right hand. These components are encoded into multi-scale actor features by component-specific tokenizers followed by an actor motion encoder:
+\begin{equation}
+\mathbf{Z}_{a}
+=
+E_a
+\left(
+\left\{
+\operatorname{Tok}_{a}^{p}(\mathbf{A}^{p})
+\right\}_{p=0}^{P}
+\right),
+\end{equation}
+where $\mathbf{Z}_{a}$ denotes the encoded actor condition. The global component captures the overall interaction context, while the part-level components provide localized cues about where and how the actor initiates the interaction.
+
+On the reactor side, $G_{\theta}$ adopts two coordinated generation branches for body and hand reactions. The body branch models full-body reaction dynamics, including posture, trajectory, and temporal coordination, while the hand branch focuses on hand-centric responses that are critical for contact-rich interactions. This body-hand decomposition prevents subtle hand behaviors from being overly smoothed by holistic full-body denoising. Both branches are conditioned on the multi-scale actor features $\mathbf{Z}_{a}$, the diffusion timestep embedding, and the optional condition embedding.
+
+The Stage I generator stacks $N$ Generator Blocks to update the body and hand reactor features. Each block first applies stream-wise self-attention to model temporal dynamics within each reactor branch, and then uses actor-conditioned cross-attention to inject the multi-scale actor features $\mathbf{Z}_{a}$. The resulting fused actor-reactor representations associate localized actor cues with corresponding reactor responses. A Part-Coordination module further exchanges information between the body and hand branches, encouraging coherent full-body reactions while preserving local hand details. Finally, a motion head decodes the updated reactor features back to SMPL-X motion parameters and outputs the initial reaction $\widetilde{\mathbf{R}}$.
+
+We train Stage I with a clean-motion denoising objective:
+\begin{equation}
+\mathcal{L}_{\mathrm{dm}}
+=
+\mathbb{E}_{\mathbf{R}_{0},\tau}
+\left[
+\left\|
+\mathbf{R}_{0}
+-
+\widetilde{\mathbf{R}}
+\right\|_{2}^{2}
+\right].
+\end{equation}
+In addition, we adopt interaction-aware relation constraints to regularize the generated reactor motion with respect to the actor motion, denoted as $\mathcal{L}_{\mathrm{inter}}$. This term encourages actor-reactor consistency in relative pose, orientation, and translation. The overall Stage I objective is
+\begin{equation}
+\mathcal{L}_{\mathrm{StageI}}
+=
+\mathcal{L}_{\mathrm{dm}}
++
+\lambda_{\mathrm{inter}}
+\mathcal{L}_{\mathrm{inter}}.
+\end{equation}
+
+
+
+\subsection{Stage II: Contact-Aware Local Refinement}
+
+Although Stage I generates a globally plausible initial reaction, sparse local contacts may still contain noticeable geometric errors. Directly regenerating the entire sequence for these localized artifacts is inefficient and may disturb the already stable global motion structure. Therefore, Stage II formulates contact improvement as a local residual refinement problem. Given the Stage I initial reaction $\widetilde{\mathbf{R}}$, we refine contact-relevant local windows and predict residual corrections instead of a new full-sequence motion.
+
+We first construct a set of contact-aware local windows from the actor motion and the initial reaction:
+\begin{equation}
+\mathcal{W}
+=
+\Phi
+\left(
+\mathbf{A},
+\widetilde{\mathbf{R}}
+\right),
+\end{equation}
+where $\Phi(\cdot)$ denotes a deterministic window construction function. As illustrated in Fig.~\ref{fig:framework}, this process consists of contact detection, segment extraction, and window expansion. It converts sparse contact-related frames into fixed-length temporal windows, allowing the refinement stage to focus on interaction-critical regions while leaving the rest of the sequence unchanged.
+
+For the $m$-th local window, we denote the corresponding actor motion, initial reactor motion, and contact-aware cues as $\mathbf{A}^{(m)}$, $\widetilde{\mathbf{R}}^{(m)}$, and $\mathbf{C}^{(m)}$, respectively. The local refiner predicts a residual motion $\Delta\mathbf{R}^{(m)}$ conditioned on these inputs:
+\begin{equation}
+\Delta\mathbf{R}^{(m)}
+=
+F_{\phi}
+\left(
+\mathbf{A}^{(m)},
+\widetilde{\mathbf{R}}^{(m)},
+\mathbf{C}^{(m)}
+\right),
+\qquad
+\widehat{\mathbf{R}}^{(m)}
+=
+\widetilde{\mathbf{R}}^{(m)}
++
+\Delta\mathbf{R}^{(m)}.
+\end{equation}
+Here, $F_{\phi}$ denotes the Stage II local refiner, and $\widehat{\mathbf{R}}^{(m)}$ is the refined reactor motion within the local window.
+
+The refiner follows a contact-aware transformer structure. The local actor motion and initial reactor motion are encoded by separate motion encoders. We construct contact-aware cue tokens from local relative positions, relative motion and velocity, and thresholded contact states, and inject them into the refiner block through contact attention. Within each refiner block, temporal self-attention first models the local reactor dynamics, cross-attention injects the actor motion context, and contact attention modulates the features using the contact-aware cue tokens. A feed-forward network then updates the local representation. Finally, the refined local windows are integrated back into the sequence to obtain the final reaction $\widehat{\mathbf{R}}$.
+
+Stage II is trained with residual reconstruction and contact-aware regularization. The overall refinement objective is
+\begin{equation}
+\mathcal{L}_{\mathrm{StageII}}
+=
+\mathcal{L}_{\mathrm{res}}
++
+\lambda_{\mathrm{contact}}\mathcal{L}_{\mathrm{contact}}
++
+\lambda_{\mathrm{smooth}}\mathcal{L}_{\mathrm{smooth}}
++
+\lambda_{\mathrm{geom}}\mathcal{L}_{\mathrm{geom}},
+\end{equation}
+where $\mathcal{L}_{\mathrm{res}}$ supervises the predicted residual motion, $\mathcal{L}_{\mathrm{contact}}$ encourages improved contact quality, $\mathcal{L}_{\mathrm{smooth}}$ enforces temporal continuity, and $\mathcal{L}_{\mathrm{geom}}$ regularizes local interaction geometry.
+
+
+
+
+
+% ==================================================
+% 4. Experiments
+% ==================================================
+\section{Experiments}
+
+\begin{figure*}[t]
+    \centering
+    \includegraphics[width=\textwidth]{figures/Figure_3_comparison.png}
+    \caption{
+    Qualitative comparison of reaction generation results with zoomed-in details for local contact regions.
+    Blue bodies denote actors, and red bodies denote reactors.
+    }
+    \label{fig:contact_refinement}
+\end{figure*}
+
+\subsection{Datasets and Evaluation Protocols}
+
+\paragraph{Datasets.}
+We primarily evaluate HiReact on the Inter-X dataset~\cite{xu2024inter}, a large-scale human-human interaction dataset covering 40 daily interaction categories with about 11K interaction sequences and more than 8.1M motion frames. Inter-X provides full-body motion, fine-grained hand motion, and interaction-order annotations, making it well suited for asymmetric actor-reactor reaction generation. To better evaluate local interaction quality, we further construct a contact-rich subset from Inter-X by selecting 15 action categories with frequent and explicit physical contacts. This subset is used for contact-oriented evaluation of hand-centric interaction accuracy. In addition, we conduct supplementary experiments on CHI3D~\cite{fieraru2020three}, which contains challenging close-contact human interactions, and report the results in the appendix.
+
+\paragraph{Global motion evaluation.}
+We evaluate global reaction quality on the full Inter-X train/test split under the online, unconstrained setting, where only the actor motion is used as input and no text condition is provided. Generated full-sequence motions are compared in the canonical motion space using STGCN-based motion distribution metrics, including Fr\'echet Inception Distance (FID)~\cite{heusel2017gans}, Accuracy (Acc.), Diversity (Div.), and Multimodality (MMod.). FID measures distributional similarity to real motions, Acc. reflects action recognizability, Div. evaluates motion diversity, and MMod. measures the multimodal nature of conditional generation. The results are reported in Tab.~\ref{tab:main_results} as mean $\pm$ variation over repeated sampling runs.
+
+\paragraph{Contact evaluation.}
+We evaluate local contact quality on the contact-rich Inter-X subset under both train-conditioned and test-conditioned settings. Unlike global motion evaluation, contact evaluation is performed in the restored real-world pair space, where subject-specific body shape, gender, and pairwise global alignment are recovered. This allows hand-target contact and local interaction geometry to be measured on realistic paired meshes rather than canonicalized bodies. We report Contact F1, Recall, Contact Distance, and Contact Ratio at the full-sequence level. Contact F1 and Recall measure the quality of generated contact events, Contact Distance measures hand-target proximity on contact-relevant frames, and Contact Ratio measures the proportion of contact frames, where values closer to the real distribution are preferred. The results are shown in Tab.~\ref{tab:contact_results}.
+
+
+
+\subsection{Implementation Details}
+
+For \textbf{Stage I}, we use an interaction-aware diffusion generator with 8 denoising blocks, a hidden dimension of 256, and 4 attention heads. The diffusion process uses 1000 diffusion steps with a cosine noise schedule. We train the model with a batch size of 32 for 200K steps. During inference, we adopt DDIM sampling with 5 denoising steps for all diffusion-based models. \textbf{Stage I} training takes about 25 hours on 4 NVIDIA RTX 5090 GPUs.
+
+For \textbf{Stage II}, we use a contact-aware local residual refiner with a hidden dimension of 512, 8 transformer layers, and 8 attention heads. The refiner is trained and inferred on fixed-length local windows of 30 frames, using a batch size of 32 for 10K training steps. For contact-relevant window selection, we use $\tau_{\text{contact}}=0.10$ as the main threshold in the selector. All \textbf{Stage II} results are reported after stitching the refined local windows back into the full sequence, and are therefore evaluated under the full-sequence reconstruction protocol.
+
+
+
+
+
+\subsection{Comparison to State-of-the-Art Methods}
+
+\begin{table*}[t]
+\centering
+\caption{
+Quantitative comparison on Inter-X under train-conditioned and test-conditioned settings.
+$\downarrow$ indicates lower is better, $\uparrow$ indicates higher is better, and $\rightarrow$ indicates closer to real motion is better.
+HiReact* denotes the Stage I reaction before Stage II local refinement.
+}
+\label{tab:main_results}
+\resizebox{\textwidth}{!}{
+\begin{tabular}{lcccccccc}
+\toprule
+\multirow{2}{*}{Method}
+& \multicolumn{4}{c}{\textbf{Train conditioned}}
+& \multicolumn{4}{c}{\textbf{Test conditioned}} \\
+\cmidrule(lr){2-5} \cmidrule(lr){6-9}
+& FID$\downarrow$ & Acc.$\uparrow$ & Div.$\rightarrow$ & MMod.$\rightarrow$
+& FID$\downarrow$ & Acc.$\uparrow$ & Div.$\rightarrow$ & MMod.$\rightarrow$ \\
+\midrule
+Real
+& -
+& 0.987$\pm$0.0000
+& 21.69$\pm$0.27
+& 12.31$\pm$0.03
+& -
+& 0.726$\pm$0.0002
+& 19.92$\pm$0.19
+& 13.81$\pm$0.06 \\
+\midrule
+AGRoL
+& 11.73$\pm$0.42
+& 0.858$\pm$0.0002
+& 19.35$\pm$0.13
+& 12.50$\pm$0.05
+& 13.72$\pm$0.25
+& 0.564$\pm$0.0001
+& 17.95$\pm$0.24
+& 13.41$\pm$0.05 \\
+MDM
+& 7.05$\pm$0.46
+& 0.871$\pm$0.0001
+& 19.46$\pm$0.17
+& 12.47$\pm$0.05
+& 8.45$\pm$0.16
+& 0.581$\pm$0.0002
+& 18.03$\pm$0.29
+& 13.33$\pm$0.05 \\
+MDM-GRU
+& 5.45$\pm$0.28
+& 0.911$\pm$0.0002
+& 19.96$\pm$0.24
+& 12.40$\pm$0.04
+& 9.81$\pm$0.22
+& 0.579$\pm$0.0001
+& 18.02$\pm$0.21
+& 13.30$\pm$0.04 \\
+ReGenNet
+& 1.40$\pm$0.03
+& 0.968$\pm$0.0001
+& \underline{21.11$\pm$0.14}
+& \textbf{12.35$\pm$0.05}
+& 8.64$\pm$0.28
+& \underline{0.598$\pm$0.0002}
+& 18.34$\pm$0.34
+& 13.40$\pm$0.05 \\
+\midrule
+\rowcolor{gray!12}
+HiReact*
+& \underline{0.94$\pm$0.01}
+& \underline{0.970$\pm$0.0001}
+& \textbf{21.22$\pm$0.16}
+& \underline{12.38$\pm$0.04}
+& \textbf{4.01$\pm$0.08}
+& \textbf{0.601$\pm$0.0002}
+& \textbf{18.84$\pm$0.25}
+& \textbf{13.81$\pm$0.05} \\
+\rowcolor{gray!12}
+HiReact
+& \textbf{0.63$\pm$0.01}
+& \textbf{0.976$\pm$0.0006}
+& 20.84$\pm$0.02
+& 11.82$\pm$0.01
+& \underline{4.36$\pm$0.04}
+& 0.591$\pm$0.0022
+& \underline{18.69$\pm$0.05}
+& \underline{13.59$\pm$0.02} \\
+\bottomrule
+\end{tabular}
+}
+\end{table*}
+
+
+\begin{table*}[t]
+\centering
+\caption{
+Contact evaluation on the contact-rich Inter-X subset under train-conditioned and test-conditioned settings.
+$\downarrow$ indicates lower is better, $\uparrow$ indicates higher is better, and $\rightarrow$ indicates closer to real motion is better.
+HiReact* denotes the Stage I output before Stage II contact-aware local refinement.
+Contact metrics are evaluated in the restored interaction space.
+}
+\label{tab:contact_results}
+\resizebox{\textwidth}{!}{
+\begin{tabular}{lcccccccc}
+\toprule
+\multirow{2}{*}{Method}
+& \multicolumn{4}{c}{\textbf{Train conditioned}}
+& \multicolumn{4}{c}{\textbf{Test conditioned}} \\
+\cmidrule(lr){2-5} \cmidrule(lr){6-9}
+& Contact F1$\uparrow$
+& Recall$\uparrow$
+& Contact Dist.$\downarrow$
+& Contact Ratio$\rightarrow$
+& Contact F1$\uparrow$
+& Recall$\uparrow$
+& Contact Dist.$\downarrow$
+& Contact Ratio$\rightarrow$ \\
+\midrule
+Real
+& -
+& -
+& 0.0160
+& 0.4171
+& -
+& -
+& 0.0168
+& 0.3886 \\
+\midrule
+AGRoL
+& 0.2369
+& 0.1807
+& 0.2239
+& 0.3390
+& 0.1117
+& 0.0842
+& 0.3504
+& 0.2526 \\
+MDM
+& 0.2731
+& 0.2041
+& 0.2256
+& 0.3071
+& 0.1353
+& 0.0993
+& 0.3521
+& 0.2375 \\
+MDM-GRU
+& 0.3436
+& 0.2609
+& 0.2095
+& 0.3164
+& 0.1274
+& 0.0924
+& 0.3927
+& 0.2273 \\
+ReGenNet
+& 0.6720
+& 0.6137
+& 0.0490
+& 0.4491
+& 0.1690
+& 0.1266
+& 0.3074
+& 0.2466 \\
+\midrule
+\rowcolor{gray!12}
+HiReact*
+& \underline{0.7816}
+& \underline{0.7300}
+& \underline{0.0343}
+& \textbf{0.4421}
+& \underline{0.1997}
+& \underline{0.1536}
+& \underline{0.2828}
+& \underline{0.2585} \\
+\rowcolor{gray!12}
+HiReact
+& \textbf{0.7946}
+& \textbf{0.7494}
+& \textbf{0.0324}
+& \underline{0.4477}
+& \textbf{0.2012}
+& \textbf{0.1557}
+& \textbf{0.2818}
+& \textbf{0.2617} \\
+\bottomrule
+\end{tabular}
+}
+\end{table*}
+
+We compare HiReact with representative reaction generation and motion generation baselines under the online, unconstrained setting, where only the actor motion is provided as the condition and no text or action label is used. The compared methods include AGRoL~\citep{du2023avatars}, MDM~\citep{tevet2022human}, MDM-GRU~\citep{tevet2022human}, and ReGenNet~\citep{xu2024regennet}. AGRoL serves as a strong motion generation baseline adapted to the reaction generation setting, MDM and MDM-GRU represent diffusion-based motion generation baselines with different temporal modeling choices, and ReGenNet is the most directly related action-reaction synthesis baseline. We also report HiReact*, which denotes the Stage I output before Stage II local refinement, to show the effect of the final contact-aware refinement stage.
+
+Table~\ref{tab:main_results} reports the global motion evaluation results on the full Inter-X split. HiReact achieves strong overall performance under both train-conditioned and test-conditioned settings. Compared with ReGenNet, HiReact substantially reduces FID in the train-conditioned setting and maintains much better generalization in the test-conditioned setting. In particular, HiReact* obtains the best test-conditioned FID and Acc., indicating that the proposed multi-scale actor conditioning and body-hand reactor generation improve the quality and recognizability of generated reactions. After Stage II refinement, HiReact further improves the train-conditioned FID and Acc., while remaining competitive on test-conditioned global metrics. Since Stage II focuses on local contact correction rather than re-optimizing the full-sequence motion distribution, slight variations in STGCN-based metrics after refinement are expected.
+
+Table~\ref{tab:contact_results} further evaluates local contact quality on the contact-rich Inter-X subset. HiReact consistently outperforms prior methods across contact-oriented metrics. Compared with ReGenNet, HiReact achieves higher Contact F1 and Recall, and significantly lower Contact Distance, showing that our framework better preserves contact-relevant interaction geometry. The improvement from HiReact* to HiReact further confirms the effectiveness of contact-aware local refinement: Stage II improves Contact F1, Recall, and Contact Distance under both train-conditioned and test-conditioned settings. Although the gain is more moderate on the test split, the consistent improvement indicates that refining contact-relevant local windows can enhance local interaction fidelity without regenerating the entire sequence.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+\subsection{Ablation Study}
+
+We first ablate the key design choices of Stage I under the test-conditioned setting, as shown in Tab.~\ref{tab:ablation_stage1}. Replacing the proposed Global + Multi-Part actor representation with either a single global actor token or a coarse body-hand actor representation leads to higher FID, indicating that fine-grained actor cues improve generalization to unseen interactions. The degradation is more pronounced when replacing the reactor body-hand dual-stream generator with a single holistic reactor stream, which shows the importance of explicitly modeling fine-grained reactor responses rather than generating the reactor as one monolithic sequence. We also compare different hidden dimensions for the full Stage I model. Increasing the dimension to 512 or reducing it to 128 does not improve the overall performance over the default 256-dimensional model. These results suggest that the gains of HiReact mainly come from the proposed role-specific multi-scale design, rather than simply increasing model capacity.
+
+
+\begin{table}[t]
+\centering
+\caption{
+Ablation study of Stage I modeling choices and model scale on the Inter-X test-conditioned setting.
+$\downarrow$ indicates lower is better, $\uparrow$ indicates higher is better, and $\rightarrow$ indicates closer to real motion is better.
+Full Stage I corresponds to HiReact* before Stage II refinement.
+}
+\label{tab:ablation_stage1}
+\resizebox{\linewidth}{!}{
+\begin{tabular}{llcccc}
+\toprule
+Class & Settings & FID$\downarrow$ & Acc.$\uparrow$ & Div.$\rightarrow$ & MMod.$\rightarrow$ \\
+\midrule
+Reference
+& Real
+& -
+& 0.726$\pm$0.0002
+& 19.92$\pm$0.19
+& 13.81$\pm$0.06 \\
+\midrule
+\multirow{2}{*}{Actor condition}
+& Global
+& 5.06$\pm$0.12
+& 0.598$\pm$0.0003
+& 18.75$\pm$0.28
+& 13.65$\pm$0.03 \\
+& Body-Hand
+& \underline{5.00$\pm$0.10}
+& \textbf{0.607$\pm$0.0001}
+& 18.75$\pm$0.32
+& 13.63$\pm$0.05 \\
+\midrule
+Reactor generation
+& Single-stream
+& 7.80$\pm$0.19
+& 0.588$\pm$0.0002
+& 18.20$\pm$0.23
+& 13.49$\pm$0.03 \\
+\midrule
+\multirow{2}{*}{Model scale}
+& Full Stage I, $D=128$
+& 6.24$\pm$0.17
+& 0.596$\pm$0.0002
+& \textbf{18.98$\pm$0.35}
+& 13.69$\pm$0.03 \\
+& Full Stage I, $D=512$
+& 4.99$\pm$0.15
+& \underline{0.603$\pm$0.0001}
+& \underline{18.90$\pm$0.31}
+& \underline{13.71$\pm$0.04} \\
+\midrule
+\rowcolor{gray!12}
+Full model
+& Full Stage I, $D=256$
+& \textbf{4.01$\pm$0.08}
+& 0.601$\pm$0.0002
+& 18.84$\pm$0.25
+& \textbf{13.81$\pm$0.05} \\
+\bottomrule
+\end{tabular}
+}
+\end{table}
+
+
+
+
+% ==================================================
+% 5. Conclusion
+% ==================================================
+\section{Conclusion}
+
+We presented HiReact, a hierarchical interaction-aware framework for human reaction generation that addresses both global reaction plausibility and fine-grained local interaction accuracy. HiReact first performs multi-scale reaction generation by encoding actor motions with global and part-level cues and generating reactor motions through coordinated body-hand streams. It then applies contact-aware local refinement to contact-relevant temporal windows, predicting residual corrections without regenerating the entire sequence. Experiments on Inter-X show that HiReact improves global motion quality and further enhances contact-oriented metrics, demonstrating the effectiveness of combining role-specific multi-scale modeling with targeted local refinement. Future work may further improve generalization under unseen interaction patterns and incorporate richer physical constraints for close-contact scenarios.
+
+\bibliographystyle{plainnat}
+\bibliography{references}
+
+\end{document}
