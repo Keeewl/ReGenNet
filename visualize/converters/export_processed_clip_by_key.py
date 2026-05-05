@@ -118,7 +118,6 @@ def _export_one_from_h5(h5_path: str, output_dir: str, args: argparse.Namespace)
 
         clip_dir = os.path.join(output_dir, args.dataset_key)
         os.makedirs(clip_dir, exist_ok=True)
-        import numpy as np
 
         np.savez(os.path.join(clip_dir, "P1.npz"), **p1_params)
         np.savez(os.path.join(clip_dir, "P2.npz"), **p2_params)
