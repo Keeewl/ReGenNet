@@ -126,7 +126,8 @@ while IFS= read -r raw_line; do
       --dataset_key "${dataset_key}" \
       --output_dir "${gt_dst_root}" \
       --shape_mode restored_shape_height \
-      --raw_motions_root "${RAW_MOTIONS_ROOT_EFFECTIVE}"
+      --raw_motions_root "${RAW_MOTIONS_ROOT_EFFECTIVE}" \
+      --restoration_meta_path "${RESTORATION_META_PATH}"
   fi
 
   baseline_out="${key_root}/baseline"

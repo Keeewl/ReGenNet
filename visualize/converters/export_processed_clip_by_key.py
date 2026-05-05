@@ -7,6 +7,9 @@ import argparse
 import os
 
 import h5py
+import numpy as np
+
+from data_loaders.a2m.feeder import _load_restoration_package
 
 from visualize.converters.convert_processed_h5_to_motions import (
     _downsample_raw_trans,
@@ -20,6 +23,19 @@ from visualize.converters.convert_processed_h5_to_motions import (
     _select_trans_for_roles,
     build_params,
 )
+
+
+GENDER_ID_TO_NAME = {0: "neutral", 1: "male", 2: "female"}
+
+
+def _restoration_record(args: argparse.Namespace):
+    if not getattr(args, "restoration_meta_path", ""):
+        return None
+    payload, key_to_index = _load_restoration_package(args.restoration_meta_path)
+    idx = key_to_index.get(args.dataset_key, None)
+    if idx is None:
+        return None
+    return payload, int(idx)
 
 
 def _export_one_from_h5(h5_path: str, output_dir: str, args: argparse.Namespace) -> bool:
@@ -44,9 +60,17 @@ def _export_one_from_h5(h5_path: str, output_dir: str, args: argparse.Namespace)
 
         p1_betas = p1_gender = p2_betas = p2_gender = None
         trans_p1 = trans_p2 = None
+        restoration = _restoration_record(args)
 
         if args.shape_mode in {"restored", "restored_shape_height"}:
-            betas_p1, gender_p1, betas_p2, gender_p2 = _load_raw_shapes(args.raw_motions_root, args.dataset_key)
+            if restoration is not None:
+                payload, idx = restoration
+                betas_p1 = np.asarray(payload["p1_betas"][idx], dtype=np.float32).reshape(-1)
+                betas_p2 = np.asarray(payload["p2_betas"][idx], dtype=np.float32).reshape(-1)
+                gender_p1 = GENDER_ID_TO_NAME.get(int(np.asarray(payload["p1_gender_id"][idx]).item()), "neutral")
+                gender_p2 = GENDER_ID_TO_NAME.get(int(np.asarray(payload["p2_gender_id"][idx]).item()), "neutral")
+            else:
+                betas_p1, gender_p1, betas_p2, gender_p2 = _load_raw_shapes(args.raw_motions_root, args.dataset_key)
             actor_shape, reactor_shape = _select_shapes_for_roles(
                 actor_is_p1, betas_p1, gender_p1, betas_p2, gender_p2
             )
@@ -54,9 +78,17 @@ def _export_one_from_h5(h5_path: str, output_dir: str, args: argparse.Namespace)
             p2_betas, p2_gender = reactor_shape
 
         if args.shape_mode == "restored_shape_height":
-            raw_trans_p1, raw_trans_p2 = _load_raw_trans(args.raw_motions_root, args.dataset_key)
-            ds_p1 = _downsample_raw_trans(raw_trans_p1, length, args.downsample)
-            ds_p2 = _downsample_raw_trans(raw_trans_p2, length, args.downsample)
+            if restoration is not None:
+                payload, idx = restoration
+                raw_trans_p1 = np.asarray(payload["p1_trans"][idx], dtype=np.float32)
+                raw_trans_p2 = np.asarray(payload["p2_trans"][idx], dtype=np.float32)
+                downsample = int(np.asarray(payload["downsample"][idx]).item()) if "downsample" in payload else args.downsample
+                ds_p1 = _downsample_raw_trans(raw_trans_p1, length, downsample)
+                ds_p2 = _downsample_raw_trans(raw_trans_p2, length, downsample)
+            else:
+                raw_trans_p1, raw_trans_p2 = _load_raw_trans(args.raw_motions_root, args.dataset_key)
+                ds_p1 = _downsample_raw_trans(raw_trans_p1, length, args.downsample)
+                ds_p2 = _downsample_raw_trans(raw_trans_p2, length, args.downsample)
             actor_trans, reactor_trans = _select_trans_for_roles(actor_is_p1, ds_p1, ds_p2)
             trans_p1 = actor_trans
             trans_p2 = reactor_trans
@@ -107,6 +139,10 @@ def main() -> None:
         default="restored_shape_height",
     )
     parser.add_argument("--raw_motions_root", required=True)
+    parser.add_argument(
+        "--restoration_meta_path",
+        default=os.path.join(repo_root, "dataset", "interx", "cache", "interx_restoration_meta.npz"),
+    )
     parser.add_argument(
         "--interaction_order",
         default=os.path.join(repo_root, "dataset", "interx", "annots", "interaction_order.pkl"),
