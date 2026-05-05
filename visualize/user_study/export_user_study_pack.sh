@@ -35,7 +35,7 @@ set -euo pipefail
 DATASET_KEYS_FILE=${DATASET_KEYS_FILE:-visualize/user_study/dataset_keys.txt}
 OUTPUT_ROOT=${OUTPUT_ROOT:-outputs/user_study_pack}
 GT_DATA_DIR=${GT_DATA_DIR:-outputs/interx_regen_train_restored_height}
-RAW_MOTIONS_ROOT=${RAW_MOTIONS_ROOT:-dataset/interx/motions}
+RAW_MOTIONS_ROOT=${RAW_MOTIONS_ROOT:-}
 RESTORATION_META_PATH=${RESTORATION_META_PATH:-dataset/interx/cache/interx_restoration_meta.npz}
 REGION_MAP_PATH=${REGION_MAP_PATH:-visualize/viewer/part_segm/6_parts/six_parts.pkl}
 
@@ -60,6 +60,17 @@ if [[ ! -f "${DATASET_KEYS_FILE}" ]]; then
   exit 1
 fi
 
+if [[ -z "${RAW_MOTIONS_ROOT}" ]]; then
+  if [[ -d "dataset/interx/motions/visual_motions" ]]; then
+    RAW_MOTIONS_ROOT="dataset/interx/motions/visual_motions"
+  elif [[ -d "dataset/interx/motions" ]]; then
+    RAW_MOTIONS_ROOT="dataset/interx/motions"
+  else
+    echo "Could not infer RAW_MOTIONS_ROOT" >&2
+    exit 1
+  fi
+fi
+
 mkdir -p "${OUTPUT_ROOT}"
 
 while IFS= read -r raw_line; do
@@ -76,9 +87,37 @@ while IFS= read -r raw_line; do
   gt_dst_root="${key_root}/gt"
   mkdir -p "${gt_dst_root}"
   if [[ ! -d "${gt_src}" ]]; then
-    echo "GT clip not found: ${gt_src}" >&2
+    gt_src="${RAW_MOTIONS_ROOT}/${dataset_key}"
+    if [[ -d "${gt_src}" ]]; then
+      echo "GT clip not found in GT_DATA_DIR; fallback to raw motions: ${gt_src}"
+    else
+      alt_gt_src="${RAW_MOTIONS_ROOT}/visual_motions/${dataset_key}"
+      if [[ -d "${alt_gt_src}" ]]; then
+        gt_src="${alt_gt_src}"
+        echo "GT clip not found in GT_DATA_DIR; fallback to raw motions: ${gt_src}"
+      else
+        echo "GT clip not found in GT_DATA_DIR, RAW_MOTIONS_ROOT, or RAW_MOTIONS_ROOT/visual_motions: ${dataset_key}" >&2
+        exit 1
+      fi
+    fi
+  fi
+
+  if [[ ! -d "${RAW_MOTIONS_ROOT}/${dataset_key}" ]] && [[ -d "${RAW_MOTIONS_ROOT}/visual_motions/${dataset_key}" ]]; then
+    RAW_MOTIONS_ROOT_EFFECTIVE="${RAW_MOTIONS_ROOT}/visual_motions"
+  else
+    RAW_MOTIONS_ROOT_EFFECTIVE="${RAW_MOTIONS_ROOT}"
+  fi
+
+  if [[ ! -d "${RAW_MOTIONS_ROOT_EFFECTIVE}/${dataset_key}" ]]; then
+    echo "Raw motions root does not contain dataset_key: ${RAW_MOTIONS_ROOT_EFFECTIVE}/${dataset_key}" >&2
     exit 1
   fi
+
+  if [[ ! -f "${RESTORATION_META_PATH}" ]]; then
+    echo "RESTORATION_META_PATH not found: ${RESTORATION_META_PATH}" >&2
+    exit 1
+  fi
+
   rm -rf "${gt_dst_root:?}/${dataset_key}"
   cp -R "${gt_src}" "${gt_dst_root}/"
 
@@ -90,7 +129,7 @@ while IFS= read -r raw_line; do
     --output_dir "${baseline_out}" \
     --shape_mode restored_shape_height \
     --restoration_meta_path "${RESTORATION_META_PATH}" \
-    --raw_motions_root "${RAW_MOTIONS_ROOT}"
+    --raw_motions_root "${RAW_MOTIONS_ROOT_EFFECTIVE}"
 
   stage1_out="${key_root}/stage1"
   python -m sample.infer_single_stage1_clip \
@@ -100,7 +139,7 @@ while IFS= read -r raw_line; do
     --output_dir "${stage1_out}" \
     --shape_mode restored_shape_height \
     --restoration_meta_path "${RESTORATION_META_PATH}" \
-    --raw_motions_root "${RAW_MOTIONS_ROOT}"
+    --raw_motions_root "${RAW_MOTIONS_ROOT_EFFECTIVE}"
 
   stage2_out="${key_root}/stage2"
   python -m refine_v2.cli_infer_refiner_on_viewer_clip \
