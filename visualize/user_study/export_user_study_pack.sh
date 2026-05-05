@@ -131,6 +131,8 @@ while IFS= read -r raw_line; do
     --dataset interx \
     --dataset_key "${dataset_key}" \
     --output_dir "${baseline_out}" \
+    --use_ddim \
+    --timestep_respacing ddim5 \
     --shape_mode restored_shape_height \
     --restoration_meta_path "${RESTORATION_META_PATH}" \
     --raw_motions_root "${RAW_MOTIONS_ROOT_EFFECTIVE}"
@@ -141,6 +143,8 @@ while IFS= read -r raw_line; do
     --dataset interx \
     --dataset_key "${dataset_key}" \
     --output_dir "${stage1_out}" \
+    --use_ddim \
+    --timestep_respacing ddim5 \
     --shape_mode restored_shape_height \
     --restoration_meta_path "${RESTORATION_META_PATH}" \
     --raw_motions_root "${RAW_MOTIONS_ROOT_EFFECTIVE}"
