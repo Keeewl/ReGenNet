@@ -6,12 +6,17 @@ from __future__ import annotations
 import argparse
 import os
 from pathlib import Path
+import sys
 
 import imageio
 import numpy as np
 import torch
 import trimesh
 from tqdm import tqdm
+
+_REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+if _REPO_ROOT not in sys.path:
+    sys.path.insert(0, _REPO_ROOT)
 
 from model.smpl import SMPLX
 from visualize.legacy.render.renderer import get_renderer, get_smplx_faces
