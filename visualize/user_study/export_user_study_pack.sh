@@ -96,8 +96,8 @@ while IFS= read -r raw_line; do
         gt_src="${alt_gt_src}"
         echo "GT clip not found in GT_DATA_DIR; fallback to raw motions: ${gt_src}"
       else
-        echo "GT clip not found in GT_DATA_DIR, RAW_MOTIONS_ROOT, or RAW_MOTIONS_ROOT/visual_motions: ${dataset_key}" >&2
-        exit 1
+        gt_src=""
+        echo "GT clip not found as pre-exported motions; fallback to regen h5 export: ${dataset_key}"
       fi
     fi
   fi
@@ -118,8 +118,16 @@ while IFS= read -r raw_line; do
     exit 1
   fi
 
-  rm -rf "${gt_dst_root:?}/${dataset_key}"
-  cp -R "${gt_src}" "${gt_dst_root}/"
+  if [[ -d "${gt_src}" ]]; then
+    rm -rf "${gt_dst_root:?}/${dataset_key}"
+    cp -R "${gt_src}" "${gt_dst_root}/"
+  else
+    python -m visualize.converters.export_processed_clip_by_key \
+      --dataset_key "${dataset_key}" \
+      --output_dir "${gt_dst_root}" \
+      --shape_mode restored_shape_height \
+      --raw_motions_root "${RAW_MOTIONS_ROOT_EFFECTIVE}"
+  fi
 
   baseline_out="${key_root}/baseline"
   python -m sample.infer_single_stage1_clip \
