@@ -17,9 +17,12 @@ from tqdm import tqdm
 _REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 if _REPO_ROOT not in sys.path:
     sys.path.insert(0, _REPO_ROOT)
+_LEGACY_RENDER_ROOT = os.path.join(_REPO_ROOT, "visualize", "legacy", "render")
+if _LEGACY_RENDER_ROOT not in sys.path:
+    sys.path.insert(0, _LEGACY_RENDER_ROOT)
 
 from model.smpl import SMPLX
-from visualize.legacy.render.renderer import get_renderer, get_smplx_faces
+from renderer import get_renderer, get_smplx_faces
 
 
 ACTOR_COLOR = (0.10, 0.47, 0.78)
@@ -134,7 +137,7 @@ def _render_frame_pair(renderer, faces, verts_p1, verts_p2, cam, p1_color, p2_co
         pyr_mesh = pyrender.Mesh.from_trimesh(mesh, material=material)
         mesh_node_list.append(scene.add(pyr_mesh, "mesh"))
 
-    from visualize.legacy.render.renderer import WeakPerspectiveCamera
+    from renderer import WeakPerspectiveCamera
     from pyrender.constants import RenderFlags
 
     sx, sy, tx, ty = cam
