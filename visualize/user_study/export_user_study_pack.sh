@@ -108,11 +108,6 @@ while IFS= read -r raw_line; do
     RAW_MOTIONS_ROOT_EFFECTIVE="${RAW_MOTIONS_ROOT}"
   fi
 
-  if [[ ! -d "${RAW_MOTIONS_ROOT_EFFECTIVE}/${dataset_key}" ]]; then
-    echo "Raw motions root does not contain dataset_key: ${RAW_MOTIONS_ROOT_EFFECTIVE}/${dataset_key}" >&2
-    exit 1
-  fi
-
   if [[ ! -f "${RESTORATION_META_PATH}" ]]; then
     echo "RESTORATION_META_PATH not found: ${RESTORATION_META_PATH}" >&2
     exit 1
