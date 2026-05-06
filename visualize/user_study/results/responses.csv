@@ -1,0 +1,11 @@
+﻿participant_id,timestamp,clip_id,contact_choice,reaction_choice,realism_choice
+6a9a4a78-d41b-4ea8-8821-bf8ed2c8185d,2026-05-06T14:18:33,clip_001,C,C,C
+6a9a4a78-d41b-4ea8-8821-bf8ed2c8185d,2026-05-06T14:18:33,clip_002,C,B,A
+6a9a4a78-d41b-4ea8-8821-bf8ed2c8185d,2026-05-06T14:18:33,clip_003,A,C,C
+6a9a4a78-d41b-4ea8-8821-bf8ed2c8185d,2026-05-06T14:18:33,clip_004,B,C,C
+6a9a4a78-d41b-4ea8-8821-bf8ed2c8185d,2026-05-06T14:18:33,clip_005,B,B,B
+6a9a4a78-d41b-4ea8-8821-bf8ed2c8185d,2026-05-06T14:18:33,clip_006,B,B,B
+6a9a4a78-d41b-4ea8-8821-bf8ed2c8185d,2026-05-06T14:18:33,clip_007,B,B,C
+6a9a4a78-d41b-4ea8-8821-bf8ed2c8185d,2026-05-06T14:18:33,clip_008,A,A,A
+6a9a4a78-d41b-4ea8-8821-bf8ed2c8185d,2026-05-06T14:18:33,clip_009,D,D,D
+6a9a4a78-d41b-4ea8-8821-bf8ed2c8185d,2026-05-06T14:18:33,clip_010,D,C,D

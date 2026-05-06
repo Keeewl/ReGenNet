@@ -1,0 +1,11 @@
+﻿participant_id,timestamp,clip_id,contact_option,contact_method,reaction_option,reaction_method,realism_option,realism_method
+6a9a4a78-d41b-4ea8-8821-bf8ed2c8185d,2026-05-06T14:18:33,clip_001,C,hireact,C,hireact,C,hireact
+6a9a4a78-d41b-4ea8-8821-bf8ed2c8185d,2026-05-06T14:18:33,clip_002,C,baseline,B,hireact,A,gt
+6a9a4a78-d41b-4ea8-8821-bf8ed2c8185d,2026-05-06T14:18:33,clip_003,A,gt,C,hireact,C,hireact
+6a9a4a78-d41b-4ea8-8821-bf8ed2c8185d,2026-05-06T14:18:33,clip_004,B,gt,C,hireact,C,hireact
+6a9a4a78-d41b-4ea8-8821-bf8ed2c8185d,2026-05-06T14:18:33,clip_005,B,hireact,B,hireact,B,hireact
+6a9a4a78-d41b-4ea8-8821-bf8ed2c8185d,2026-05-06T14:18:33,clip_006,B,hireact,B,hireact,B,hireact
+6a9a4a78-d41b-4ea8-8821-bf8ed2c8185d,2026-05-06T14:18:33,clip_007,B,hireact_star,B,hireact_star,C,hireact
+6a9a4a78-d41b-4ea8-8821-bf8ed2c8185d,2026-05-06T14:18:33,clip_008,A,gt,A,gt,A,gt
+6a9a4a78-d41b-4ea8-8821-bf8ed2c8185d,2026-05-06T14:18:33,clip_009,D,hireact,D,hireact,D,hireact
+6a9a4a78-d41b-4ea8-8821-bf8ed2c8185d,2026-05-06T14:18:33,clip_010,D,hireact,C,hireact_star,D,hireact

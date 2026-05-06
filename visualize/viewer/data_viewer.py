@@ -594,6 +594,11 @@ if __name__=='__main__':
     parser.add_argument('--val_index_h5', help='Optional val.h5 path used to map dataset_key to val split index')
     parser.add_argument('--test_index_h5', help='Optional test.h5 path used to map dataset_key to test split index')
     parser.add_argument(
+        '--playback_fps',
+        type=float,
+        help='Override viewer playback fps without changing the dataset preset defaults'
+    )
+    parser.add_argument(
         '--share_shape',
         choices=['none', 'p1', 'p2', 'mean'],
         default='none',
@@ -638,4 +643,6 @@ if __name__=='__main__':
     else:
         viewer.scene.fps=120
         viewer.playback_fps=120
+    if args.playback_fps is not None:
+        viewer.playback_fps = args.playback_fps
     viewer.run()

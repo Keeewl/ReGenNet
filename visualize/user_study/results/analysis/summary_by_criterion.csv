@@ -1,0 +1,10 @@
+﻿criterion,method,votes,ratio
+contact,baseline,1,0.1000
+contact,gt,3,0.3000
+contact,hireact,5,0.5000
+contact,hireact_star,1,0.1000
+reaction,gt,1,0.1000
+reaction,hireact,7,0.7000
+reaction,hireact_star,2,0.2000
+realism,gt,2,0.2000
+realism,hireact,8,0.8000
