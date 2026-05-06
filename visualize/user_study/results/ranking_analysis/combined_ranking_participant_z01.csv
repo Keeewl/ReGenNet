@@ -1,0 +1,4 @@
+﻿method,contact_avg_rank,contact_first_count,contact_first_ratio,contact_second_count,contact_third_count,reaction_avg_rank,reaction_first_count,reaction_first_ratio,reaction_second_count,reaction_third_count,realism_avg_rank,realism_first_count,realism_first_ratio,realism_second_count,realism_third_count
+baseline,2.6000,0,0.0000,8,12,2.6000,0,0.0000,8,12,2.6000,0,0.0000,8,12
+hireact,1.5000,14,0.7000,2,4,1.5000,14,0.7000,2,4,1.5000,14,0.7000,2,4
+hireact_star,1.9000,6,0.3000,10,4,1.9000,6,0.3000,10,4,1.9000,6,0.3000,10,4

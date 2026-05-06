@@ -1,0 +1,10 @@
+﻿criterion,method,avg_rank,first_count,first_ratio,second_count,third_count
+contact,baseline,2.1000,4,0.4000,1,5
+contact,hireact,1.6000,6,0.6000,2,2
+contact,hireact_star,2.3000,0,0.0000,7,3
+reaction,baseline,2.1000,4,0.4000,1,5
+reaction,hireact,1.6000,5,0.5000,4,1
+reaction,hireact_star,2.3000,1,0.1000,5,4
+realism,baseline,2.0000,4,0.4000,2,4
+realism,hireact,1.5000,5,0.5000,5,0
+realism,hireact_star,2.5000,1,0.1000,3,6

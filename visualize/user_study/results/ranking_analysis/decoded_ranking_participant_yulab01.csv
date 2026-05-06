@@ -1,0 +1,11 @@
+﻿participant_id,timestamp,clip_id,dataset_key,reference_option,candidate_options,contact_rank1_option,contact_rank1_method,contact_rank2_option,contact_rank2_method,contact_rank3_option,contact_rank3_method,reaction_rank1_option,reaction_rank1_method,reaction_rank2_option,reaction_rank2_method,reaction_rank3_option,reaction_rank3_method,realism_rank1_option,realism_rank1_method,realism_rank2_option,realism_rank2_method,realism_rank3_option,realism_rank3_method
+yulab01,2026-05-06T22:08:32,clip_001,G002T000A001R005,D,"A,B,C",C,hireact,B,hireact_star,A,baseline,C,hireact,B,hireact_star,A,baseline,C,hireact,B,hireact_star,A,baseline
+yulab01,2026-05-06T22:08:32,clip_002,G016T000A001R013,D,"A,B,C",C,hireact,A,hireact_star,B,baseline,C,hireact,B,baseline,A,hireact_star,C,hireact,B,baseline,A,hireact_star
+yulab01,2026-05-06T22:08:32,clip_003,G017T000A001R006,D,"A,B,C",B,hireact,A,hireact_star,C,baseline,B,hireact,A,hireact_star,C,baseline,B,hireact,A,hireact_star,C,baseline
+yulab01,2026-05-06T22:08:32,clip_004,G027T004A021R004,D,"A,B,C",B,hireact,A,hireact_star,C,baseline,B,hireact,A,hireact_star,C,baseline,B,hireact,A,hireact_star,C,baseline
+yulab01,2026-05-06T22:08:32,clip_005,G032T000A001R006,D,"A,B,C",C,hireact,A,hireact_star,B,baseline,C,hireact,A,hireact_star,B,baseline,C,hireact,A,hireact_star,B,baseline
+yulab01,2026-05-06T22:08:32,clip_006,G033T000A001R004,D,"A,B,C",C,hireact,A,hireact_star,B,baseline,C,hireact,A,hireact_star,B,baseline,C,hireact,A,hireact_star,B,baseline
+yulab01,2026-05-06T22:08:32,clip_007,G043T003A016R010,D,"A,B,C",C,hireact,B,hireact_star,A,baseline,C,hireact,B,hireact_star,A,baseline,B,hireact_star,C,hireact,A,baseline
+yulab01,2026-05-06T22:08:32,clip_008,G053T000A000R001,D,"A,B,C",C,hireact,B,baseline,A,hireact_star,C,hireact,B,baseline,A,hireact_star,C,hireact,B,baseline,A,hireact_star
+yulab01,2026-05-06T22:08:32,clip_009,G053T000A000R004,D,"A,B,C",B,hireact,C,hireact_star,A,baseline,B,hireact,C,hireact_star,A,baseline,B,hireact,C,hireact_star,A,baseline
+yulab01,2026-05-06T22:08:32,clip_010,G053T003A016R006,D,"A,B,C",C,hireact,A,hireact_star,B,baseline,C,hireact,B,baseline,A,hireact_star,C,hireact,B,baseline,A,hireact_star

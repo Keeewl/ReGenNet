@@ -1,0 +1,15 @@
+﻿criterion,winner,loser,wins
+contact,baseline,hireact_star,3
+contact,hireact,baseline,10
+contact,hireact,hireact_star,9
+contact,hireact_star,baseline,7
+contact,hireact_star,hireact,1
+reaction,hireact,baseline,10
+reaction,hireact,hireact_star,9
+reaction,hireact_star,baseline,10
+reaction,hireact_star,hireact,1
+realism,baseline,hireact_star,1
+realism,hireact,baseline,10
+realism,hireact,hireact_star,9
+realism,hireact_star,baseline,9
+realism,hireact_star,hireact,1

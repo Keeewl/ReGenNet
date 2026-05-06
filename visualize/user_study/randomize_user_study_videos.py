@@ -65,6 +65,15 @@ def parse_args():
             "'auto' detects automatically."
         ),
     )
+    parser.add_argument(
+        "--selected_keys_file",
+        help="Optional text/markdown file containing one dataset_key per line; only selected clips will be randomized.",
+    )
+    parser.add_argument(
+        "--gt_fixed_option",
+        choices=["A", "B", "C", "D"],
+        help="If set, always place method 'gt' at this anonymous option, and shuffle the remaining methods over the remaining options.",
+    )
     return parser.parse_args()
 
 
@@ -157,6 +166,23 @@ def build_flat_index(input_root: Path, video_ext: str):
     return index
 
 
+def canonical_clip_key(name: str) -> str:
+    return re.sub(r"-pack\d+$", "", name)
+
+
+def load_selected_keys(path: Path | None):
+    if path is None:
+        return None
+    selected = set()
+    text = path.read_text(encoding="utf-8-sig")
+    for line in text.splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        selected.add(line)
+    return selected
+
+
 def ensure_parent(path: Path):
     path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -183,6 +209,7 @@ def main():
     methods = list(args.methods)
     options = ["A", "B", "C", "D"]
     canonical_methods = [canonical_method_name(m) for m in methods]
+    selected_keys = load_selected_keys(Path(args.selected_keys_file).expanduser().resolve() if args.selected_keys_file else None)
 
     output_root.mkdir(parents=True, exist_ok=True)
     videos_root.mkdir(parents=True, exist_ok=True)
@@ -195,9 +222,19 @@ def main():
     if layout == "flat":
         flat_index = build_flat_index(input_root, video_ext)
         found_clip_keys = sorted(flat_index.keys())
+        if selected_keys is not None:
+            found_clip_keys = [
+                clip_key for clip_key in found_clip_keys
+                if canonical_clip_key(clip_key) in selected_keys
+            ]
         found_clip_dirs = [input_root / clip_key for clip_key in found_clip_keys]
     else:
         found_clip_dirs = iter_clip_dirs(input_root)
+        if selected_keys is not None:
+            found_clip_dirs = [
+                clip_dir for clip_dir in found_clip_dirs
+                if canonical_clip_key(clip_dir.name) in selected_keys
+            ]
 
     mapping_rows = []
     questionnaire_rows = []
@@ -206,6 +243,7 @@ def main():
 
     for clip_idx, clip_dir in enumerate(found_clip_dirs, start=1):
         clip_source_name = clip_dir.name
+        clip_dataset_key = canonical_clip_key(clip_source_name)
         clip_id = f"clip_{clip_idx:03d}"
         resolved = {}
         missing = []
@@ -227,19 +265,34 @@ def main():
             skipped_count += 1
             continue
 
-        shuffled_methods = methods[:]
-        rng.shuffle(shuffled_methods)
+        if args.gt_fixed_option:
+            if "gt" not in methods:
+                raise ValueError("--gt_fixed_option requires 'gt' to be present in --methods")
+            remaining_methods = [m for m in methods if m != "gt"]
+            rng.shuffle(remaining_methods)
+            option_to_method = {}
+            remaining_options = [opt for opt in options if opt != args.gt_fixed_option]
+            for opt, method in zip(remaining_options, remaining_methods):
+                option_to_method[opt] = method
+            option_to_method[args.gt_fixed_option] = "gt"
+            shuffled_pairs = [(opt, option_to_method[opt]) for opt in options]
+        else:
+            shuffled_methods = methods[:]
+            rng.shuffle(shuffled_methods)
+            shuffled_pairs = list(zip(options, shuffled_methods))
         clip_out_dir = videos_root / clip_id
         clip_out_dir.mkdir(parents=True, exist_ok=True)
 
         question_row = {"clip_id": clip_id}
-        for option, method in zip(options, shuffled_methods):
+        for option, method in shuffled_pairs:
             src_path = resolved[method]
             anon_path = (clip_out_dir / f"{option}{video_ext}").resolve()
             write_video(src_path, anon_path, args.copy_mode)
             mapping_rows.append(
                 {
                     "clip_id": clip_id,
+                    "dataset_key": clip_dataset_key,
+                    "source_name": clip_source_name,
                     "option": option,
                     "method": method,
                     "src_path": str(src_path),
@@ -251,12 +304,13 @@ def main():
         question_row["question_contact"] = QUESTION_CONTACT
         question_row["question_reaction"] = QUESTION_REACTION
         question_row["question_realism"] = QUESTION_REALISM
+        question_row["dataset_key"] = clip_dataset_key
         questionnaire_rows.append(question_row)
         exported_count += 1
 
     with mapping_path.open("w", newline="", encoding="utf-8-sig") as f:
         writer = csv.DictWriter(
-            f, fieldnames=["clip_id", "option", "method", "src_path", "anon_path"]
+            f, fieldnames=["clip_id", "dataset_key", "source_name", "option", "method", "src_path", "anon_path"]
         )
         writer.writeheader()
         writer.writerows(mapping_rows)
@@ -266,6 +320,7 @@ def main():
             f,
             fieldnames=[
                 "clip_id",
+                "dataset_key",
                 "video_A",
                 "video_B",
                 "video_C",

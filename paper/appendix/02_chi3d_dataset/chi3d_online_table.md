@@ -6,15 +6,30 @@
       <th colspan="4">Test-conditioned</th>
     </tr>
     <tr>
-      <th>FID↓</th><th>Acc.→</th><th>Div.→</th><th>Multimod.→</th>
-      <th>FID↓</th><th>Acc.→</th><th>Div.→</th><th>Multimod.→</th>
+      <th>FID↓</th><th>Acc.↑</th><th>Div.→</th><th>Multimod.→</th>
+      <th>FID↓</th><th>Acc.↑</th><th>Div.→</th><th>Multimod.→</th>
     </tr>
   </thead>
   <tbody>
     <tr>
-      <td>gt</td>
-      <td>0.00 ± 0.00</td><td>1.00 ± 0.00</td><td>19.400 ± 0.4558</td><td>5.690 ± 0.1252</td>
-      <td>0.00 ± 0.00</td><td>0.434 ± 0.0078</td><td>11.698 ± 0.6888</td><td>7.057 ± 0.4563</td>
+      <td>Real</td>
+      <td>-</td><td>1.00 ± 0.00</td><td>19.400 ± 0.4558</td><td>5.690 ± 0.1252</td>
+      <td>-</td><td>0.434 ± 0.0078</td><td>11.698 ± 0.6888</td><td>7.057 ± 0.4563</td>
+    </tr>
+    <tr>
+      <td>AGRoL</td>
+      <td>27.71 ± 0.0131</td><td>0.975 ± 0.001</td><td>19.183 ± 0.4772</td><td>5.452 ± 0.2006</td>
+      <td>42.607 ± 17.0921</td><td>0.335 ± 0.0072</td><td>8.495 ± 0.9614</td><td>6.259 ± 0.6792</td>
+    </tr>
+    <tr>
+      <td>MDM</td>
+      <td>16.52 ± 0.51</td><td>0.994 ± 0.0</td><td>19.201 ± 0.4873</td><td>5.887 ± 0.1038</td>
+      <td>27.002 ± 7.6529</td><td>0.324 ± 0.0087</td><td>9.703 ± 0.9812</td><td>6.209 ± 0.5876</td>
+    </tr>
+    <tr>
+      <td>MDM-GRU</td>
+      <td>5.87 ± 0.32</td><td><u>0.996 ± 0.00</u></td><td>19.175 ± 0.4662</td><td>5.886 ± 0.1245</td>
+      <td>25.026 ± 8.9574</td><td>0.361 ± 0.0113</td><td>9.659 ± 0.8672</td><td>6.125 ± 0.6007</td>
     </tr>
     <tr>
       <td>ReGenNet</td>

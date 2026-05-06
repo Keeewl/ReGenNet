@@ -1,0 +1,131 @@
+﻿clip_id,dataset_key,video_A,video_B,video_C,video_D,question_contact,question_reaction,question_realism
+clip_001,G002T000A001R005,/Users/keweiou/Desktop/Project/ReGenNet/visualize/user_study/randomized_videos_selected_gtd/videos/clip_001/A.mp4,/Users/keweiou/Desktop/Project/ReGenNet/visualize/user_study/randomized_videos_selected_gtd/videos/clip_001/B.mp4,/Users/keweiou/Desktop/Project/ReGenNet/visualize/user_study/randomized_videos_selected_gtd/videos/clip_001/C.mp4,/Users/keweiou/Desktop/Project/ReGenNet/visualize/user_study/randomized_videos_selected_gtd/videos/clip_001/D.mp4,"Contact Quality:
+Which video shows more natural and accurate physical contact? Please focus on hand contact alignment, floating hands, penetration, or obvious misalignment.
+
+接触质量：
+哪个视频中的身体接触更自然、更准确？请重点关注手部接触是否对齐，是否存在悬空、穿模或明显错位。","Reaction Appropriateness:
+Which video shows a more appropriate reaction to the other person's motion? Please focus on timing, direction, and whether the response matches the interaction semantics.
+
+反应合理性：
+哪个视频对另一人的动作做出了更合适的反应？请重点关注反应的时机、方向，以及是否符合交互语义。","Overall Realism:
+Which video looks more realistic, natural, and coherent overall? Please consider motion smoothness, body pose plausibility, interaction consistency, and visual credibility.
+
+整体真实感：
+哪个视频整体看起来更真实、自然、连贯？请综合考虑动作平滑性、姿态合理性、交互一致性和视觉可信度。"
+clip_002,G016T000A001R013,/Users/keweiou/Desktop/Project/ReGenNet/visualize/user_study/randomized_videos_selected_gtd/videos/clip_002/A.mp4,/Users/keweiou/Desktop/Project/ReGenNet/visualize/user_study/randomized_videos_selected_gtd/videos/clip_002/B.mp4,/Users/keweiou/Desktop/Project/ReGenNet/visualize/user_study/randomized_videos_selected_gtd/videos/clip_002/C.mp4,/Users/keweiou/Desktop/Project/ReGenNet/visualize/user_study/randomized_videos_selected_gtd/videos/clip_002/D.mp4,"Contact Quality:
+Which video shows more natural and accurate physical contact? Please focus on hand contact alignment, floating hands, penetration, or obvious misalignment.
+
+接触质量：
+哪个视频中的身体接触更自然、更准确？请重点关注手部接触是否对齐，是否存在悬空、穿模或明显错位。","Reaction Appropriateness:
+Which video shows a more appropriate reaction to the other person's motion? Please focus on timing, direction, and whether the response matches the interaction semantics.
+
+反应合理性：
+哪个视频对另一人的动作做出了更合适的反应？请重点关注反应的时机、方向，以及是否符合交互语义。","Overall Realism:
+Which video looks more realistic, natural, and coherent overall? Please consider motion smoothness, body pose plausibility, interaction consistency, and visual credibility.
+
+整体真实感：
+哪个视频整体看起来更真实、自然、连贯？请综合考虑动作平滑性、姿态合理性、交互一致性和视觉可信度。"
+clip_003,G017T000A001R006,/Users/keweiou/Desktop/Project/ReGenNet/visualize/user_study/randomized_videos_selected_gtd/videos/clip_003/A.mp4,/Users/keweiou/Desktop/Project/ReGenNet/visualize/user_study/randomized_videos_selected_gtd/videos/clip_003/B.mp4,/Users/keweiou/Desktop/Project/ReGenNet/visualize/user_study/randomized_videos_selected_gtd/videos/clip_003/C.mp4,/Users/keweiou/Desktop/Project/ReGenNet/visualize/user_study/randomized_videos_selected_gtd/videos/clip_003/D.mp4,"Contact Quality:
+Which video shows more natural and accurate physical contact? Please focus on hand contact alignment, floating hands, penetration, or obvious misalignment.
+
+接触质量：
+哪个视频中的身体接触更自然、更准确？请重点关注手部接触是否对齐，是否存在悬空、穿模或明显错位。","Reaction Appropriateness:
+Which video shows a more appropriate reaction to the other person's motion? Please focus on timing, direction, and whether the response matches the interaction semantics.
+
+反应合理性：
+哪个视频对另一人的动作做出了更合适的反应？请重点关注反应的时机、方向，以及是否符合交互语义。","Overall Realism:
+Which video looks more realistic, natural, and coherent overall? Please consider motion smoothness, body pose plausibility, interaction consistency, and visual credibility.
+
+整体真实感：
+哪个视频整体看起来更真实、自然、连贯？请综合考虑动作平滑性、姿态合理性、交互一致性和视觉可信度。"
+clip_004,G027T004A021R004,/Users/keweiou/Desktop/Project/ReGenNet/visualize/user_study/randomized_videos_selected_gtd/videos/clip_004/A.mp4,/Users/keweiou/Desktop/Project/ReGenNet/visualize/user_study/randomized_videos_selected_gtd/videos/clip_004/B.mp4,/Users/keweiou/Desktop/Project/ReGenNet/visualize/user_study/randomized_videos_selected_gtd/videos/clip_004/C.mp4,/Users/keweiou/Desktop/Project/ReGenNet/visualize/user_study/randomized_videos_selected_gtd/videos/clip_004/D.mp4,"Contact Quality:
+Which video shows more natural and accurate physical contact? Please focus on hand contact alignment, floating hands, penetration, or obvious misalignment.
+
+接触质量：
+哪个视频中的身体接触更自然、更准确？请重点关注手部接触是否对齐，是否存在悬空、穿模或明显错位。","Reaction Appropriateness:
+Which video shows a more appropriate reaction to the other person's motion? Please focus on timing, direction, and whether the response matches the interaction semantics.
+
+反应合理性：
+哪个视频对另一人的动作做出了更合适的反应？请重点关注反应的时机、方向，以及是否符合交互语义。","Overall Realism:
+Which video looks more realistic, natural, and coherent overall? Please consider motion smoothness, body pose plausibility, interaction consistency, and visual credibility.
+
+整体真实感：
+哪个视频整体看起来更真实、自然、连贯？请综合考虑动作平滑性、姿态合理性、交互一致性和视觉可信度。"
+clip_005,G032T000A001R006,/Users/keweiou/Desktop/Project/ReGenNet/visualize/user_study/randomized_videos_selected_gtd/videos/clip_005/A.mp4,/Users/keweiou/Desktop/Project/ReGenNet/visualize/user_study/randomized_videos_selected_gtd/videos/clip_005/B.mp4,/Users/keweiou/Desktop/Project/ReGenNet/visualize/user_study/randomized_videos_selected_gtd/videos/clip_005/C.mp4,/Users/keweiou/Desktop/Project/ReGenNet/visualize/user_study/randomized_videos_selected_gtd/videos/clip_005/D.mp4,"Contact Quality:
+Which video shows more natural and accurate physical contact? Please focus on hand contact alignment, floating hands, penetration, or obvious misalignment.
+
+接触质量：
+哪个视频中的身体接触更自然、更准确？请重点关注手部接触是否对齐，是否存在悬空、穿模或明显错位。","Reaction Appropriateness:
+Which video shows a more appropriate reaction to the other person's motion? Please focus on timing, direction, and whether the response matches the interaction semantics.
+
+反应合理性：
+哪个视频对另一人的动作做出了更合适的反应？请重点关注反应的时机、方向，以及是否符合交互语义。","Overall Realism:
+Which video looks more realistic, natural, and coherent overall? Please consider motion smoothness, body pose plausibility, interaction consistency, and visual credibility.
+
+整体真实感：
+哪个视频整体看起来更真实、自然、连贯？请综合考虑动作平滑性、姿态合理性、交互一致性和视觉可信度。"
+clip_006,G033T000A001R004,/Users/keweiou/Desktop/Project/ReGenNet/visualize/user_study/randomized_videos_selected_gtd/videos/clip_006/A.mp4,/Users/keweiou/Desktop/Project/ReGenNet/visualize/user_study/randomized_videos_selected_gtd/videos/clip_006/B.mp4,/Users/keweiou/Desktop/Project/ReGenNet/visualize/user_study/randomized_videos_selected_gtd/videos/clip_006/C.mp4,/Users/keweiou/Desktop/Project/ReGenNet/visualize/user_study/randomized_videos_selected_gtd/videos/clip_006/D.mp4,"Contact Quality:
+Which video shows more natural and accurate physical contact? Please focus on hand contact alignment, floating hands, penetration, or obvious misalignment.
+
+接触质量：
+哪个视频中的身体接触更自然、更准确？请重点关注手部接触是否对齐，是否存在悬空、穿模或明显错位。","Reaction Appropriateness:
+Which video shows a more appropriate reaction to the other person's motion? Please focus on timing, direction, and whether the response matches the interaction semantics.
+
+反应合理性：
+哪个视频对另一人的动作做出了更合适的反应？请重点关注反应的时机、方向，以及是否符合交互语义。","Overall Realism:
+Which video looks more realistic, natural, and coherent overall? Please consider motion smoothness, body pose plausibility, interaction consistency, and visual credibility.
+
+整体真实感：
+哪个视频整体看起来更真实、自然、连贯？请综合考虑动作平滑性、姿态合理性、交互一致性和视觉可信度。"
+clip_007,G043T003A016R010,/Users/keweiou/Desktop/Project/ReGenNet/visualize/user_study/randomized_videos_selected_gtd/videos/clip_007/A.mp4,/Users/keweiou/Desktop/Project/ReGenNet/visualize/user_study/randomized_videos_selected_gtd/videos/clip_007/B.mp4,/Users/keweiou/Desktop/Project/ReGenNet/visualize/user_study/randomized_videos_selected_gtd/videos/clip_007/C.mp4,/Users/keweiou/Desktop/Project/ReGenNet/visualize/user_study/randomized_videos_selected_gtd/videos/clip_007/D.mp4,"Contact Quality:
+Which video shows more natural and accurate physical contact? Please focus on hand contact alignment, floating hands, penetration, or obvious misalignment.
+
+接触质量：
+哪个视频中的身体接触更自然、更准确？请重点关注手部接触是否对齐，是否存在悬空、穿模或明显错位。","Reaction Appropriateness:
+Which video shows a more appropriate reaction to the other person's motion? Please focus on timing, direction, and whether the response matches the interaction semantics.
+
+反应合理性：
+哪个视频对另一人的动作做出了更合适的反应？请重点关注反应的时机、方向，以及是否符合交互语义。","Overall Realism:
+Which video looks more realistic, natural, and coherent overall? Please consider motion smoothness, body pose plausibility, interaction consistency, and visual credibility.
+
+整体真实感：
+哪个视频整体看起来更真实、自然、连贯？请综合考虑动作平滑性、姿态合理性、交互一致性和视觉可信度。"
+clip_008,G053T000A000R001,/Users/keweiou/Desktop/Project/ReGenNet/visualize/user_study/randomized_videos_selected_gtd/videos/clip_008/A.mp4,/Users/keweiou/Desktop/Project/ReGenNet/visualize/user_study/randomized_videos_selected_gtd/videos/clip_008/B.mp4,/Users/keweiou/Desktop/Project/ReGenNet/visualize/user_study/randomized_videos_selected_gtd/videos/clip_008/C.mp4,/Users/keweiou/Desktop/Project/ReGenNet/visualize/user_study/randomized_videos_selected_gtd/videos/clip_008/D.mp4,"Contact Quality:
+Which video shows more natural and accurate physical contact? Please focus on hand contact alignment, floating hands, penetration, or obvious misalignment.
+
+接触质量：
+哪个视频中的身体接触更自然、更准确？请重点关注手部接触是否对齐，是否存在悬空、穿模或明显错位。","Reaction Appropriateness:
+Which video shows a more appropriate reaction to the other person's motion? Please focus on timing, direction, and whether the response matches the interaction semantics.
+
+反应合理性：
+哪个视频对另一人的动作做出了更合适的反应？请重点关注反应的时机、方向，以及是否符合交互语义。","Overall Realism:
+Which video looks more realistic, natural, and coherent overall? Please consider motion smoothness, body pose plausibility, interaction consistency, and visual credibility.
+
+整体真实感：
+哪个视频整体看起来更真实、自然、连贯？请综合考虑动作平滑性、姿态合理性、交互一致性和视觉可信度。"
+clip_009,G053T000A000R004,/Users/keweiou/Desktop/Project/ReGenNet/visualize/user_study/randomized_videos_selected_gtd/videos/clip_009/A.mp4,/Users/keweiou/Desktop/Project/ReGenNet/visualize/user_study/randomized_videos_selected_gtd/videos/clip_009/B.mp4,/Users/keweiou/Desktop/Project/ReGenNet/visualize/user_study/randomized_videos_selected_gtd/videos/clip_009/C.mp4,/Users/keweiou/Desktop/Project/ReGenNet/visualize/user_study/randomized_videos_selected_gtd/videos/clip_009/D.mp4,"Contact Quality:
+Which video shows more natural and accurate physical contact? Please focus on hand contact alignment, floating hands, penetration, or obvious misalignment.
+
+接触质量：
+哪个视频中的身体接触更自然、更准确？请重点关注手部接触是否对齐，是否存在悬空、穿模或明显错位。","Reaction Appropriateness:
+Which video shows a more appropriate reaction to the other person's motion? Please focus on timing, direction, and whether the response matches the interaction semantics.
+
+反应合理性：
+哪个视频对另一人的动作做出了更合适的反应？请重点关注反应的时机、方向，以及是否符合交互语义。","Overall Realism:
+Which video looks more realistic, natural, and coherent overall? Please consider motion smoothness, body pose plausibility, interaction consistency, and visual credibility.
+
+整体真实感：
+哪个视频整体看起来更真实、自然、连贯？请综合考虑动作平滑性、姿态合理性、交互一致性和视觉可信度。"
+clip_010,G053T003A016R006,/Users/keweiou/Desktop/Project/ReGenNet/visualize/user_study/randomized_videos_selected_gtd/videos/clip_010/A.mp4,/Users/keweiou/Desktop/Project/ReGenNet/visualize/user_study/randomized_videos_selected_gtd/videos/clip_010/B.mp4,/Users/keweiou/Desktop/Project/ReGenNet/visualize/user_study/randomized_videos_selected_gtd/videos/clip_010/C.mp4,/Users/keweiou/Desktop/Project/ReGenNet/visualize/user_study/randomized_videos_selected_gtd/videos/clip_010/D.mp4,"Contact Quality:
+Which video shows more natural and accurate physical contact? Please focus on hand contact alignment, floating hands, penetration, or obvious misalignment.
+
+接触质量：
+哪个视频中的身体接触更自然、更准确？请重点关注手部接触是否对齐，是否存在悬空、穿模或明显错位。","Reaction Appropriateness:
+Which video shows a more appropriate reaction to the other person's motion? Please focus on timing, direction, and whether the response matches the interaction semantics.
+
+反应合理性：
+哪个视频对另一人的动作做出了更合适的反应？请重点关注反应的时机、方向，以及是否符合交互语义。","Overall Realism:
+Which video looks more realistic, natural, and coherent overall? Please consider motion smoothness, body pose plausibility, interaction consistency, and visual credibility.
+
+整体真实感：
+哪个视频整体看起来更真实、自然、连贯？请综合考虑动作平滑性、姿态合理性、交互一致性和视觉可信度。"
