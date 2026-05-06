@@ -181,6 +181,7 @@ save/
 
 # legacy
 legacy/
+!visualize/legacy/**
 
 # imgui
 *.ini
