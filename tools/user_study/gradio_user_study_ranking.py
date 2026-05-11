@@ -8,26 +8,29 @@ from uuid import uuid4
 import gradio as gr
 
 
+APP_TITLE = "Motion Interaction Ranking Study"
+INTRO_TEXT = (
+    "## Motion Interaction Ranking Study\n\n"
+    "Each page shows one reference video and three anonymized candidate videos for the same interaction.\n\n"
+    "- The reference video is provided for context only and is not part of the ranking.\n"
+    "- Focus on the person responding to the interaction.\n"
+    "- For each criterion, rank the three candidates from best to worst.\n"
+    "- Please replace the default participant ID before you start."
+)
 CONTACT_PROMPT = (
-    "Contact Quality:\n"
+    "### Contact Quality\n"
     "Rank the three candidate videos from best to worst in terms of physical contact quality. "
-    "Please focus on hand contact alignment, floating hands, penetration, or obvious misalignment.\n\n"
-    "接触质量：\n"
-    "请将三个候选视频按照身体接触质量从好到差排序。请重点关注手部接触是否对齐，是否存在悬空、穿模或明显错位。"
+    "Focus on contact alignment, floating hands, penetration, and obvious spatial mismatch."
 )
 REACTION_PROMPT = (
-    "Reaction Appropriateness:\n"
-    "Rank the three candidate videos from best to worst in terms of reaction appropriateness. "
-    "Please focus on timing, direction, and whether the response matches the interaction semantics.\n\n"
-    "反应合理性：\n"
-    "请将三个候选视频按照反应合理性从好到差排序。请重点关注反应的时机、方向，以及是否符合交互语义。"
+    "### Reaction Appropriateness\n"
+    "Rank the three candidate videos from best to worst in terms of response quality. "
+    "Focus on timing, direction, and whether the response matches the interaction."
 )
 REALISM_PROMPT = (
-    "Overall Realism:\n"
+    "### Overall Realism\n"
     "Rank the three candidate videos from best to worst in overall realism. "
-    "Please consider motion smoothness, body pose plausibility, interaction consistency, and visual credibility.\n\n"
-    "整体真实感：\n"
-    "请将三个候选视频按照整体真实感从好到差排序。请综合考虑动作平滑性、姿态合理性、交互一致性和视觉可信度。"
+    "Consider motion smoothness, pose plausibility, interaction consistency, and visual credibility."
 )
 
 
@@ -176,11 +179,11 @@ def build_page_payload(items, index, responses):
     is_last = index == len(items) - 1
     candidates = item["candidate_options"]
     return {
-        "progress": f"Clip {index + 1} / {len(items)}\n第 {index + 1} 条 / 共 {len(items)} 条",
-        "clip_label": item["clip_id"],
-        "reference_label": f"Reference (GT) - Video {item['reference_option']}\n参考视频（GT）- 视频 {item['reference_option']}",
+        "progress": f"Clip {index + 1} of {len(items)}",
+        "clip_label": f"Interaction Clip {index + 1}",
+        "reference_label": "Reference Video",
         "reference_video": item["reference_video"],
-        "cand_labels": [f"Video {opt} / 视频 {opt}" for opt in candidates],
+        "cand_labels": [f"Candidate {opt}" for opt in candidates],
         "cand_videos": [item["candidate_videos"][opt] for opt in candidates],
         "choices": candidates,
         "contact": existing.get("contact", [None, None, None]),
@@ -207,9 +210,9 @@ def make_app(items, output_csv: Path):
     def validate_participant_id(participant_id):
         pid = (participant_id or "").strip()
         if not pid:
-            return False, "Please enter a participant ID.\n请输入参与者编号。"
+            return False, "Please enter a participant ID."
         if pid == initial_participant_id:
-            return False, "Please modify the default participant ID before continuing.\n请先修改默认的参与者编号后再继续。"
+            return False, "Please replace the default participant ID before continuing."
         return True, ""
 
     def save_current(current_index, responses, contact1, contact2, contact3, reaction1, reaction2, reaction3, realism1, realism2, realism3):
@@ -219,11 +222,11 @@ def make_app(items, output_csv: Path):
         reaction = [reaction1, reaction2, reaction3]
         realism = [realism1, realism2, realism3]
         if not is_valid_ranking(contact, choices):
-            return None, "Please provide a valid non-repeating ranking for Contact Quality.\n请为接触质量提供一个有效且不重复的排序。"
+            return None, "Please provide a valid non-repeating ranking for Contact Quality."
         if not is_valid_ranking(reaction, choices):
-            return None, "Please provide a valid non-repeating ranking for Reaction Appropriateness.\n请为反应合理性提供一个有效且不重复的排序。"
+            return None, "Please provide a valid non-repeating ranking for Reaction Appropriateness."
         if not is_valid_ranking(realism, choices):
-            return None, "Please provide a valid non-repeating ranking for Overall Realism.\n请为整体真实感提供一个有效且不重复的排序。"
+            return None, "Please provide a valid non-repeating ranking for Overall Realism."
 
         responses = deepcopy(responses or {})
         responses[item["clip_id"]] = {
@@ -329,44 +332,27 @@ def make_app(items, output_csv: Path):
         if responses is None:
             return msg
         if len(responses) != len(items):
-            return "Submission failed because some clips are still missing rankings.\n提交失败：仍有部分片段未完成排序。"
+            return "Submission failed because some clips are still missing rankings."
         participant_id = participant_id.strip()
         append_results(output_csv, participant_id, items, responses)
         return (
-            f"Submission saved successfully.\n提交成功。\n\n"
-            f"Participant ID / 参与者编号: {participant_id}\n"
-            f"Responses written to / 结果已写入: {output_csv.resolve()}"
+            f"Submission saved successfully.\n\n"
+            f"Participant ID: {participant_id}\n"
+            f"Responses written to: {output_csv.resolve()}"
         )
 
-    with gr.Blocks(title="HiReact Ranking User Study") as demo:
+    with gr.Blocks(title=APP_TITLE) as demo:
         idx_state = gr.State(0)
         responses_state = gr.State(initial_responses)
 
-        gr.Markdown(
-            "## User Study: Ranking with GT Reference / 用户研究：带 GT 参考的排序问卷\n\n"
-            "This study contains 10 interaction clips. Each page shows one **reference video** and three "
-            "**candidate videos** of the same interaction.\n\n"
-            "- The **blue person** is the **actor**.\n"
-            "- The **orange person** is the **generated reactor**.\n"
-            "- Please mainly evaluate the differences in the **orange person**.\n"
-            "- The **reference video (GT)** is shown only as a reference and does **not** participate in ranking.\n"
-            "- For each criterion, rank the three candidate videos from **best to worst**.\n"
-            "- Please modify the default participant ID before starting.\n\n"
-            "本研究包含 10 条交互片段。每一页展示一个**参考视频**和三个**候选视频**，它们都对应同一交互。\n\n"
-            "- **蓝色人物**表示 **actor（发起者）**。\n"
-            "- **橙色人物**表示 **生成的 reactor（反应者）**。\n"
-            "- 请主要关注**橙色人物**之间的差异。\n"
-            "- **参考视频（GT）**仅用于参考，**不参与排序**。\n"
-            "- 对于每个评价维度，请将三个候选视频按**从好到差**进行排序。\n"
-            "- 开始前请先修改默认的参与者编号。"
-        )
+        gr.Markdown(INTRO_TEXT)
 
-        participant_id = gr.Textbox(label="Participant ID / 参与者编号", value=initial_participant_id, interactive=True)
+        participant_id = gr.Textbox(label="Participant ID", value=initial_participant_id, interactive=True)
         progress = gr.Markdown(f"**{initial['progress']}**")
         clip_label = gr.Markdown(f"**{initial['clip_label']}**")
 
         ref_label = gr.Markdown(f"**{initial['reference_label']}**")
-        ref_video = gr.Video(value=initial["reference_video"], label="Reference (GT) / 参考视频（GT）", interactive=False)
+        ref_video = gr.Video(value=initial["reference_video"], label="Reference Video", interactive=False)
 
         with gr.Row():
             with gr.Column():
@@ -380,26 +366,26 @@ def make_app(items, output_csv: Path):
 
         gr.Markdown(CONTACT_PROMPT)
         with gr.Row():
-            contact1 = gr.Dropdown(choices=choices, value=initial["contact"][0], label="1st / 第1名")
-            contact2 = gr.Dropdown(choices=choices, value=initial["contact"][1], label="2nd / 第2名")
-            contact3 = gr.Dropdown(choices=choices, value=initial["contact"][2], label="3rd / 第3名")
+            contact1 = gr.Dropdown(choices=choices, value=initial["contact"][0], label="1st")
+            contact2 = gr.Dropdown(choices=choices, value=initial["contact"][1], label="2nd")
+            contact3 = gr.Dropdown(choices=choices, value=initial["contact"][2], label="3rd")
 
         gr.Markdown(REACTION_PROMPT)
         with gr.Row():
-            reaction1 = gr.Dropdown(choices=choices, value=initial["reaction"][0], label="1st / 第1名")
-            reaction2 = gr.Dropdown(choices=choices, value=initial["reaction"][1], label="2nd / 第2名")
-            reaction3 = gr.Dropdown(choices=choices, value=initial["reaction"][2], label="3rd / 第3名")
+            reaction1 = gr.Dropdown(choices=choices, value=initial["reaction"][0], label="1st")
+            reaction2 = gr.Dropdown(choices=choices, value=initial["reaction"][1], label="2nd")
+            reaction3 = gr.Dropdown(choices=choices, value=initial["reaction"][2], label="3rd")
 
         gr.Markdown(REALISM_PROMPT)
         with gr.Row():
-            realism1 = gr.Dropdown(choices=choices, value=initial["realism"][0], label="1st / 第1名")
-            realism2 = gr.Dropdown(choices=choices, value=initial["realism"][1], label="2nd / 第2名")
-            realism3 = gr.Dropdown(choices=choices, value=initial["realism"][2], label="3rd / 第3名")
+            realism1 = gr.Dropdown(choices=choices, value=initial["realism"][0], label="1st")
+            realism2 = gr.Dropdown(choices=choices, value=initial["realism"][1], label="2nd")
+            realism3 = gr.Dropdown(choices=choices, value=initial["realism"][2], label="3rd")
 
         status = gr.Markdown("")
         with gr.Row():
-            next_btn = gr.Button("Next / 下一条", interactive=initial["next_interactive"], variant="primary")
-            submit_btn = gr.Button("Submit / 提交", interactive=initial["submit_interactive"], variant="primary")
+            next_btn = gr.Button("Next", interactive=initial["next_interactive"], variant="primary")
+            submit_btn = gr.Button("Submit", interactive=initial["submit_interactive"], variant="primary")
 
         next_btn.click(
             fn=go_next,

@@ -1,4 +1,4 @@
 ﻿method,contact_avg_rank,contact_first_count,contact_first_ratio,contact_second_count,contact_third_count,reaction_avg_rank,reaction_first_count,reaction_first_ratio,reaction_second_count,reaction_third_count,realism_avg_rank,realism_first_count,realism_first_ratio,realism_second_count,realism_third_count
-baseline,2.6000,13,0.0867,34,103,2.5267,15,0.1000,41,94,2.5333,16,0.1067,38,96
-hireact,1.3333,114,0.7600,22,14,1.3600,108,0.7200,30,12,1.3533,109,0.7267,29,12
-hireact_star,2.0667,23,0.1533,94,33,2.1133,27,0.1800,79,44,2.1133,25,0.1667,83,42
+baseline,2.5231,32,0.1231,60,168,2.4269,42,0.1615,65,153,2.4500,38,0.1462,67,155
+hireact,1.4346,179,0.6885,49,32,1.5154,162,0.6231,62,36,1.4846,169,0.6500,56,35
+hireact_star,2.0423,49,0.1885,151,60,2.0577,56,0.2154,133,71,2.0654,53,0.2038,137,70

@@ -8,26 +8,29 @@ from uuid import uuid4
 import gradio as gr
 
 
+APP_TITLE = "Motion Interaction Evaluation"
+INTRO_TEXT = (
+    "## Motion Interaction Evaluation\n\n"
+    "This study contains a set of interaction clips. Each page shows four anonymized candidate videos "
+    "of the same interaction. Select the best candidate for each criterion.\n\n"
+    "- Focus on the quality of the interaction itself rather than personal preference.\n"
+    "- Review all four videos before answering.\n"
+    "- Please replace the default participant ID before you start."
+)
 DEFAULT_CONTACT_QUESTION = (
-    "Contact Quality:\n"
-    "Which video shows more natural and accurate physical contact? Please focus on hand contact "
-    "alignment, floating hands, penetration, or obvious misalignment.\n\n"
-    "接触质量：\n"
-    "哪个视频中的身体接触更自然、更准确？请重点关注手部接触是否对齐，是否存在悬空、穿模或明显错位。"
+    "### Contact Quality\n"
+    "Which candidate shows the most natural and accurate physical contact? Focus on contact alignment, "
+    "floating hands, penetration, and obvious spatial mismatch."
 )
 DEFAULT_REACTION_QUESTION = (
-    "Reaction Appropriateness:\n"
-    "Which video shows a more appropriate reaction to the other person's motion? Please focus on "
-    "timing, direction, and whether the response matches the interaction semantics.\n\n"
-    "反应合理性：\n"
-    "哪个视频对另一人的动作做出了更合适的反应？请重点关注反应的时机、方向，以及是否符合交互语义。"
+    "### Reaction Appropriateness\n"
+    "Which candidate shows the most appropriate response to the other person's motion? Focus on timing, "
+    "direction, and whether the response matches the interaction."
 )
 DEFAULT_REALISM_QUESTION = (
-    "Overall Realism:\n"
-    "Which video looks more realistic, natural, and coherent overall? Please consider motion "
-    "smoothness, body pose plausibility, interaction consistency, and visual credibility.\n\n"
-    "整体真实感：\n"
-    "哪个视频整体看起来更真实、自然、连贯？请综合考虑动作平滑性、姿态合理性、交互一致性和视觉可信度。"
+    "### Overall Realism\n"
+    "Which candidate looks the most realistic, natural, and coherent overall? Consider motion smoothness, "
+    "pose plausibility, interaction consistency, and visual credibility."
 )
 
 
@@ -156,8 +159,8 @@ def build_page_payload(items, index, responses):
     existing = responses.get(item["clip_id"], {})
     is_last = index == len(items) - 1
     return {
-        "progress_text": f"Clip {index + 1} / {len(items)}\n第 {index + 1} 条 / 共 {len(items)} 条",
-        "clip_label": f"{item['clip_id']}",
+        "progress_text": f"Clip {index + 1} of {len(items)}",
+        "clip_label": f"Interaction Clip {index + 1}",
         "video_A": item["videos"]["A"],
         "video_B": item["videos"]["B"],
         "video_C": item["videos"]["C"],
@@ -181,9 +184,9 @@ def make_app(items, output_csv: Path):
     def validate_participant_id(participant_id):
         pid = (participant_id or "").strip()
         if not pid:
-            return False, "Please enter a participant ID.\n请输入参与者编号。"
+            return False, "Please enter a participant ID."
         if pid == initial_participant_id:
-            return False, "Please modify the default participant ID before continuing.\n请先修改默认的参与者编号后再继续。"
+            return False, "Please replace the default participant ID before continuing."
         return True, ""
 
     def validate_choices(contact_choice, reaction_choice, realism_choice):
@@ -225,7 +228,7 @@ def make_app(items, output_csv: Path):
                 gr.update(),
                 gr.update(),
                 gr.update(),
-                "Please complete all three questions before continuing.\n请先完成三个问题后再进入下一页。",
+                "Please complete all three questions before continuing.",
             )
 
         responses = deepcopy(responses or {})
@@ -260,7 +263,7 @@ def make_app(items, output_csv: Path):
         if not ok:
             return msg
         if not validate_choices(contact_choice, reaction_choice, realism_choice):
-            return "Please complete all three questions before submitting.\n请先完成三个问题后再提交。"
+            return "Please complete all three questions before submitting."
 
         participant_id = participant_id.strip()
         responses = deepcopy(responses or {})
@@ -272,31 +275,23 @@ def make_app(items, output_csv: Path):
         }
 
         if len(responses) != len(items):
-            return "Submission failed because some clips are still missing responses.\n提交失败：仍有部分片段未完成作答。"
+            return "Submission failed because some clips are still missing responses."
 
         append_results_csv(output_csv, participant_id, items, responses)
         return (
-            f"Submission saved successfully.\n提交成功。\n\n"
-            f"Participant ID / 参与者编号: {participant_id}\n"
-            f"Responses written to / 结果已写入: {output_csv.resolve()}"
+            f"Submission saved successfully.\n\n"
+            f"Participant ID: {participant_id}\n"
+            f"Responses written to: {output_csv.resolve()}"
         )
 
-    with gr.Blocks(title="HiReact User Study") as demo:
+    with gr.Blocks(title=APP_TITLE) as demo:
         current_index_state = gr.State(0)
         responses_state = gr.State(initial_responses)
 
-        gr.Markdown(
-            "## User Study / 用户研究\n\n"
-            "This study contains 10 interaction clips. Each clip shows four anonymized videos "
-            "A/B/C/D of the same interaction. Please choose the best video for each criterion.\n\n"
-            "本研究包含 10 条交互片段。每条片段展示同一交互的四个匿名视频 A/B/C/D。"
-            "请针对每个评价维度选择你认为最好的视频。\n\n"
-            "Please modify the default participant ID before starting.\n"
-            "开始前请先修改默认的参与者编号。"
-        )
+        gr.Markdown(INTRO_TEXT)
 
         participant_id_box = gr.Textbox(
-            label="Participant ID / 参与者编号",
+            label="Participant ID",
             value=initial_participant_id,
             interactive=True,
         )
@@ -306,34 +301,34 @@ def make_app(items, output_csv: Path):
 
         with gr.Row():
             with gr.Column():
-                video_a = gr.Video(value=initial_page["video_A"], label="Video A / 视频 A", interactive=False)
-                video_c = gr.Video(value=initial_page["video_C"], label="Video C / 视频 C", interactive=False)
+                video_a = gr.Video(value=initial_page["video_A"], label="Candidate A", interactive=False)
+                video_c = gr.Video(value=initial_page["video_C"], label="Candidate C", interactive=False)
             with gr.Column():
-                video_b = gr.Video(value=initial_page["video_B"], label="Video B / 视频 B", interactive=False)
-                video_d = gr.Video(value=initial_page["video_D"], label="Video D / 视频 D", interactive=False)
+                video_b = gr.Video(value=initial_page["video_B"], label="Candidate B", interactive=False)
+                video_d = gr.Video(value=initial_page["video_D"], label="Candidate D", interactive=False)
 
         question_contact_md = gr.Markdown(initial_page["question_contact"])
-        contact_radio = gr.Radio(choices=["A", "B", "C", "D"], value=initial_page["contact_value"], label="Contact Quality / 接触质量")
+        contact_radio = gr.Radio(choices=["A", "B", "C", "D"], value=initial_page["contact_value"], label="Best Candidate")
 
         question_reaction_md = gr.Markdown(initial_page["question_reaction"])
         reaction_radio = gr.Radio(
             choices=["A", "B", "C", "D"],
             value=initial_page["reaction_value"],
-            label="Reaction Appropriateness / 反应合理性",
+            label="Best Candidate",
         )
 
         question_realism_md = gr.Markdown(initial_page["question_realism"])
         realism_radio = gr.Radio(
             choices=["A", "B", "C", "D"],
             value=initial_page["realism_value"],
-            label="Overall Realism / 整体真实感",
+            label="Best Candidate",
         )
 
         status_box = gr.Markdown("")
 
         with gr.Row():
-            next_btn = gr.Button("Next / 下一条", visible=initial_page["next_visible"], variant="primary")
-            submit_btn = gr.Button("Submit / 提交", visible=initial_page["submit_visible"], variant="primary")
+            next_btn = gr.Button("Next", visible=initial_page["next_visible"], variant="primary")
+            submit_btn = gr.Button("Submit", visible=initial_page["submit_visible"], variant="primary")
 
         next_btn.click(
             fn=next_clip,
