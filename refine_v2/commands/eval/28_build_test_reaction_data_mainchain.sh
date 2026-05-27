@@ -4,7 +4,7 @@ set -euo pipefail
 conda activate regennet5090
 
 ####### table2 test debug: rebuild test reaction_data from the same Stage1 main chain as train #######
-export CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES:-0}
+export CUDA_VISIBLE_DEVICES=4
 
 python3 -m refine.data.build_reaction_data \
   --model_path save/cnet_v5/interx_smplx_online_exp1/model000200000.pt \

@@ -3,7 +3,7 @@ set -euo pipefail
 
 SEED=${SEED:-0}
 CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES:-0}
-STAGE1_MODEL_PATH=${STAGE1_MODEL_PATH:-save/cnet_v5_256/interx_smplx_offline_exp1/model000149455.pt}
+STAGE1_MODEL_PATH=${STAGE1_MODEL_PATH:-save/cnet_v5_256/interx_smplx_offline_exp1/model000209455.pt}
 STAGE2_CHECKPOINT=${STAGE2_CHECKPOINT:-refine_v2/save/train/refiner_v2_exp8_interaction_v1_10k/model_best.pt}
 STGCN_MODEL_PATH=${STGCN_MODEL_PATH:-recognition_training/interx_exp1/checkpoint_0100.pth.tar}
 REGION_MAP_PATH=${REGION_MAP_PATH:-visualize/viewer/part_segm/6_parts/six_parts.pkl}

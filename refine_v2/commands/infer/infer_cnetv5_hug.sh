@@ -1,11 +1,11 @@
 conda activate regennet5090
 
 ####### single-sample Stage1 infer/export: CNetV5 baseline #######
-export CUDA_VISIBLE_DEVICES=0
+export CUDA_VISIBLE_DEVICES=3
 
 MODEL_PATH=save/cnet_v5_256/interx_smplx_online_exp1/model000209455.pt
-DATASET_KEY=G038T003A016R005
-OUTPUT_DIR=outputs/single_stage1_cnetv5_G038T003A016R005
+DATASET_KEY=G053T000A000R004
+OUTPUT_DIR=outputs/single_stage1_cnetv5_G053T000A000R004
 
 python -m sample.infer_single_stage1_clip \
   --model_path "${MODEL_PATH}" \
